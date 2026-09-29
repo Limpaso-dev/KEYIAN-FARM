@@ -1,9 +1,8 @@
 import {
-  createContext,
-  useContext,
   useEffect,
   useState,
 } from "react";
+import authContext from "./AuthContextStore";
 
 import {
   loginUser,
@@ -11,44 +10,54 @@ import {
   logoutUser,
 } from "../services/auth.service";
 
-const AuthContext = createContext(null);
-
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem("keiyian_user");
-
-    return savedUser ? JSON.parse(savedUser) : null;
-  });
-
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let current = true;
+
     const initializeAuth = async () => {
       const token = localStorage.getItem("keiyian_token");
 
       if (!token) {
-        setLoading(false);
+        logoutUser();
+        if (current) setLoading(false);
         return;
       }
 
       try {
         const response = await getCurrentUser();
 
-        setUser(response.user);
+        if (current) setUser(response.user);
 
         localStorage.setItem(
           "keiyian_user",
           JSON.stringify(response.user)
         );
-      } catch (error) {
+      } catch {
         logoutUser();
-        setUser(null);
+        if (current) setUser(null);
       } finally {
+        if (current) setLoading(false);
+      }
+    };
+
+    const handleUnauthorized = () => {
+      logoutUser();
+      if (current) {
+        setUser(null);
         setLoading(false);
       }
     };
 
+    window.addEventListener("keiyian:unauthorized", handleUnauthorized);
     initializeAuth();
+
+    return () => {
+      current = false;
+      window.removeEventListener("keiyian:unauthorized", handleUnauthorized);
+    };
   }, []);
 
   const login = async (credentials) => {
@@ -83,20 +92,8 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={value}>
+    <authContext.Provider value={value}>
       {children}
-    </AuthContext.Provider>
+    </authContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-
-  if (!context) {
-    throw new Error(
-      "useAuth must be used inside AuthProvider"
-    );
-  }
-
-  return context;
 };

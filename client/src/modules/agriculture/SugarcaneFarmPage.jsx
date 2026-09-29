@@ -59,7 +59,7 @@ const SugarcaneFarmPage = () => {
         ]);
 
       setFarms(farmResponse.sugarcaneFarms || []);
-      setFarmers(farmerResponse.farmers || []);
+      setFarmers(farmerResponse.data || farmerResponse.farmers || []);
     } catch (error) {
       console.error(
         "Failed to load sugarcane farm data:",

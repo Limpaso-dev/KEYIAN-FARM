@@ -1,9 +1,10 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
+import { canAccessModule, getModuleForPath } from "../utils/permissions";
 
 const ProtectedRoute = () => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -27,6 +28,20 @@ const ProtectedRoute = () => {
         replace
         state={{ from: location }}
       />
+    );
+  }
+
+  const moduleName = getModuleForPath(location.pathname);
+  if (moduleName && !canAccessModule(user?.role, moduleName)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <div className="max-w-md rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <h1 className="text-lg font-semibold text-slate-900">Access denied</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            Your account does not have access to this module.
+          </p>
+        </div>
+      </div>
     );
   }
 

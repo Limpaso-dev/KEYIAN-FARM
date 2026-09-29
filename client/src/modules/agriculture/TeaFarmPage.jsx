@@ -57,7 +57,7 @@ const TeaFarmPage = () => {
       ]);
 
       setFarms(farmResponse.teaFarms || []);
-      setFarmers(farmerResponse.farmers || []);
+      setFarmers(farmerResponse.data || farmerResponse.farmers || []);
     } catch (error) {
       console.error("Failed to load tea farm data:", error);
       alert(

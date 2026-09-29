@@ -82,7 +82,7 @@ const MilkCollectionPage = () => {
 
       const response = await getFarmers();
 
-      setFarmers(response.farmers || []);
+      setFarmers(response.data || response.farmers || []);
     } catch (err) {
       console.error(
         "Failed to fetch farmers:",

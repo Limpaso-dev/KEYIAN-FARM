@@ -9,11 +9,12 @@ import {
 } from "../controllers/milkCollection.controller.js";
 
 import { protect } from "../middleware/auth.middleware.js";
+import { authorizeModule } from "../middleware/role.middleware.js";
 
 const router = express.Router();
 
 // All milk collection routes require authentication
-router.use(protect);
+router.use(protect, authorizeModule("milkCollection"));
 
 // Create
 router.post("/", createMilkCollection);

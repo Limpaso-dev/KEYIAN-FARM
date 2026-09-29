@@ -3,6 +3,7 @@ import AnimalFeed from "../models/AnimalFeed.js";
 export const createAnimalFeed = async (req, res, next) => {
   try {
     const feed = await AnimalFeed.create(req.body);
+    await feed.populate("supplier", "name");
 
     res.status(201).json({
       success: true,
@@ -17,6 +18,7 @@ export const createAnimalFeed = async (req, res, next) => {
 export const getAnimalFeeds = async (req, res, next) => {
   try {
     const feeds = await AnimalFeed.find()
+      .populate("supplier", "name")
       .sort({ createdAt: -1 });
 
     res.json({
@@ -31,7 +33,8 @@ export const getAnimalFeeds = async (req, res, next) => {
 
 export const getAnimalFeedById = async (req, res, next) => {
   try {
-    const feed = await AnimalFeed.findById(req.params.id);
+    const feed = await AnimalFeed.findById(req.params.id)
+      .populate("supplier", "name");
 
     if (!feed) {
       return res.status(404).json({
@@ -58,7 +61,7 @@ export const updateAnimalFeed = async (req, res, next) => {
         new: true,
         runValidators: true,
       }
-    );
+    ).populate("supplier", "name");
 
     if (!feed) {
       return res.status(404).json({

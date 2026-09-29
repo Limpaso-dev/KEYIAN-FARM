@@ -9,6 +9,7 @@ import {
 } from "../controllers/farmer.controller.js";
 
 import { protect } from "../middleware/auth.middleware.js";
+import { authorizeModule } from "../middleware/role.middleware.js";
 
 const router = express.Router();
 
@@ -16,19 +17,12 @@ const router = express.Router();
  * All farmer routes require authentication.
  */
 
-// Get all farmers
-router.get("/", protect, getFarmers);
+router.use(protect, authorizeModule("farmers"));
 
-// Get a single farmer
-router.get("/:id", protect, getFarmerById);
-
-// Create a farmer
-router.post("/", protect, createFarmer);
-
-// Update a farmer
-router.put("/:id", protect, updateFarmer);
-
-// Delete a farmer
-router.delete("/:id", protect, deleteFarmer);
+router.get("/", getFarmers);
+router.get("/:id", getFarmerById);
+router.post("/", createFarmer);
+router.put("/:id", updateFarmer);
+router.delete("/:id", deleteFarmer);
 
 export default router;

@@ -49,7 +49,7 @@ const FarmersPage = () => {
 
       const response = await getFarmers();
 
-      setFarmers(response.farmers || []);
+      setFarmers(response.data || response.farmers || []);
     } catch (err) {
       console.error(err);
 
@@ -63,7 +63,31 @@ const FarmersPage = () => {
   };
 
   useEffect(() => {
-    loadFarmers();
+    let current = true;
+
+    getFarmers()
+      .then((response) => {
+        if (current) {
+          setFarmers(response.data || response.farmers || []);
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+
+        if (current) {
+          setError(
+            err.response?.data?.message ||
+              "Failed to load farmers."
+          );
+        }
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+
+    return () => {
+      current = false;
+    };
   }, []);
 
   const filteredFarmers = useMemo(() => {

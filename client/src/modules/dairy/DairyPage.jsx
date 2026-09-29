@@ -5,14 +5,20 @@ import {
   Milk,
   TestTube2,
 } from "lucide-react";
+import { useAuth } from "../../context/useAuth";
+import { canAccessModule } from "../../utils/permissions";
 
 import MilkCollectionPage from "./MilkCollectionPage";
 import MilkTestPage from "./MilkTestPage";
 import MilkValueAdditionPage from "./MilkValueAdditionPage";
 
 const DairyPage = () => {
+  const { user } = useAuth();
   const [activeArea, setActiveArea] =
-    useState("collection");
+    useState(() => user?.role === "laboratory" ? "testing" : "collection");
+  const canViewCollection = canAccessModule(user?.role, "milkCollection");
+  const canViewTesting = canAccessModule(user?.role, "milkLaboratory");
+  const canViewValueAddition = canAccessModule(user?.role, "milkValueAddition");
 
   const renderActiveArea = () => {
     switch (activeArea) {
@@ -50,38 +56,36 @@ const DairyPage = () => {
         </div>
 
         {/* Dairy Areas */}
-        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <DairyAreaCard
-            icon={ClipboardList}
-            title="Milk Collection"
-            description="Record and manage milk received from farmers."
-            active={activeArea === "collection"}
-            onClick={() =>
-              setActiveArea("collection")
-            }
-          />
+        <div className={`mt-6 grid grid-cols-1 gap-4 ${user?.role === "laboratory" ? "md:grid-cols-1" : "md:grid-cols-3"}`}>
+          {canViewCollection && (
+            <DairyAreaCard
+              icon={ClipboardList}
+              title="Milk Collection"
+              description="Record and manage milk received from farmers."
+              active={activeArea === "collection"}
+              onClick={() => setActiveArea("collection")}
+            />
+          )}
 
-          <DairyAreaCard
-            icon={TestTube2}
-            title="Milk Testing"
-            description="Manage milk quality and laboratory testing."
-            active={activeArea === "testing"}
-            onClick={() =>
-              setActiveArea("testing")
-            }
-          />
+          {canViewTesting && (
+            <DairyAreaCard
+              icon={TestTube2}
+              title="Milk Testing"
+              description="Manage milk quality and laboratory testing."
+              active={activeArea === "testing"}
+              onClick={() => setActiveArea("testing")}
+            />
+          )}
 
-          <DairyAreaCard
-            icon={Factory}
-            title="Milk Value Addition"
-            description="Manage processing and dairy products."
-            active={
-              activeArea === "value-addition"
-            }
-            onClick={() =>
-              setActiveArea("value-addition")
-            }
-          />
+          {canViewValueAddition && (
+            <DairyAreaCard
+              icon={Factory}
+              title="Milk Value Addition"
+              description="Manage processing and dairy products."
+              active={activeArea === "value-addition"}
+              onClick={() => setActiveArea("value-addition")}
+            />
+          )}
         </div>
       </div>
 

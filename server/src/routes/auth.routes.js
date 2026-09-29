@@ -4,6 +4,8 @@ import {
   login,
   getMe,
   createUser,
+  getUsers,
+  updateUser,
 } from "../controllers/auth.controller.js";
 
 import {
@@ -33,6 +35,20 @@ router.post(
   protect,
   authorize("admin", "super_admin"),
   createUser
+);
+
+router.get(
+  "/users",
+  protect,
+  authorize("admin", "super_admin"),
+  getUsers
+);
+
+router.put(
+  "/users/:id",
+  protect,
+  authorize("admin", "super_admin"),
+  updateUser
 );
 
 export default router;

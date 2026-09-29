@@ -1,5 +1,5 @@
+import { useEffect, useState } from "react";
 import {
-  ArrowDownRight,
   ArrowUpRight,
   CalendarDays,
   ClipboardList,
@@ -9,13 +9,75 @@ import {
   Wheat,
 } from "lucide-react";
 
-const stats = [
-  {
-    title: "Total Farmers",
-    value: "0",
-    change: "Registered farmers",
-    icon: Users,
-  },
+import { getFarmers } from "../../services/farmer.service";
+import { useAuth } from "../../context/useAuth";
+import { canAccessModule } from "../../utils/permissions";
+
+const Dashboard = () => {
+  const { user } = useAuth();
+  const canReadFarmerData = canAccessModule(user?.role, "farmers");
+  const [farmerCount, setFarmerCount] = useState(null);
+  const [totalShares, setTotalShares] = useState(null);
+  const [farmersLoading, setFarmersLoading] = useState(canReadFarmerData);
+
+  useEffect(() => {
+    if (!canReadFarmerData) return undefined;
+
+    let current = true;
+
+    getFarmers()
+      .then((response) => {
+        const farmers = Array.isArray(response.data)
+          ? response.data
+          : Array.isArray(response.farmers)
+            ? response.farmers
+            : [];
+        const count = Number.isFinite(response.count)
+          ? response.count
+          : farmers.length;
+        const shares = farmers.reduce(
+          (total, farmer) => total + Number(farmer.shares || 0),
+          0
+        );
+
+        if (current) {
+          setFarmerCount(count);
+          setTotalShares(shares);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load farmer count:", error);
+        if (current) {
+          setFarmerCount(null);
+          setTotalShares(null);
+        }
+      })
+      .finally(() => {
+        if (current) setFarmersLoading(false);
+      });
+
+    return () => {
+      current = false;
+    };
+  }, [canReadFarmerData]);
+
+  const stats = [
+    ...(canReadFarmerData
+      ? [
+    {
+      title: "Total Farmers",
+      value: farmersLoading ? "..." : farmerCount ?? "N/A",
+      change: "Registered farmers",
+      icon: Users,
+    },
+      ]
+      : []),
+    {
+      title: "Total Shares",
+      value: farmersLoading ? "..." : totalShares ?? "N/A",
+      change: "Shares held by members",
+      icon: Users,
+    },
   {
     title: "Milk Collected",
     value: "0 L",
@@ -34,9 +96,8 @@ const stats = [
     change: "Current employees",
     icon: ClipboardList,
   },
-];
+  ];
 
-const Dashboard = () => {
   return (
     <div>
       {/* Header */}
@@ -59,7 +120,7 @@ const Dashboard = () => {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-5">
         {stats.map((stat) => {
           const Icon = stat.icon;
 

@@ -9,10 +9,11 @@ import {
 } from "../controllers/milkLaboratory.controller.js";
 
 import { protect } from "../middleware/auth.middleware.js";
+import { authorizeModule } from "../middleware/role.middleware.js";
 
 const router = express.Router();
 
-router.use(protect);
+router.use(protect, authorizeModule("milkLaboratory"));
 
 router.post("/", createMilkTest);
 router.get("/", getMilkTests);

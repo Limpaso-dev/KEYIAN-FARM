@@ -57,7 +57,7 @@ const LivestockPage = () => {
         ]);
 
       setLivestock(livestockResponse.livestock || []);
-      setFarmers(farmersResponse.farmers || []);
+      setFarmers(farmersResponse.data || farmersResponse.farmers || []);
     } catch (err) {
       console.error(err);
 

@@ -28,6 +28,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       localStorage.removeItem("keiyian_token");
       localStorage.removeItem("keiyian_user");
+      window.dispatchEvent(new Event("keiyian:unauthorized"));
     }
 
     return Promise.reject(error);

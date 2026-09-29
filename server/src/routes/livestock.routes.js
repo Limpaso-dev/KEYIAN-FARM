@@ -9,11 +9,12 @@ import {
 } from "../controllers/livestock.controller.js";
 
 import { protect } from "../middleware/auth.middleware.js";
+import { authorizeModule } from "../middleware/role.middleware.js";
 
 const router = express.Router();
 
 // All livestock routes require authentication
-router.use(protect);
+router.use(protect, authorizeModule("livestock"));
 
 // Create
 router.post("/", createLivestock);

@@ -10,6 +10,7 @@ import FarmersPage from "../modules/farmers/FarmersPage";
 import LivestockPage from "../modules/livestock/LivestockPage";
 import DairyPage from "../modules/dairy/DairyPage";
 import AgriculturePage from "../modules/agriculture/AgriculturePage";
+import AnimalFeedsPage from "../modules/animal-feeds/AnimalFeedsPage";
 
 // HMIS
 import HMISPage from "../modules/hmis/HMISPage";
@@ -35,6 +36,8 @@ import RentalsPage from "../modules/rentals/RentalsPage";
 
 // Sales
 import SalesPage from "../modules/sales/SalesPage";
+import UserManagementPage from "../modules/users/UserManagementPage";
+import ReportsPage from "../modules/reports/ReportsPage";
 
 const AppRoutes = () => {
   return (
@@ -80,6 +83,11 @@ const AppRoutes = () => {
           <Route
             path="/livestock"
             element={<LivestockPage />}
+          />
+
+          <Route
+            path="/animal-feeds"
+            element={<AnimalFeedsPage />}
           />
 
           {/* =================================================
@@ -191,15 +199,23 @@ const AppRoutes = () => {
             element={<SalesPage />}
           />
 
+          <Route
+            path="/reports"
+            element={<ReportsPage />}
+          />
+
           {/* =================================================
               SETTINGS
           ================================================= */}
 
           <Route
             path="/settings"
-            element={
-              <div>Settings</div>
-            }
+            element={<Navigate to="/settings/users" replace />}
+          />
+
+          <Route
+            path="/settings/users"
+            element={<UserManagementPage />}
           />
 
         </Route>

@@ -21,6 +21,7 @@ import milkLaboratoryRoutes from "./routes/milkLaboratory.routes.js";
 import salesRoutes from "./routes/sales.routes.js";
 import procurementRoutes from "./routes/procurement.routes.js";
 import inventoryRoutes from "./routes/inventory.routes.js";
+import reportsRoutes from "./routes/reports.routes.js";
 
 import { errorHandler } from "./middleware/error.middleware.js";
 
@@ -106,6 +107,7 @@ app.use(
   "/api/inventory",
   inventoryRoutes
 );
+app.use("/api/reports", reportsRoutes);
 
 /*
  * ERROR HANDLER

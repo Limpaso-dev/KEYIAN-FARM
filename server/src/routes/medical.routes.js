@@ -31,6 +31,7 @@ import {
 } from "../controllers/medical.controller.js";
 
 import { protect } from "../middleware/auth.middleware.js";
+import { authorizeModule } from "../middleware/role.middleware.js";
 
 const router = express.Router();
 
@@ -45,56 +46,56 @@ router.use(protect);
 // PATIENTS
 // =====================================================
 
-router.post("/patients", createPatient);
+router.post("/patients", authorizeModule("hmisPatients"), createPatient);
 
-router.get("/patients", getPatients);
+router.get("/patients", authorizeModule("hmisPatients"), getPatients);
 
-router.get("/patients/:id", getPatientById);
+router.get("/patients/:id", authorizeModule("hmisPatients"), getPatientById);
 
-router.put("/patients/:id", updatePatient);
+router.put("/patients/:id", authorizeModule("hmisPatients"), updatePatient);
 
-router.delete("/patients/:id", deletePatient);
+router.delete("/patients/:id", authorizeModule("hmisPatients"), deletePatient);
 
 // =====================================================
 // MEDICAL VISITS
 // =====================================================
 
-router.post("/visits", createMedicalVisit);
+router.post("/visits", authorizeModule("hmisVisits"), createMedicalVisit);
 
-router.get("/visits", getMedicalVisits);
+router.get("/visits", authorizeModule("hmisVisits"), getMedicalVisits);
 
-router.get("/visits/:id", getMedicalVisitById);
+router.get("/visits/:id", authorizeModule("hmisVisits"), getMedicalVisitById);
 
-router.put("/visits/:id", updateMedicalVisit);
+router.put("/visits/:id", authorizeModule("hmisVisits"), updateMedicalVisit);
 
-router.delete("/visits/:id", deleteMedicalVisit);
+router.delete("/visits/:id", authorizeModule("hmisVisits"), deleteMedicalVisit);
 
 // =====================================================
 // MEDICAL LAB RESULTS
 // =====================================================
 
-router.post("/lab-results", createMedicalLabResult);
+router.post("/lab-results", authorizeModule("hmisLab"), createMedicalLabResult);
 
-router.get("/lab-results", getMedicalLabResults);
+router.get("/lab-results", authorizeModule("hmisLab"), getMedicalLabResults);
 
-router.get("/lab-results/:id", getMedicalLabResultById);
+router.get("/lab-results/:id", authorizeModule("hmisLab"), getMedicalLabResultById);
 
-router.put("/lab-results/:id", updateMedicalLabResult);
+router.put("/lab-results/:id", authorizeModule("hmisLab"), updateMedicalLabResult);
 
-router.delete("/lab-results/:id", deleteMedicalLabResult);
+router.delete("/lab-results/:id", authorizeModule("hmisLab"), deleteMedicalLabResult);
 
 // =====================================================
 // PRESCRIPTIONS
 // =====================================================
 
-router.post("/prescriptions", createPrescription);
+router.post("/prescriptions", authorizeModule("hmisPrescriptions"), createPrescription);
 
-router.get("/prescriptions", getPrescriptions);
+router.get("/prescriptions", authorizeModule("hmisPrescriptions"), getPrescriptions);
 
-router.get("/prescriptions/:id", getPrescriptionById);
+router.get("/prescriptions/:id", authorizeModule("hmisPrescriptions"), getPrescriptionById);
 
-router.put("/prescriptions/:id", updatePrescription);
+router.put("/prescriptions/:id", authorizeModule("hmisPrescriptions"), updatePrescription);
 
-router.delete("/prescriptions/:id", deletePrescription);
+router.delete("/prescriptions/:id", authorizeModule("hmisPrescriptions"), deletePrescription);
 
 export default router;
