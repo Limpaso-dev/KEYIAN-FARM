@@ -8,6 +8,9 @@ import {
   Package,
   AlertTriangle,
 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../../context/useAuth";
+import { canAccessModule } from "../../utils/permissions";
 
 import {
   getInventory,
@@ -29,6 +32,8 @@ const initialForm = {
 };
 
 const InventoryPage = () => {
+  const { user } = useAuth();
+  const canManageInventory = canAccessModule(user?.role, "inventory", "POST");
   const [items, setItems] = useState([]);
 
   const [loading, setLoading] = useState(true);
@@ -249,14 +254,7 @@ const InventoryPage = () => {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700"
-        >
-          <Plus size={18} />
-          Add Inventory Item
-        </button>
+        <div className="flex flex-wrap gap-2"><Link to="/inventory/receiving" className="inline-flex items-center justify-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm font-semibold text-primary-700 hover:bg-primary-100">Goods Receiving</Link>{canManageInventory && <button type="button" onClick={openCreateForm} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700"><Plus size={18} />Add Inventory Item</button>}</div>
       </div>
 
       {/* Summary */}
@@ -384,9 +382,7 @@ const InventoryPage = () => {
                     Status
                   </th>
 
-                  <th className="px-4 py-3 text-right font-semibold text-slate-600">
-                    Actions
-                  </th>
+                  {canManageInventory && <th className="px-4 py-3 text-right font-semibold text-slate-600">Actions</th>}
                 </tr>
               </thead>
 
@@ -406,7 +402,7 @@ const InventoryPage = () => {
                         {item.itemCode}
                       </td>
 
-                      <td className="px-4 py-3">
+                      {canManageInventory && <td className="px-4 py-3">
                         <div className="font-medium text-slate-900">
                           {item.name}
                         </div>
@@ -416,7 +412,7 @@ const InventoryPage = () => {
                             Unit: {item.unit}
                           </div>
                         )}
-                      </td>
+                      </td>}
 
                       <td className="px-4 py-3 text-slate-600">
                         {item.category || "—"}

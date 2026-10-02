@@ -621,3 +621,60 @@ export const deletePrescription = async (
     next(error);
   }
 };
+
+export const getMedicalSummary = async (req, res, next) => {
+  try {
+    const role = req.user.role;
+    const canRead = (roles) =>
+      ["admin", "super_admin", "manager"].includes(role) ||
+      roles.includes(role);
+    const canReadPatients = canRead(["doctor", "nurse"]);
+    const canReadVisits = canRead(["doctor", "nurse"]);
+    const canReadLab = canRead(["doctor", "nurse", "laboratory"]);
+    const canReadPrescriptions = canRead(["doctor", "pharmacist"]);
+
+    const nairobiParts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Nairobi",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const dateParts = Object.fromEntries(
+      nairobiParts.map(({ type, value }) => [type, value])
+    );
+    const startOfToday = new Date(
+      Date.UTC(
+        Number(dateParts.year),
+        Number(dateParts.month) - 1,
+        Number(dateParts.day)
+      ) - 3 * 60 * 60 * 1000
+    );
+    const startOfTomorrow = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
+
+    const [patients, todaysVisits, pendingLab, prescriptions] = await Promise.all([
+      canReadPatients ? Patient.countDocuments() : null,
+      canReadVisits
+        ? MedicalVisit.countDocuments({
+            visitDate: { $gte: startOfToday, $lt: startOfTomorrow },
+            status: { $ne: "cancelled" },
+          })
+        : null,
+      canReadLab
+        ? MedicalLabResult.countDocuments({ status: "pending" })
+        : null,
+      canReadPrescriptions ? Prescription.countDocuments() : null,
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        patients,
+        todaysVisits,
+        pendingLab,
+        prescriptions,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};

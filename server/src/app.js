@@ -22,6 +22,7 @@ import salesRoutes from "./routes/sales.routes.js";
 import procurementRoutes from "./routes/procurement.routes.js";
 import inventoryRoutes from "./routes/inventory.routes.js";
 import reportsRoutes from "./routes/reports.routes.js";
+import workflowRoutes from "./routes/workflow.routes.js";
 
 import { errorHandler } from "./middleware/error.middleware.js";
 
@@ -108,6 +109,7 @@ app.use(
   inventoryRoutes
 );
 app.use("/api/reports", reportsRoutes);
+app.use("/api/workflows", workflowRoutes);
 
 /*
  * ERROR HANDLER

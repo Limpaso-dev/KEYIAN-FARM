@@ -6,6 +6,7 @@ import {
 
 import SuppliersPage from "./SuppliersPage";
 import PurchaseOrdersPage from "./PurchaseOrdersPage";
+import SupplierInvoicesPage from "./SupplierInvoicesPage";
 
 const ProcurementPage = () => {
   const [activeSection, setActiveSection] =
@@ -22,6 +23,12 @@ const ProcurementPage = () => {
       id: "purchase-orders",
       label: "Purchase Orders",
       description: "Create and manage purchase orders",
+      icon: ClipboardList,
+    },
+    {
+      id: "supplier-invoices",
+      label: "Supplier Invoices",
+      description: "Match supplier invoices to POs and goods receipts",
       icon: ClipboardList,
     },
   ];
@@ -41,7 +48,7 @@ const ProcurementPage = () => {
       </div>
 
       {/* Section Navigation */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
         {sections.map((section) => {
           const Icon = section.icon;
 
@@ -94,6 +101,8 @@ const ProcurementPage = () => {
         {activeSection === "purchase-orders" && (
           <PurchaseOrdersPage />
         )}
+
+        {activeSection === "supplier-invoices" && <SupplierInvoicesPage />}
       </div>
     </div>
   );

@@ -6,6 +6,9 @@ import {
   createUser,
   getUsers,
   updateUser,
+  verifyUserEmail,
+  requestVerificationCode,
+  resendUserVerification,
 } from "../controllers/auth.controller.js";
 
 import {
@@ -21,6 +24,8 @@ const router = express.Router();
 
 // Login
 router.post("/login", login);
+router.post("/verify-email", verifyUserEmail);
+router.post("/resend-verification", requestVerificationCode);
 
 // Get currently authenticated user
 router.get("/me", protect, getMe);
@@ -49,6 +54,13 @@ router.put(
   protect,
   authorize("admin", "super_admin"),
   updateUser
+);
+
+router.post(
+  "/users/:id/resend-verification",
+  protect,
+  authorize("admin", "super_admin"),
+  resendUserVerification
 );
 
 export default router;

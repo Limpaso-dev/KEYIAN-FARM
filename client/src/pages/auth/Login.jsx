@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../context/useAuth";
 import landingImage from "../../assets/keiyian-landing.jpg";
@@ -17,6 +17,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
 
   // If already logged in
   if (isAuthenticated) {
@@ -36,6 +37,7 @@ const Login = () => {
     e.preventDefault();
 
     setError("");
+    setVerificationEmail("");
     setLoading(true);
 
     try {
@@ -45,10 +47,16 @@ const Login = () => {
         replace: true,
       });
     } catch (error) {
-      setError(
-        error.response?.data?.message ||
-          "Unable to log in. Please check your credentials."
-      );
+      const response = error.response?.data;
+      if (response?.code === "EMAIL_NOT_VERIFIED") {
+        setVerificationEmail(formData.email);
+        setError("Verify your email address before signing in.");
+      } else {
+        setError(
+          response?.message ||
+            "Unable to log in. Please check your credentials."
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -64,11 +72,11 @@ const Login = () => {
         />
         <div className="absolute inset-0 -z-10 bg-[#10251b]/45" />
 
-        <div className="flex flex-col items-start gap-3">
+        <div className="flex w-full flex-col items-center gap-3">
           <img
             src="/keiyian%20llogo.png"
             alt="Keiyian Farmers Cooperative Society"
-            className="h-14 w-64 rounded-sm bg-white px-3 py-1.5 object-contain object-left"
+            className="h-16 w-16 object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
           />
         </div>
 
@@ -108,7 +116,15 @@ const Login = () => {
 
           {error && (
             <div role="alert" className="mb-6 rounded-md border border-red-200 border-l-2 border-l-red-600 bg-red-50 px-4 py-3 text-sm text-red-800">
-              {error}
+              <p>{error}</p>
+              {verificationEmail && (
+                <Link
+                  to={`/verify-account?email=${encodeURIComponent(verificationEmail)}`}
+                  className="mt-2 inline-block font-semibold text-amber-900 underline underline-offset-2"
+                >
+                  Verify your email
+                </Link>
+              )}
             </div>
           )}
 

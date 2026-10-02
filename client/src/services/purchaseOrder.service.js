@@ -37,3 +37,5 @@ export const deletePurchaseOrder = async (id) => {
   );
   return response.data;
 };
+
+export const placePurchaseOrder = async (id, comment = "") => (await api.post(`/procurement/purchase-orders/${id}/place`, { comment })).data;

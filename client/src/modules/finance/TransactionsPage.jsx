@@ -18,6 +18,7 @@ import {
 } from "../../services/transaction.service";
 
 import { getAccounts } from "../../services/account.service";
+import { Link } from "react-router-dom";
 
 const initialForm = {
   reference: "",
@@ -36,13 +37,6 @@ const transactionTypes = [
   "receipt",
   "transfer",
   "journal",
-];
-
-const statuses = [
-  "pending",
-  "approved",
-  "posted",
-  "cancelled",
 ];
 
 const formatCurrency = (value) => {
@@ -302,7 +296,6 @@ const TransactionsPage = () => {
         account: form.account,
         amount: Number(form.amount),
         description: form.description.trim(),
-        status: form.status,
       };
 
       if (editingTransaction) {
@@ -605,6 +598,7 @@ const TransactionsPage = () => {
 
                       <td className="px-5 py-4">
                         <div className="flex justify-end gap-2">
+                          {transaction.history?.length > 0 ? <Link to="/workflows" className="rounded-lg px-2 py-2 text-xs font-semibold text-primary-700 hover:bg-primary-50">Workflow</Link> : <>
                           <button
                             type="button"
                             onClick={() =>
@@ -615,6 +609,7 @@ const TransactionsPage = () => {
                           >
                             <Pencil size={17} />
                           </button>
+                          </>}
 
                           <button
                             type="button"
@@ -781,28 +776,7 @@ const TransactionsPage = () => {
                   />
                 </div>
 
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Status
-                  </label>
-
-                  <select
-                    name="status"
-                    value={form.status}
-                    onChange={handleChange}
-                    className="form-input"
-                  >
-                    {statuses.map((status) => (
-                      <option
-                        key={status}
-                        value={status}
-                      >
-                        {status.charAt(0).toUpperCase() +
-                          status.slice(1)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <div className="flex items-end text-sm text-slate-500">Submitting this transaction sends it through the configured Finance approval policy.</div>
               </div>
 
               <div>

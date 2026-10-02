@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import {
   Activity,
   ArrowRight,
+  BadgeDollarSign,
   ClipboardList,
   FlaskConical,
   HeartPulse,
@@ -9,8 +11,40 @@ import {
   Users,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useAuth } from "../../context/useAuth";
+import { getMedicalSummary } from "../../services/medicalSummary.service";
+import { canAccessModule } from "../../utils/permissions";
 
 const HMISPage = () => {
+  const { user } = useAuth();
+  const [summary, setSummary] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let current = true;
+
+    getMedicalSummary()
+      .then((response) => {
+        if (current) setSummary(response.data);
+      })
+      .catch((requestError) => {
+        if (current) {
+          setError(
+            requestError.response?.data?.message ||
+              "Unable to load medical centre totals."
+          );
+        }
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+
+    return () => {
+      current = false;
+    };
+  }, []);
+
   const modules = [
     {
       title: "Patients",
@@ -18,6 +52,7 @@ const HMISPage = () => {
         "Register and manage patients, farmer-linked records, contacts, and next-of-kin information.",
       icon: Users,
       path: "/hmis/patients",
+      permission: "hmisPatients",
       color: "bg-blue-50 text-blue-600",
     },
     {
@@ -26,6 +61,7 @@ const HMISPage = () => {
         "Manage outpatient visits, complaints, clinical notes, diagnoses, and treatment plans.",
       icon: Stethoscope,
       path: "/hmis/visits",
+      permission: "hmisVisits",
       color: "bg-emerald-50 text-emerald-600",
     },
     {
@@ -34,6 +70,7 @@ const HMISPage = () => {
         "Record laboratory investigations, results, reference ranges, and completion status.",
       icon: FlaskConical,
       path: "/hmis/laboratory",
+      permission: "hmisLab",
       color: "bg-purple-50 text-purple-600",
     },
     {
@@ -42,32 +79,49 @@ const HMISPage = () => {
         "Create and manage prescriptions, medications, dosage, frequency, and dispensing status.",
       icon: Pill,
       path: "/hmis/prescriptions",
+      permission: "hmisPrescriptions",
       color: "bg-orange-50 text-orange-600",
+    },
+    {
+      title: "Billing",
+      description: "Submit patient charges to Finance for approval and record approved payments.",
+      icon: BadgeDollarSign,
+      path: "/hmis/billing",
+      permission: "hmisBilling",
+      color: "bg-rose-50 text-rose-600",
     },
   ];
 
   const quickStats = [
     {
       label: "Patients",
-      value: "—",
+      key: "patients",
+      permission: "hmisPatients",
       icon: Users,
     },
     {
       label: "Today's Visits",
-      value: "—",
+      key: "todaysVisits",
+      permission: "hmisVisits",
       icon: Stethoscope,
     },
     {
       label: "Pending Lab",
-      value: "—",
+      key: "pendingLab",
+      permission: "hmisLab",
       icon: FlaskConical,
     },
     {
       label: "Prescriptions",
-      value: "—",
+      key: "prescriptions",
+      permission: "hmisPrescriptions",
       icon: Pill,
     },
-  ];
+  ].filter((stat) => canAccessModule(user?.role, stat.permission));
+
+  const visibleModules = modules.filter((module) =>
+    canAccessModule(user?.role, module.permission)
+  );
 
   return (
     <div className="space-y-6">
@@ -92,9 +146,20 @@ const HMISPage = () => {
       </div>
 
       {/* Quick Stats */}
+      {error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {quickStats.map((stat) => {
           const Icon = stat.icon;
+          const value = loading
+            ? "..."
+            : summary?.[stat.key] == null
+              ? "—"
+              : Number(summary[stat.key]).toLocaleString("en-KE");
 
           return (
             <div
@@ -108,7 +173,7 @@ const HMISPage = () => {
                   </p>
 
                   <p className="mt-2 text-2xl font-bold text-slate-900">
-                    {stat.value}
+                    {value}
                   </p>
                 </div>
 
@@ -135,7 +200,7 @@ const HMISPage = () => {
         </div>
 
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-          {modules.map((module) => {
+          {visibleModules.map((module) => {
             const Icon = module.icon;
 
             return (
@@ -187,10 +252,9 @@ const HMISPage = () => {
             </h3>
 
             <p className="mt-1 text-sm leading-6 text-slate-600">
-              HMIS records are connected to the wider Keiyian ERP.
-              Patients can be linked to cooperative farmers, while
-              future Finance, Inventory, and HR integrations can use
-              the appropriate shared ERP records.
+            HMIS records are connected to the wider Keiyian ERP.
+            Patient bills route to Finance for approval and payment receipts
+            are recorded in the shared accounts ledger.
             </p>
           </div>
         </div>

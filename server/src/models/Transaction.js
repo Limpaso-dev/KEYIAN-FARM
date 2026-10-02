@@ -41,9 +41,15 @@ const transactionSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["pending", "approved", "posted", "cancelled"],
+      enum: ["pending", "approved", "posted", "cancelled", "rejected", "returned"],
       default: "pending",
     },
+
+    department: { type: String, default: "finance" },
+    policy: { type: mongoose.Schema.Types.ObjectId, ref: "WorkflowPolicy" },
+    approvalSteps: [{ label: String, approverRole: String, approverDepartment: String, status: { type: String, default: "pending" }, decidedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, decidedAt: Date, comment: String }],
+    currentStep: { type: Number, default: 0 },
+    history: [{ action: String, by: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, at: { type: Date, default: Date.now }, comment: String, stepLabel: String }],
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

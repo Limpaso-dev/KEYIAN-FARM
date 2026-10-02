@@ -8,6 +8,7 @@ const moduleRoles = {
   tea: ["farm_officer"],
   sugarcane: ["farm_officer"],
   hmisPatients: ["doctor", "nurse"],
+  hmisSummary: ["doctor", "nurse", "laboratory", "pharmacist"],
   hmisVisits: ["doctor", "nurse"],
   hmisLab: ["doctor", "nurse", "laboratory"],
   hmisPrescriptions: ["doctor", "pharmacist"],
@@ -15,6 +16,8 @@ const moduleRoles = {
   suppliers: ["procurement"],
   salesReports: ["sales"],
   inventory: ["procurement", "sales", "livestock", "dairy", "farm_officer"],
+  hmisBilling: ["doctor", "nurse", "finance"],
+  receiving: ["procurement", "stores"],
   finance: ["finance"],
   hr: ["hr"],
   sales: ["sales"],
@@ -22,6 +25,8 @@ const moduleRoles = {
 };
 
 const readOnlyModuleRoles = {
+  procurement: ["stores"],
+  inventory: ["stores"],
   farmers: ["livestock", "dairy", "doctor", "nurse"],
   milkCollection: ["laboratory"],
   suppliers: ["livestock", "dairy", "farm_officer", "sales"],

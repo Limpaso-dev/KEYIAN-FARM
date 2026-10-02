@@ -28,10 +28,13 @@ import {
   getPrescriptionById,
   updatePrescription,
   deletePrescription,
+  getMedicalSummary,
 } from "../controllers/medical.controller.js";
 
 import { protect } from "../middleware/auth.middleware.js";
 import { authorizeModule } from "../middleware/role.middleware.js";
+import { createMedicalBill, listMedicalBills } from "../controllers/medicalBilling.controller.js";
+import { recordMedicalBillPayment } from "../controllers/invoice.controller.js";
 
 const router = express.Router();
 
@@ -41,6 +44,11 @@ const router = express.Router();
 
 // All HMIS routes require authentication
 router.use(protect);
+
+router.get("/summary", authorizeModule("hmisSummary"), getMedicalSummary);
+router.get("/bills", authorizeModule("hmisBilling"), listMedicalBills);
+router.post("/bills", authorizeModule("hmisBilling"), createMedicalBill);
+router.post("/bills/:id/payments", authorizeModule("hmisBilling"), recordMedicalBillPayment);
 
 // =====================================================
 // PATIENTS

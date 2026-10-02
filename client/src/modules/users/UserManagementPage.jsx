@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import {
   Check,
   KeyRound,
+  MailCheck,
   Pencil,
   Plus,
   Search,
+  Send,
   ShieldCheck,
   UserCog,
   Users,
@@ -12,7 +14,12 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "../../context/useAuth";
-import { createUser, getUsers, updateUser } from "../../services/user.service";
+import {
+  createUser,
+  getUsers,
+  resendUserVerification,
+  updateUser,
+} from "../../services/user.service";
 
 const roles = [
   ["admin", "Administrator"],
@@ -20,6 +27,7 @@ const roles = [
   ["finance", "Finance"],
   ["hr", "HR"],
   ["procurement", "Procurement"],
+  ["stores", "Stores / Receiving"],
   ["livestock", "Livestock"],
   ["dairy", "Dairy"],
   ["laboratory", "Laboratory"],
@@ -47,6 +55,7 @@ const UserManagementPage = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [showForm, setShowForm] = useState(false);
@@ -97,6 +106,7 @@ const UserManagementPage = () => {
     setEditingUser(null);
     setForm(initialForm);
     setError("");
+    setNotice("");
     setShowForm(true);
   };
 
@@ -112,6 +122,7 @@ const UserManagementPage = () => {
       isActive: account.isActive !== false,
     });
     setError("");
+    setNotice("");
     setShowForm(true);
   };
 
@@ -134,10 +145,6 @@ const UserManagementPage = () => {
     event.preventDefault();
     setError("");
 
-    if (!editingUser && form.password.length < 12) {
-      setError("A new account password must be at least 12 characters.");
-      return;
-    }
     if (form.password && form.password.length < 12) {
       setError("A new password must be at least 12 characters.");
       return;
@@ -155,12 +162,14 @@ const UserManagementPage = () => {
 
     try {
       setSaving(true);
+      let response;
       if (editingUser) {
-        await updateUser(editingUser._id, payload);
+        response = await updateUser(editingUser._id, payload);
       } else {
-        await createUser(payload);
+        response = await createUser(payload);
       }
       await loadUsers();
+      setNotice(response.message || "Account saved.");
       setShowForm(false);
       setEditingUser(null);
       setForm(initialForm);
@@ -171,6 +180,20 @@ const UserManagementPage = () => {
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleResendVerification = async (account) => {
+    setError("");
+    setNotice("");
+    try {
+      const response = await resendUserVerification(account._id);
+      setNotice(response.message || `Verification email sent to ${account.email}.`);
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.message ||
+          "Unable to resend the verification email."
+      );
     }
   };
 
@@ -191,8 +214,9 @@ const UserManagementPage = () => {
       (statusFilter === "active" ? account.isActive : !account.isActive);
     return matchesSearch && matchesStatus;
   });
-  const activeCount = users.filter((account) => account.isActive).length;
-  const inactiveCount = users.length - activeCount;
+  const activeCount = users.filter((account) => account.isActive && account.emailVerified !== false).length;
+  const pendingCount = users.filter((account) => account.emailVerified === false).length;
+  const inactiveCount = users.filter((account) => !account.isActive && account.emailVerified !== false).length;
   const canChangeOwnAccess = (account) =>
     account._id !== currentUser?._id;
 
@@ -222,10 +246,16 @@ const UserManagementPage = () => {
           {error}
         </div>
       )}
+      {notice && (
+        <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {notice}
+        </div>
+      )}
 
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Summary icon={Users} label="Accounts" value={users.length} />
         <Summary icon={Check} label="Active" value={activeCount} />
+        <Summary icon={MailCheck} label="Awaiting verification" value={pendingCount} />
         <Summary icon={ShieldCheck} label="Inactive" value={inactiveCount} />
       </section>
 
@@ -281,12 +311,22 @@ const UserManagementPage = () => {
                     </td>
                     <td className="px-4 py-3 text-slate-600">{account.department || "-"}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${account.isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
-                        {account.isActive ? "Active" : "Inactive"}
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${account.emailVerified === false ? "bg-amber-50 text-amber-800" : account.isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                        {account.emailVerified === false ? "Awaiting verification" : account.isActive ? "Active" : "Inactive"}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end">
+                        {account.emailVerified === false && (
+                          <button
+                            type="button"
+                            title="Resend verification email"
+                            onClick={() => handleResendVerification(account)}
+                            className="rounded p-2 text-amber-700 hover:bg-amber-50 hover:text-amber-900"
+                          >
+                            <Send size={16} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           title="Edit account"
@@ -320,7 +360,7 @@ const UserManagementPage = () => {
                   {editingUser ? "Edit Account" : "Create Account"}
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  {editingUser ? "Leave password blank to keep it unchanged." : "Set a temporary password for the new user."}
+                  {editingUser ? "Leave password blank to keep it unchanged." : "We’ll email a verification code; the user sets their password after verifying."}
                 </p>
               </div>
               <button type="button" onClick={closeForm} aria-label="Close form" className="rounded p-2 text-slate-500 hover:bg-slate-100">
@@ -346,7 +386,7 @@ const UserManagementPage = () => {
                   ))}
                 </select>
               </label>
-              <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+              {editingUser && <label className="grid gap-1.5 text-sm font-medium text-slate-700">
                 {editingUser ? "Reset password" : "Temporary password"}
                 <span className="relative">
                   <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -362,7 +402,7 @@ const UserManagementPage = () => {
                     className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
                   />
                 </span>
-              </label>
+              </label>}
               <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
                 <input
                   type="checkbox"

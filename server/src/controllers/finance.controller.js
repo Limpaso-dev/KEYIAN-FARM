@@ -1,5 +1,6 @@
 import Account from "../models/Account.js";
 import Transaction from "../models/Transaction.js";
+import { getApprovalSteps } from "../services/approvalWorkflow.service.js";
 
 // ===============================
 // ACCOUNTS
@@ -110,7 +111,13 @@ export const deleteAccount = async (req, res, next) => {
 
 export const createTransaction = async (req, res, next) => {
   try {
-    const transaction = await Transaction.create(req.body);
+    const { reference, transactionDate, type, account: accountId, amount, description } = req.body;
+    const account = await Account.findOne({ _id: accountId, status: "active", accountType: "asset" });
+    if (!account) return res.status(400).json({ success: false, message: "Select an active finance account" });
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) return res.status(400).json({ success: false, message: "Transaction amount must be greater than zero" });
+    const { policyId, steps } = await getApprovalSteps({ workflowType: "finance_transaction", department: "finance", amount: numericAmount });
+    const transaction = await Transaction.create({ reference, transactionDate, type, account: account._id, amount: numericAmount, description, createdBy: req.user._id, status: "pending", policy: policyId, approvalSteps: steps, history: [{ action: "submitted", by: req.user._id }] });
 
     res.status(201).json({
       success: true,
@@ -162,15 +169,7 @@ export const getTransactionById = async (req, res, next) => {
 
 export const updateTransaction = async (req, res, next) => {
   try {
-    const transaction =
-      await Transaction.findByIdAndUpdate(
-        req.params.id,
-        req.body,
-        {
-          new: true,
-          runValidators: true,
-        }
-      );
+    const transaction = await Transaction.findById(req.params.id);
 
     if (!transaction) {
       return res.status(404).json({
@@ -178,6 +177,14 @@ export const updateTransaction = async (req, res, next) => {
         message: "Transaction not found",
       });
     }
+
+    if (transaction.status === "posted") return res.status(409).json({ success: false, message: "Posted ledger transactions are immutable" });
+    if (transaction.history?.length) return res.status(409).json({ success: false, message: "Submitted transactions must be revised through the workflow inbox" });
+    if (["approved", "posted"].includes(req.body.status)) return res.status(403).json({ success: false, message: "Only an approval workflow can approve or post a financial transaction" });
+    for (const field of ["reference", "transactionDate", "type", "account", "amount", "description"]) {
+      if (req.body[field] !== undefined) transaction[field] = req.body[field];
+    }
+    await transaction.save();
 
     res.json({
       success: true,
@@ -191,8 +198,7 @@ export const updateTransaction = async (req, res, next) => {
 
 export const deleteTransaction = async (req, res, next) => {
   try {
-    const transaction =
-      await Transaction.findByIdAndDelete(req.params.id);
+    const transaction = await Transaction.findById(req.params.id);
 
     if (!transaction) {
       return res.status(404).json({
@@ -200,6 +206,10 @@ export const deleteTransaction = async (req, res, next) => {
         message: "Transaction not found",
       });
     }
+
+    if (transaction.status === "posted") return res.status(409).json({ success: false, message: "Posted ledger transactions cannot be deleted" });
+    if (transaction.history?.length) return res.status(409).json({ success: false, message: "Submitted transactions are retained for audit" });
+    await transaction.deleteOne();
 
     res.json({
       success: true,

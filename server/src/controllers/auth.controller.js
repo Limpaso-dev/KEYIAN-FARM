@@ -1,6 +1,45 @@
 import bcrypt from "bcryptjs";
+import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import {
+  isEmailConfigured,
+  sendVerificationEmail,
+} from "../services/email.service.js";
+
+const VERIFICATION_EXPIRY_MS = 10 * 60 * 1000;
+const VERIFICATION_RESEND_DELAY_MS = 60 * 1000;
+const MAX_VERIFICATION_ATTEMPTS = 5;
+
+const normalizeEmail = (email) => email.trim().toLowerCase();
+
+const isValidEmail = (email) =>
+  typeof email === "string" &&
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+const makeVerificationCode = () =>
+  String(randomInt(0, 1_000_000)).padStart(6, "0");
+
+const hashVerificationCode = (userId, code) =>
+  createHmac("sha256", process.env.JWT_SECRET)
+    .update(`${userId}:${code}`)
+    .digest("hex");
+
+const setVerificationCode = (user) => {
+  const code = makeVerificationCode();
+  user.emailVerificationCodeHash = hashVerificationCode(user._id, code);
+  user.emailVerificationExpiresAt = new Date(Date.now() + VERIFICATION_EXPIRY_MS);
+  user.emailVerificationAttempts = 0;
+  user.emailVerificationLastSentAt = new Date();
+  return code;
+};
+
+const codeMatches = (user, code) => {
+  const expectedHash = Buffer.from(user.emailVerificationCodeHash || "", "hex");
+  const providedHash = Buffer.from(hashVerificationCode(user._id, code), "hex");
+  return expectedHash.length === providedHash.length &&
+    timingSafeEqual(expectedHash, providedHash);
+};
 
 /*
  * Generate JWT
@@ -23,6 +62,10 @@ const sanitizeUser = (user) => {
   const userObject = user.toObject();
 
   delete userObject.password;
+  delete userObject.emailVerificationCodeHash;
+  delete userObject.emailVerificationExpiresAt;
+  delete userObject.emailVerificationAttempts;
+  delete userObject.emailVerificationLastSentAt;
 
   return userObject;
 };
@@ -74,6 +117,14 @@ export const login = async (req, res, next) => {
       });
     }
 
+    if (!user.emailVerified) {
+      return res.status(403).json({
+        success: false,
+        code: "EMAIL_NOT_VERIFIED",
+        message: "Verify your email address before signing in",
+      });
+    }
+
     const token = generateToken(user._id);
 
     return res.status(200).json({
@@ -115,7 +166,6 @@ export const createUser = async (req, res, next) => {
       name,
       email,
       phone,
-      password,
       role,
       department,
     } = req.body;
@@ -130,20 +180,11 @@ export const createUser = async (req, res, next) => {
     if (
       typeof name !== "string" ||
       !name.trim() ||
-      typeof email !== "string" ||
-      !email.trim() ||
-      typeof password !== "string"
+      !isValidEmail(email)
     ) {
       return res.status(400).json({
         success: false,
-        message: "Name, email and password are required",
-      });
-    }
-
-    if (password.length < 12) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be at least 12 characters",
+        message: "A valid name and email address are required",
       });
     }
 
@@ -162,7 +203,21 @@ export const createUser = async (req, res, next) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    if (department !== undefined && typeof department !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Department must be a string",
+      });
+    }
+
+    if (!isEmailConfigured()) {
+      return res.status(503).json({
+        success: false,
+        message: "Email verification is not configured. Configure SMTP settings before inviting users.",
+      });
+    }
+
+    const normalizedEmail = normalizeEmail(email);
 
     const existingUser = await User.findOne({
       email: normalizedEmail,
@@ -175,28 +230,203 @@ export const createUser = async (req, res, next) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(
-      password,
-      12
-    );
-
-    const user = await User.create({
+    const user = new User({
       name: name.trim(),
       email: normalizedEmail,
       phone: phone?.trim(),
-      password: hashedPassword,
+      password: await bcrypt.hash(randomBytes(48).toString("hex"), 12),
       role: role || "staff",
       department: department?.trim(),
       isActive: true,
+      emailVerified: false,
     });
+
+    const code = setVerificationCode(user);
+    await user.save();
+
+    let emailSent = true;
+    try {
+      await sendVerificationEmail({ to: user.email, name: user.name, code });
+    } catch (emailError) {
+      emailSent = false;
+      console.error("Failed to send user verification email:", emailError.message);
+    }
 
     return res.status(201).json({
       success: true,
-      message: "User created successfully",
+      emailSent,
+      message: emailSent
+        ? "Account invitation sent. The user must verify their email and set a password."
+        : "Account created but the verification email could not be sent. Check SMTP settings and resend the code.",
       user: sanitizeUser(user),
     });
   } catch (error) {
     next(error);
+  }
+};
+
+export const verifyUserEmail = async (req, res, next) => {
+  try {
+    const { email, code, password } = req.body;
+    if (
+      !isValidEmail(email) ||
+      typeof code !== "string" ||
+      !/^\d{6}$/.test(code) ||
+      typeof password !== "string" ||
+      password.length < 12
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter a valid email, six-digit code, and password of at least 12 characters",
+      });
+    }
+
+    const user = await User.findOne({ email: normalizeEmail(email) }).select(
+      "+emailVerificationCodeHash +emailVerificationExpiresAt +emailVerificationAttempts"
+    );
+
+    if (!user || user.emailVerified || !user.emailVerificationCodeHash) {
+      return res.status(400).json({
+        success: false,
+        message: "The verification code is invalid or expired",
+      });
+    }
+
+    if (user.emailVerificationAttempts >= MAX_VERIFICATION_ATTEMPTS) {
+      return res.status(429).json({
+        success: false,
+        message: "Too many incorrect codes. Request a new verification code.",
+      });
+    }
+
+    if (!user.emailVerificationExpiresAt || user.emailVerificationExpiresAt <= new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: "The verification code is invalid or expired",
+      });
+    }
+
+    if (!codeMatches(user, code)) {
+      user.emailVerificationAttempts += 1;
+      await user.save();
+      return res.status(400).json({
+        success: false,
+        message: "The verification code is invalid or expired",
+      });
+    }
+
+    user.password = await bcrypt.hash(password, 12);
+    user.emailVerified = true;
+    user.set("emailVerificationCodeHash", undefined);
+    user.set("emailVerificationExpiresAt", undefined);
+    user.set("emailVerificationAttempts", undefined);
+    user.set("emailVerificationLastSentAt", undefined);
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Email verified. You can now sign in.",
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const requestVerificationCode = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Enter a valid email address",
+      });
+    }
+
+    if (!isEmailConfigured()) {
+      return res.status(503).json({
+        success: false,
+        message: "Email delivery is currently unavailable",
+      });
+    }
+
+    const user = await User.findOne({
+      email: normalizeEmail(email),
+      emailVerified: false,
+    }).select("+emailVerificationLastSentAt");
+
+    if (
+      user &&
+      Date.now() - new Date(user.emailVerificationLastSentAt || 0).getTime() >=
+        VERIFICATION_RESEND_DELAY_MS
+    ) {
+      const code = setVerificationCode(user);
+      await user.save();
+      try {
+        await sendVerificationEmail({ to: user.email, name: user.name, code });
+      } catch (error) {
+        console.error("Failed to resend user verification email:", error.message);
+      }
+    }
+
+    return res.status(202).json({
+      success: true,
+      message: "If an unverified account exists for that email, a new code will be sent.",
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const resendUserVerification = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.id).select(
+      "+emailVerificationLastSentAt"
+    );
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    if (user.role === "super_admin" && req.user.role !== "super_admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only a super admin can manage a super-admin account",
+      });
+    }
+    if (user.emailVerified) {
+      return res.status(409).json({
+        success: false,
+        message: "This account's email is already verified",
+      });
+    }
+    if (!isEmailConfigured()) {
+      return res.status(503).json({
+        success: false,
+        message: "Email verification is not configured",
+      });
+    }
+
+    const elapsed = Date.now() - new Date(user.emailVerificationLastSentAt || 0).getTime();
+    if (elapsed < VERIFICATION_RESEND_DELAY_MS) {
+      return res.status(429).json({
+        success: false,
+        message: `Wait ${Math.ceil((VERIFICATION_RESEND_DELAY_MS - elapsed) / 1000)} seconds before resending`,
+      });
+    }
+
+    const code = setVerificationCode(user);
+    await user.save();
+    await sendVerificationEmail({ to: user.email, name: user.name, code });
+
+    return res.status(200).json({
+      success: true,
+      message: `A new verification code was sent to ${user.email}`,
+    });
+  } catch (error) {
+    console.error("Failed to resend user verification email:", error.message);
+    return res.status(502).json({
+      success: false,
+      message: "Unable to send the verification email. Check SMTP settings and try again.",
+    });
   }
 };
 
@@ -231,6 +461,7 @@ export const updateUser = async (req, res, next) => {
     }
 
     const isSelf = user._id.toString() === req.user._id.toString();
+    let emailChanged = false;
     if (user.role === "super_admin" && req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
@@ -266,13 +497,13 @@ export const updateUser = async (req, res, next) => {
     }
 
     if (req.body.email !== undefined) {
-      if (typeof req.body.email !== "string" || !req.body.email.trim()) {
+      if (!isValidEmail(req.body.email)) {
         return res.status(400).json({
           success: false,
           message: "A valid email address is required",
         });
       }
-      const email = req.body.email.trim().toLowerCase();
+      const email = normalizeEmail(req.body.email);
       const duplicate = await User.findOne({
         email,
         _id: { $ne: user._id },
@@ -283,7 +514,17 @@ export const updateUser = async (req, res, next) => {
           message: "User with this email already exists",
         });
       }
-      user.email = email;
+      if (email !== user.email) {
+        if (!isEmailConfigured()) {
+          return res.status(503).json({
+            success: false,
+            message: "Email verification is not configured. The email address was not changed.",
+          });
+        }
+        emailChanged = true;
+        user.email = email;
+        user.emailVerified = false;
+      }
     }
 
     if (req.body.phone !== undefined) {
@@ -337,11 +578,32 @@ export const updateUser = async (req, res, next) => {
       user.password = await bcrypt.hash(req.body.password, 12);
     }
 
+    const verificationCode = emailChanged ? setVerificationCode(user) : null;
     await user.save();
+
+    let emailSent = null;
+    if (emailChanged) {
+      try {
+        await sendVerificationEmail({
+          to: user.email,
+          name: user.name,
+          code: verificationCode,
+        });
+        emailSent = true;
+      } catch (emailError) {
+        emailSent = false;
+        console.error("Failed to send updated email verification:", emailError.message);
+      }
+    }
 
     return res.status(200).json({
       success: true,
-      message: "User updated successfully",
+      emailSent,
+      message: emailChanged
+        ? emailSent
+          ? "Email updated. The user must verify the new address before signing in."
+          : "Email updated but verification email could not be sent. Check SMTP settings and resend the code."
+        : "User updated successfully",
       user: sanitizeUser(user),
     });
   } catch (error) {

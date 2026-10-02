@@ -36,6 +36,7 @@ const userSchema = new mongoose.Schema(
         "finance",
         "hr",
         "procurement",
+        "stores",
         "livestock",
         "dairy",
         "laboratory",
@@ -56,6 +57,32 @@ const userSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+
+    emailVerified: {
+      type: Boolean,
+      default: true,
+    },
+
+    emailVerificationCodeHash: {
+      type: String,
+      select: false,
+    },
+
+    emailVerificationExpiresAt: {
+      type: Date,
+      select: false,
+    },
+
+    emailVerificationAttempts: {
+      type: Number,
+      default: 0,
+      select: false,
+    },
+
+    emailVerificationLastSentAt: {
+      type: Date,
+      select: false,
     },
   },
   {

@@ -12,10 +12,13 @@ import {
   getPurchaseOrderById,
   updatePurchaseOrder,
   deletePurchaseOrder,
+  placePurchaseOrder,
 } from "../controllers/procurement.controller.js";
 
 import { protect } from "../middleware/auth.middleware.js";
 import { authorizeModule } from "../middleware/role.middleware.js";
+import { listGoodsReceipts, receivePurchaseOrder } from "../controllers/receipt.controller.js";
+import { listSupplierInvoices, submitSupplierInvoice } from "../controllers/invoice.controller.js";
 
 const router = express.Router();
 
@@ -52,11 +55,17 @@ router.put(
   authorizeModule("procurement"),
   updatePurchaseOrder
 );
+router.post("/purchase-orders/:id/place", authorizeModule("procurement"), placePurchaseOrder);
 
 router.delete(
   "/purchase-orders/:id",
   authorizeModule("procurement"),
   deletePurchaseOrder
 );
+
+router.get("/goods-receipts", authorizeModule("inventory"), listGoodsReceipts);
+router.post("/purchase-orders/:orderId/receive", authorizeModule("inventory"), receivePurchaseOrder);
+router.get("/supplier-invoices", authorizeModule("procurement"), listSupplierInvoices);
+router.post("/supplier-invoices", authorizeModule("procurement"), submitSupplierInvoice);
 
 export default router;

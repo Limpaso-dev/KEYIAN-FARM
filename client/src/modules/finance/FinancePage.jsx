@@ -2,10 +2,12 @@ import { useState } from "react";
 import {
   WalletCards,
   Receipt,
+  BadgeDollarSign,
 } from "lucide-react";
 
 import AccountsPage from "./AccountsPage";
 import TransactionsPage from "./TransactionsPage";
+import SupplierPaymentsPage from "./SupplierPaymentsPage";
 
 const FinancePage = () => {
   const [activeTab, setActiveTab] = useState("accounts");
@@ -40,6 +42,8 @@ const FinancePage = () => {
             Accounts
           </button>
 
+          <button type="button" onClick={() => setActiveTab("supplier-payments")} className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${activeTab === "supplier-payments" ? "bg-primary-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}><BadgeDollarSign size={18}/>Supplier Payments</button>
+
           <button
             type="button"
             onClick={() => setActiveTab("transactions")}
@@ -61,6 +65,7 @@ const FinancePage = () => {
       {activeTab === "transactions" && (
         <TransactionsPage />
       )}
+      {activeTab === "supplier-payments" && <SupplierPaymentsPage />}
     </div>
   );
 };

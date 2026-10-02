@@ -1,0 +1,49 @@
+import { randomInt } from "node:crypto";
+import MedicalBill from "../models/MedicalBill.js";
+import MedicalVisit from "../models/MedicalVisit.js";
+import { getApprovalSteps } from "../services/approvalWorkflow.service.js";
+
+export const listMedicalBills = async (req, res, next) => {
+  try {
+    const filter = ["finance", "admin", "super_admin", "manager"].includes(req.user.role)
+      ? {}
+      : { createdBy: req.user._id };
+    const bills = await MedicalBill.find(filter)
+      .populate("patient", "patientNumber")
+      .populate("visit", "visitDate visitType")
+      .populate("createdBy", "name role")
+      .populate("history.by", "name role")
+      .sort({ createdAt: -1 });
+    res.json({ success: true, count: bills.length, data: bills });
+  } catch (error) { next(error); }
+};
+
+export const createMedicalBill = async (req, res, next) => {
+  try {
+    if (!["doctor", "nurse", "admin", "super_admin"].includes(req.user.role)) return res.status(403).json({ success: false, message: "Only clinical staff can create a patient bill" });
+    const visit = await MedicalVisit.findById(req.body.visit);
+    if (!visit) return res.status(404).json({ success: false, message: "Medical visit not found" });
+    if (visit.status === "cancelled") return res.status(409).json({ success: false, message: "A cancelled visit cannot be billed" });
+    if (await MedicalBill.exists({ visit: visit._id, status: { $nin: ["rejected", "returned"] } })) {
+      return res.status(409).json({ success: false, message: "This visit already has an active bill" });
+    }
+    if (!Array.isArray(req.body.items) || req.body.items.length === 0) return res.status(400).json({ success: false, message: "Add at least one charge" });
+    const items = req.body.items.map((item) => {
+      const description = String(item.description || "").trim();
+      const quantity = Number(item.quantity);
+      const unitPrice = Number(item.unitPrice);
+      if (!description || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Each charge needs a description, positive quantity, and valid rate");
+      return { description, quantity, unitPrice, total: quantity * unitPrice };
+    });
+    const totalAmount = items.reduce((sum, item) => sum + item.total, 0);
+    const { policyId, steps } = await getApprovalSteps({ workflowType: "hmis_bill", department: "hmis", amount: totalAmount });
+    const bill = await MedicalBill.create({
+      billNumber: `HB-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}-${randomInt(100, 1000)}`,
+      patient: visit.patient, visit: visit._id, createdBy: req.user._id,
+      items, totalAmount, status: "pending_approval", approvalSteps: steps,
+      policy: policyId, history: [{ action: "submitted", by: req.user._id }],
+    });
+    await bill.populate([{ path: "patient", select: "patientNumber" }, { path: "visit", select: "visitDate visitType" }, { path: "createdBy", select: "name role" }]);
+    res.status(201).json({ success: true, message: "Patient bill sent to Finance for approval", data: bill });
+  } catch (error) { res.status(error.status || 400).json({ success: false, message: error.message }); }
+};

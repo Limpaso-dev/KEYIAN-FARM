@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import Login from "../pages/auth/Login";
+import VerifyAccountPage from "../pages/auth/VerifyAccountPage";
 import Dashboard from "../pages/dashboard/Dashboard";
 
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -18,12 +19,14 @@ import PatientsPage from "../modules/hmis/PatientsPage";
 import MedicalVisitsPage from "../modules/hmis/MedicalVisitsPage";
 import MedicalLabPage from "../modules/hmis/MedicalLabPage";
 import PrescriptionsPage from "../modules/hmis/PrescriptionsPage";
+import MedicalBillingPage from "../modules/hmis/MedicalBillingPage";
 
 // Procurement
 import ProcurementPage from "../modules/procurement/ProcurementPage";
 
 // Inventory
 import InventoryPage from "../modules/inventory/InventoryPage";
+import GoodsReceivingPage from "../modules/inventory/GoodsReceivingPage";
 
 // Finance
 import FinancePage from "../modules/finance/FinancePage";
@@ -38,6 +41,7 @@ import RentalsPage from "../modules/rentals/RentalsPage";
 import SalesPage from "../modules/sales/SalesPage";
 import UserManagementPage from "../modules/users/UserManagementPage";
 import ReportsPage from "../modules/reports/ReportsPage";
+import WorkflowInboxPage from "../modules/workflows/WorkflowInboxPage";
 
 const AppRoutes = () => {
   return (
@@ -49,6 +53,11 @@ const AppRoutes = () => {
       <Route
         path="/login"
         element={<Login />}
+      />
+
+      <Route
+        path="/verify-account"
+        element={<VerifyAccountPage />}
       />
 
       {/* =====================================================
@@ -66,6 +75,8 @@ const AppRoutes = () => {
             path="/dashboard"
             element={<Dashboard />}
           />
+
+          <Route path="/workflows" element={<WorkflowInboxPage />} />
 
           {/* =================================================
               FARMERS
@@ -116,6 +127,7 @@ const AppRoutes = () => {
             path="/hmis"
             element={<HMISPage />}
           />
+          <Route path="/hmis/billing" element={<MedicalBillingPage />} />
 
           {/* ---------------- PATIENTS ---------------- */}
 
@@ -162,6 +174,7 @@ const AppRoutes = () => {
             path="/inventory"
             element={<InventoryPage />}
           />
+          <Route path="/inventory/receiving" element={<GoodsReceivingPage />} />
 
           {/* =================================================
               FINANCE
