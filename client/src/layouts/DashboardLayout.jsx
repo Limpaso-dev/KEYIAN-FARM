@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Outlet } from "react-router-dom";
 
 import Sidebar from "../components/common/Sidebar";
@@ -5,14 +6,19 @@ import Topbar from "../components/common/Topbar";
 import PageNavigation from "../components/common/PageNavigation";
 
 const DashboardLayout = () => {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-50">
-      <Sidebar />
+      <Sidebar
+        mobileOpen={mobileMenuOpen}
+        onClose={() => setMobileMenuOpen(false)}
+      />
 
-      <Topbar />
+      <Topbar onMenuClick={() => setMobileMenuOpen(true)} />
 
-      <main className="ml-64 flex flex-1 flex-col pt-20">
-        <div className="flex-1 p-6">
+      <main className="ml-0 flex flex-1 flex-col pt-20 lg:ml-64">
+        <div className="flex-1 p-4 sm:p-6">
           <PageNavigation />
           <Outlet />
         </div>

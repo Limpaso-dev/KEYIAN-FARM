@@ -62,7 +62,7 @@ const MilkTestPage = () => {
           getMilkCollections(),
         ]);
 
-      setTests(testsResponse.milkTests || []);
+      setTests(Array.isArray(testsResponse.data) ? testsResponse.data : []);
       setCollections(
         collectionsResponse.milkCollections || []
       );

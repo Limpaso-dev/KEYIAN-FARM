@@ -1,4 +1,4 @@
-import { Bell, CheckCheck, Search, X } from "lucide-react";
+import { Bell, CheckCheck, Menu, Search, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
@@ -6,7 +6,7 @@ import { getLifecycleTasks, getPurchaseRequests } from "../../services/workflow.
 
 const currency = (amount) => new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 2 }).format(Number(amount) || 0);
 
-const Topbar = () => {
+const Topbar = ({ onMenuClick = () => {} }) => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
@@ -76,10 +76,11 @@ const Topbar = () => {
   };
 
   return (
-    <header className="fixed left-64 right-0 top-0 z-30 h-20 border-b border-slate-200 bg-white">
-      <div className="flex h-full items-center justify-between px-6">
+    <header className="fixed left-0 right-0 top-0 z-30 h-20 border-b border-slate-200 bg-white lg:left-64">
+      <div className="flex h-full items-center justify-between gap-3 px-3 sm:px-6">
+        <button type="button" aria-label="Open navigation" onClick={onMenuClick} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"><Menu size={20} /></button>
         {/* Search */}
-        <div className="relative w-96">
+        <div className="relative w-full max-w-96">
           <Search
             size={18}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"

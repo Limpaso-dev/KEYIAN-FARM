@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
+  X,
   Users,
   Milk,
   Tractor,
@@ -122,7 +123,7 @@ const navigation = [
   },
 ];
 
-const Sidebar = () => {
+const Sidebar = ({ mobileOpen = false, onClose = () => {} }) => {
   const { logout, user } = useAuth();
   const [pendingTaskCount, setPendingTaskCount] = useState(0);
 
@@ -148,19 +149,22 @@ const Sidebar = () => {
   );
 
   return (
-    <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-slate-200 bg-white">
+    <>
+    {mobileOpen && <button type="button" aria-label="Close navigation" onClick={onClose} className="fixed inset-0 z-30 bg-slate-950/35 lg:hidden" />}
+    <aside className={`fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-[#dfe6dc] bg-[#edf2ea] transition-transform lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
       {/* Logo */}
-      <div className="flex h-20 items-center border-b border-slate-200 px-6">
+      <div className="flex h-20 items-center border-b border-slate-200 bg-white px-6">
         <img
           src="/keiyian%20llogo.png"
           alt="Keiyian Farmers Cooperative Society"
           className="h-12 w-full object-contain object-left"
         />
+        <button type="button" aria-label="Close navigation" onClick={onClose} className="ml-2 rounded p-2 text-slate-500 hover:bg-slate-100 lg:hidden"><X size={18} /></button>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-4">
-        <p className="mb-3 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+        <p className="mb-3 px-3 text-xs font-semibold uppercase tracking-wider text-emerald-950/50">
           Main Menu
         </p>
 
@@ -172,11 +176,12 @@ const Sidebar = () => {
               <NavLink
                 key={item.path}
                 to={item.path}
+                onClick={onClose}
                 className={({ isActive }) =>
                   `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
                     isActive
-                      ? "bg-primary-50 text-primary-700"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                      ? "bg-[#dce8d8] text-[#234b37]"
+                      : "text-slate-700 hover:bg-white/75 hover:text-[#234b37]"
                   }`
                 }
               >
@@ -191,11 +196,12 @@ const Sidebar = () => {
       </nav>
 
       {/* Bottom */}
-      <div className="border-t border-slate-200 p-4">
+      <div className="border-t border-[#d6dfd3] p-4">
         {canAccessModule(user?.role, "settings") && (
           <NavLink
             to="/settings"
-            className="mb-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-600 hover:bg-slate-50"
+            onClick={onClose}
+            className="mb-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-700 hover:bg-white/75 hover:text-[#234b37]"
           >
             <Users size={19} />
             User Management
@@ -203,14 +209,15 @@ const Sidebar = () => {
         )}
 
         <button
-          onClick={logout}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-red-600 hover:bg-red-50"
+          onClick={() => { onClose(); logout(); }}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-rose-700 hover:bg-rose-50 hover:text-rose-800"
         >
           <LogOut size={19} />
           Logout
         </button>
       </div>
     </aside>
+    </>
   );
 };
 

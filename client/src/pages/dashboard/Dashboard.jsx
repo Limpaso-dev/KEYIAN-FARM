@@ -1,247 +1,256 @@
-import { useEffect, useState } from "react";
 import {
+  ArrowDownRight,
+  ArrowRight,
   ArrowUpRight,
+  BarChart3,
+  Building2,
   CalendarDays,
-  ClipboardList,
-  DollarSign,
+  ChevronRight,
+  HeartPulse,
   Milk,
+  Package,
+  ShoppingCart,
+  Tractor,
   Users,
+  UserCog,
+  Wallet,
   Wheat,
 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
-import { getFarmers } from "../../services/farmer.service";
 import { useAuth } from "../../context/useAuth";
+import { getFarmers } from "../../services/farmer.service";
+import { getMilkCollections } from "../../services/milkCollection.service";
 import { canAccessModule } from "../../utils/permissions";
+import "./Dashboard.css";
+
+const formatNumber = (value) =>
+  new Intl.NumberFormat("en-KE", { maximumFractionDigits: 1 }).format(value);
+
+const getDateKey = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const sumLitres = (collections) =>
+  collections.reduce((total, collection) => total + Number(collection.quantityLitres || 0), 0);
 
 const Dashboard = () => {
   const { user } = useAuth();
-  const canReadFarmerData = canAccessModule(user?.role, "farmers");
+  const canReadFarmers = canAccessModule(user?.role, "farmers");
+  const canReadMilkCollections = canAccessModule(user?.role, "milkCollection");
   const [farmerCount, setFarmerCount] = useState(null);
-  const [totalShares, setTotalShares] = useState(null);
-  const [farmersLoading, setFarmersLoading] = useState(canReadFarmerData);
+  const [milkCollections, setMilkCollections] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!canReadFarmerData) return undefined;
-
     let current = true;
 
-    getFarmers()
-      .then((response) => {
-        const farmers = Array.isArray(response.data)
-          ? response.data
-          : Array.isArray(response.farmers)
-            ? response.farmers
-            : [];
+    const loadDashboardData = async () => {
+      const [farmersResult, collectionsResult] = await Promise.allSettled([
+        canReadFarmers ? getFarmers() : Promise.resolve(null),
+        canReadMilkCollections ? getMilkCollections() : Promise.resolve(null),
+      ]);
+
+      if (!current) return;
+
+      if (farmersResult.status === "fulfilled" && farmersResult.value) {
+        const response = farmersResult.value;
         const count = Number.isFinite(response.count)
           ? response.count
-          : farmers.length;
-        const shares = farmers.reduce(
-          (total, farmer) => total + Number(farmer.shares || 0),
-          0
-        );
+          : Array.isArray(response.data)
+            ? response.data.length
+            : null;
+        setFarmerCount(count);
+      }
 
-        if (current) {
-          setFarmerCount(count);
-          setTotalShares(shares);
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to load farmer count:", error);
-        if (current) {
-          setFarmerCount(null);
-          setTotalShares(null);
-        }
-      })
-      .finally(() => {
-        if (current) setFarmersLoading(false);
-      });
+      if (collectionsResult.status === "fulfilled" && collectionsResult.value) {
+        const records = collectionsResult.value.milkCollections;
+        setMilkCollections(Array.isArray(records) ? records : null);
+      }
+
+      setLoading(false);
+    };
+
+    loadDashboardData().catch((error) => {
+      console.error("Failed to load dashboard data:", error);
+      if (current) setLoading(false);
+    });
 
     return () => {
       current = false;
     };
-  }, [canReadFarmerData]);
+  }, [canReadFarmers, canReadMilkCollections]);
+
+  const today = new Date();
+  const greeting = today.getHours() < 12
+    ? "Good morning"
+    : today.getHours() < 18
+      ? "Good afternoon"
+      : "Good evening";
+  const todayKey = getDateKey(today);
+  const currentMonthKey = todayKey.slice(0, 7);
+
+  const collectionsToday = (milkCollections || []).filter((collection) =>
+    collection.collectionDate && getDateKey(new Date(collection.collectionDate)) === todayKey
+  );
+
+  const collectionsThisMonth = (milkCollections || []).filter((collection) =>
+    collection.collectionDate && getDateKey(new Date(collection.collectionDate)).startsWith(currentMonthKey)
+  );
+
+  const weeklyCollections = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date();
+      date.setHours(0, 0, 0, 0);
+      date.setDate(date.getDate() - (6 - index));
+      const dateKey = getDateKey(date);
+      const records = (milkCollections || []).filter((collection) =>
+        collection.collectionDate && getDateKey(new Date(collection.collectionDate)) === dateKey
+      );
+
+      return {
+        dateKey,
+        label: date.toLocaleDateString("en", { weekday: "short" }),
+        litres: sumLitres(records),
+      };
+    });
+
+  const recentCollections = [...(milkCollections || [])]
+    .sort((first, second) => new Date(second.collectionDate) - new Date(first.collectionDate))
+    .slice(0, 5);
+  const maxDailyMilk = Math.max(0, ...weeklyCollections.map((day) => day.litres));
 
   const stats = [
-    ...(canReadFarmerData
-      ? [
-    {
-      title: "Total Farmers",
-      value: farmersLoading ? "..." : farmerCount ?? "N/A",
-      change: "Registered farmers",
+    ...(canReadFarmers ? [{
+      label: "Registered farmers",
+      value: loading ? "..." : farmerCount === null ? "Unavailable" : formatNumber(farmerCount),
       icon: Users,
-    },
-      ]
-      : []),
-    {
-      title: "Total Shares",
-      value: farmersLoading ? "..." : totalShares ?? "N/A",
-      change: "Shares held by members",
-      icon: Users,
-    },
-  {
-    title: "Milk Collected",
-    value: "0 L",
-    change: "This month",
-    icon: Milk,
-  },
-  {
-    title: "Revenue",
-    value: "KES 0",
-    change: "This month",
-    icon: DollarSign,
-  },
-  {
-    title: "Active Employees",
-    value: "0",
-    change: "Current employees",
-    icon: ClipboardList,
-  },
+      tone: "green",
+      note: "total registered members",
+    }] : []),
+    ...(canReadMilkCollections ? [{
+      label: "Milk collected today",
+      value: loading ? "..." : milkCollections === null ? "Unavailable" : `${formatNumber(sumLitres(collectionsToday))} L`,
+      icon: Milk,
+      tone: "gold",
+      note: "from recorded collections",
+    }, {
+      label: "Milk collected this month",
+      value: loading ? "..." : milkCollections === null ? "Unavailable" : `${formatNumber(sumLitres(collectionsThisMonth))} L`,
+      icon: Milk,
+      tone: "green",
+      note: "current calendar month",
+    }] : []),
+  ];
+
+  const workflows = [
+    { number: "01", name: "Milk to farmer payment", detail: "Collection → quality check → payout", icon: Milk, path: "/dairy", tag: "DAIRY", accent: "green" },
+    { number: "02", name: "Procurement to inventory", detail: "Request → approval → goods received", icon: ShoppingCart, path: "/procurement", tag: "SUPPLY CHAIN", accent: "gold" },
+    { number: "03", name: "Patient care to billing", detail: "Registration → consultation → invoice", icon: HeartPulse, path: "/hmis", tag: "MEDICAL CENTRE", accent: "coral" },
+    { number: "04", name: "Employee to payroll", detail: "People → payroll → finance", icon: Wallet, path: "/hr", tag: "PEOPLE & FINANCE", accent: "blue" },
+  ];
+
+  const departments = [
+    { label: "Farmers", icon: Users, path: "/farmers" },
+    { label: "Livestock", icon: Tractor, path: "/livestock" },
+    { label: "Dairy", icon: Milk, path: "/dairy" },
+    { label: "Agriculture", icon: Wheat, path: "/agriculture" },
+    { label: "Medical centre", icon: HeartPulse, path: "/hmis" },
+    { label: "Procurement", icon: ShoppingCart, path: "/procurement" },
+    { label: "Inventory", icon: Package, path: "/inventory" },
+    { label: "Finance", icon: Wallet, path: "/finance" },
+    { label: "HR & payroll", icon: UserCog, path: "/hr" },
+    { label: "Sales", icon: BarChart3, path: "/sales" },
+    { label: "Rentals", icon: Building2, path: "/rentals" },
   ];
 
   return (
-    <div>
-      {/* Header */}
-      <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+    <div className="keiyian-dashboard">
+      <section className="dashboard-heading">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            Dashboard
-          </h1>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Overview of Keiyian Cooperative operations.
-          </p>
+          <p className="dashboard-greeting">{greeting}, {user?.name || "there"}</p>
+          <h1>Cooperative overview</h1>
         </div>
-
-        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-600">
-          <CalendarDays size={17} />
-
-          <span>Today</span>
+        <div className="heading-tools">
+          <span className="dashboard-period"><CalendarDays size={16} /> {today.toLocaleDateString("en", { month: "long", year: "numeric" })}</span>
         </div>
-      </div>
+      </section>
 
-      {/* KPI Cards */}
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-5">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
+      <section className="metric-grid" aria-label="Cooperative key figures">
+        {stats.map(({ label, value, icon: Icon, tone, note }) => (
+          <article className="metric-item" key={label}>
+            <div className={`metric-icon ${tone}`}><Icon size={19} /></div>
+            <p className="metric-label">{label}</p>
+            <div className="metric-value-row"><strong>{value}</strong></div>
+            <p className="metric-note">{note}</p>
+          </article>
+        ))}
+      </section>
 
-          return (
-            <div
-              key={stat.title}
-              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-            >
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm font-medium text-slate-500">
-                    {stat.title}
-                  </p>
-
-                  <h2 className="mt-2 text-2xl font-bold text-slate-900">
-                    {stat.value}
-                  </h2>
-                </div>
-
-                <div className="rounded-lg bg-primary-50 p-3 text-primary-600">
-                  <Icon size={21} />
-                </div>
-              </div>
-
-              <p className="mt-4 text-xs text-slate-500">
-                {stat.change}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Main dashboard */}
-      <div className="mt-6 grid gap-6 xl:grid-cols-3">
-        {/* Operations */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6 xl:col-span-2">
-          <div className="mb-6">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Cooperative Overview
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Key operational areas will appear here as data is
-              connected.
-            </p>
+      {canReadMilkCollections && <div className="dashboard-content-grid">
+        <section className="production-panel">
+          <div className="section-heading">
+            <div><p className="eyebrow">RECORDED DAIRY OPERATIONS</p><h2>Milk collection</h2></div>
+            <Link to="/reports" className="text-link">View reports <ArrowRight size={15} /></Link>
           </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-lg bg-slate-50 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <div className="rounded-lg bg-green-100 p-2 text-green-600">
-                  <Milk size={20} />
-                </div>
-
-                <ArrowUpRight
-                  size={18}
-                  className="text-green-500"
-                />
-              </div>
-
-              <p className="text-sm text-slate-500">
-                Dairy Operations
-              </p>
-
-              <p className="mt-1 text-lg font-semibold text-slate-900">
-                Milk Collection
-              </p>
-            </div>
-
-            <div className="rounded-lg bg-slate-50 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <div className="rounded-lg bg-amber-100 p-2 text-amber-600">
-                  <Wheat size={20} />
-                </div>
-
-                <ArrowUpRight
-                  size={18}
-                  className="text-amber-500"
-                />
-              </div>
-
-              <p className="text-sm text-slate-500">
-                Agriculture
-              </p>
-
-              <p className="mt-1 text-lg font-semibold text-slate-900">
-                Tea & Sugarcane
-              </p>
-            </div>
+          <div className="production-summary">
+            <div><span className="summary-mark"><Milk size={17} /></span><span className="summary-label">COLLECTED TODAY</span></div>
+            <div className="production-total"><strong>{loading ? "..." : milkCollections === null ? "Unavailable" : formatNumber(sumLitres(collectionsToday))}</strong><span>litres</span></div>
           </div>
-        </div>
-
-        {/* Activity */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Recent Activity
-          </h2>
-
-          <p className="mt-1 text-sm text-slate-500">
-            System activity will appear here.
-          </p>
-
-          <div className="mt-6 flex flex-col items-center justify-center py-10 text-center">
-            <div className="rounded-full bg-slate-100 p-4">
-              <ClipboardList
-                size={24}
-                className="text-slate-400"
-              />
+          {milkCollections === null ? (
+            <p className="chart-unavailable">{loading ? "Loading collection totals..." : "Collection totals are unavailable."}</p>
+          ) : (
+            <div className="chart-area" role="img" aria-label={`Milk collected over the last seven days: ${weeklyCollections.map((day) => `${day.label} ${formatNumber(day.litres)} litres`).join(", ")}`}>
+              <div className="bar-chart">
+                {weeklyCollections.map((day, index) => (
+                  <div className="bar-column" key={day.dateKey} title={`${formatNumber(day.litres)} L`}><div className={`bar ${index === weeklyCollections.length - 1 ? "bar-current" : ""}`} style={{ height: `${maxDailyMilk ? day.litres / maxDailyMilk * 100 : 0}%` }} /><span>{day.label}</span></div>
+                ))}
+              </div>
             </div>
+          )}
+          <div className="production-footer"><span><span className="legend-dot" /> Last seven days</span><span>Recorded total <strong>{milkCollections === null ? "Unavailable" : `${formatNumber(weeklyCollections.reduce((total, day) => total + day.litres, 0))} L`}</strong></span></div>
+        </section>
 
-            <p className="mt-4 text-sm font-medium text-slate-600">
-              No recent activity
-            </p>
-
-            <p className="mt-1 text-xs text-slate-400">
-              Activity will appear once users start working
-              in the system.
-            </p>
+        <section className="activity-panel">
+          <div className="section-heading">
+            <div><p className="eyebrow">LIVE RECORDS</p><h2>Recent milk collections</h2></div>
           </div>
+          <div className="activity-list">
+            {loading ? <p className="activity-empty">Loading recorded collections...</p> : milkCollections === null ? <p className="activity-empty">Collection records are unavailable.</p> : recentCollections.length === 0 ? <p className="activity-empty">No milk collections recorded yet.</p> : recentCollections.map((collection) => (
+              <div className="activity-row" key={collection._id}>
+                <span className="activity-icon green"><Milk size={15} /></span>
+                <div className="activity-copy"><strong>{collection.farmer ? `${collection.farmer.firstName || ""} ${collection.farmer.lastName || ""}`.trim() : "Farmer record"}</strong><span>{collection.collectionCentre} · {new Date(collection.collectionDate).toLocaleDateString("en-KE", { day: "2-digit", month: "short" })}</span></div>
+                <time>{formatNumber(Number(collection.quantityLitres || 0))} L</time>
+              </div>
+            ))}
+          </div>
+          <Link to="/dairy" className="activity-link">View dairy records <ChevronRight size={16} /></Link>
+        </section>
+      </div>}
+
+      <section className="workflow-section">
+        <div className="section-heading">
+          <div><p className="eyebrow">FROM RECORDING TO RESULT</p><h2>See how the work connects</h2></div>
+          <span className="section-caption">Choose a workflow to explore</span>
         </div>
-      </div>
+        <div className="workflow-grid">
+          {workflows.map(({ number, name, detail, icon: Icon, path, tag, accent }) => (
+            <Link to={path} className={`workflow-link ${accent}`} key={number}>
+              <div className="workflow-top"><span className="workflow-number">{number}</span><Icon size={19} /><span className="workflow-tag">{tag}</span></div>
+              <strong>{name}</strong>
+              <span className="workflow-detail">{detail}</span>
+              <span className="workflow-go">Explore workflow <ArrowUpRight size={15} /></span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
+      <section className="department-section">
+        <div className="section-heading"><div><p className="eyebrow">ONE SHARED PLATFORM</p><h2>Across every department</h2></div><span className="section-caption">Connected data. Clear decisions.</span></div>
+        <div className="department-list">
+          {departments.map(({ label, icon: Icon, path }) => <Link to={path} className="department-link" key={label}><Icon size={17} /><span>{label}</span><ArrowDownRight size={14} /></Link>)}
+        </div>
+      </section>
+
     </div>
   );
 };
