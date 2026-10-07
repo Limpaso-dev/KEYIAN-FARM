@@ -26,9 +26,21 @@ const initialForm = {
   firstName: "",
   lastName: "",
   dateOfBirth: "",
+  estimatedAge: "",
   sex: "",
   phone: "",
+  nationalId: "",
   address: "",
+  payer: "cash",
+  payerDetails: {
+    scheme: "",
+    memberNumber: "",
+    principalMember: "",
+    validityStart: "",
+    validityEnd: "",
+    limit: "",
+  },
+  consentAcknowledged: false,
   nextOfKin: {
     name: "",
     phone: "",
@@ -152,9 +164,25 @@ const PatientsPage = () => {
       dateOfBirth: patient.dateOfBirth
         ? patient.dateOfBirth.substring(0, 10)
         : "",
+      estimatedAge: patient.estimatedAge || "",
       sex: patient.sex || "",
       phone: patient.phone || "",
+      nationalId: patient.nationalId || "",
       address: patient.address || "",
+      payer: patient.payer || "cash",
+      payerDetails: {
+        scheme: patient.payerDetails?.scheme || "",
+        memberNumber: patient.payerDetails?.memberNumber || "",
+        principalMember: patient.payerDetails?.principalMember || "",
+        validityStart: patient.payerDetails?.validityStart
+          ? patient.payerDetails.validityStart.substring(0, 10)
+          : "",
+        validityEnd: patient.payerDetails?.validityEnd
+          ? patient.payerDetails.validityEnd.substring(0, 10)
+          : "",
+        limit: patient.payerDetails?.limit || "",
+      },
+      consentAcknowledged: Boolean(patient.consentAcknowledged),
       nextOfKin: {
         name: patient.nextOfKin?.name || "",
         phone: patient.nextOfKin?.phone || "",
@@ -190,9 +218,28 @@ const PatientsPage = () => {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
         dateOfBirth: form.dateOfBirth || undefined,
+        estimatedAge: form.estimatedAge
+          ? Number(form.estimatedAge)
+          : undefined,
         sex: form.sex || undefined,
         phone: form.phone.trim(),
+        nationalId: form.nationalId.trim(),
         address: form.address.trim(),
+        payer: form.payer || "cash",
+        payerDetails: {
+          scheme: form.payerDetails.scheme.trim(),
+          memberNumber: form.payerDetails.memberNumber.trim(),
+          principalMember:
+            form.payerDetails.principalMember.trim(),
+          validityStart:
+            form.payerDetails.validityStart || undefined,
+          validityEnd:
+            form.payerDetails.validityEnd || undefined,
+          limit: form.payerDetails.limit
+            ? Number(form.payerDetails.limit)
+            : undefined,
+        },
+        consentAcknowledged: Boolean(form.consentAcknowledged),
         nextOfKin: {
           name: form.nextOfKin.name.trim(),
           phone: form.nextOfKin.phone.trim(),
@@ -769,17 +816,13 @@ const PatientFormModal = ({
               </h3>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <FormField
-                  label="Patient Number"
-                  required
-                >
+                <FormField label="Patient Number">
                   <input
                     name="patientNumber"
                     value={form.patientNumber}
                     onChange={onChange}
                     className="form-input"
-                    placeholder="e.g. P00001"
-                    required
+                    placeholder="Auto-generated if left blank"
                   />
                 </FormField>
 
@@ -845,6 +888,19 @@ const PatientFormModal = ({
                   />
                 </FormField>
 
+                <FormField label="Estimated Age">
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    name="estimatedAge"
+                    value={form.estimatedAge}
+                    onChange={onChange}
+                    className="form-input"
+                    placeholder="Age in years"
+                  />
+                </FormField>
+
                 <FormField label="Sex">
                   <select
                     name="sex"
@@ -878,6 +934,16 @@ const PatientFormModal = ({
                   />
                 </FormField>
 
+                <FormField label="National ID">
+                  <input
+                    name="nationalId"
+                    value={form.nationalId}
+                    onChange={onChange}
+                    className="form-input"
+                    placeholder="National ID number"
+                  />
+                </FormField>
+
                 <FormField label="Address">
                   <input
                     name="address"
@@ -887,16 +953,162 @@ const PatientFormModal = ({
                     placeholder="Residential address"
                   />
                 </FormField>
+
+                <FormField label="Payer Type">
+                  <select
+                    name="payer"
+                    value={form.payer}
+                    onChange={onChange}
+                    className="form-input"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="insurance">
+                      Insurance
+                    </option>
+                    <option value="corporate">
+                      Corporate
+                    </option>
+                    <option value="scheme">Scheme</option>
+                  </select>
+                </FormField>
+
+                <FormField label="Scheme/Provider">
+                  <input
+                    name="scheme"
+                    value={form.payerDetails.scheme}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        payerDetails: {
+                          ...previous.payerDetails,
+                          scheme: event.target.value,
+                        },
+                      }))
+                    }
+                    className="form-input"
+                    placeholder="e.g. NHIF / Insurance"
+                  />
+                </FormField>
+
+                <FormField label="Member Number">
+                  <input
+                    name="memberNumber"
+                    value={form.payerDetails.memberNumber}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        payerDetails: {
+                          ...previous.payerDetails,
+                          memberNumber: event.target.value,
+                        },
+                      }))
+                    }
+                    className="form-input"
+                    placeholder="Member number"
+                  />
+                </FormField>
+
+                <FormField label="Principal Member">
+                  <input
+                    name="principalMember"
+                    value={form.payerDetails.principalMember}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        payerDetails: {
+                          ...previous.payerDetails,
+                          principalMember: event.target.value,
+                        },
+                      }))
+                    }
+                    className="form-input"
+                    placeholder="Principal member name"
+                  />
+                </FormField>
+
+                <FormField label="Validity Start">
+                  <input
+                    type="date"
+                    name="validityStart"
+                    value={form.payerDetails.validityStart}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        payerDetails: {
+                          ...previous.payerDetails,
+                          validityStart: event.target.value,
+                        },
+                      }))
+                    }
+                    className="form-input"
+                  />
+                </FormField>
+
+                <FormField label="Validity End">
+                  <input
+                    type="date"
+                    name="validityEnd"
+                    value={form.payerDetails.validityEnd}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        payerDetails: {
+                          ...previous.payerDetails,
+                          validityEnd: event.target.value,
+                        },
+                      }))
+                    }
+                    className="form-input"
+                  />
+                </FormField>
+
+                <FormField label="Coverage Limit">
+                  <input
+                    type="number"
+                    min="0"
+                    name="limit"
+                    value={form.payerDetails.limit}
+                    onChange={(event) =>
+                      setForm((previous) => ({
+                        ...previous,
+                        payerDetails: {
+                          ...previous.payerDetails,
+                          limit: event.target.value,
+                        },
+                      }))
+                    }
+                    className="form-input"
+                    placeholder="Optional limit"
+                  />
+                </FormField>
               </div>
             </section>
 
-            {/* Next of Kin */}
+            {/* Consent & Next of Kin */}
             <section className="border-t border-slate-200 pt-6">
               <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-700">
-                Next of Kin
+                Consent & Next of Kin
               </h3>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="md:col-span-3">
+                  <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={form.consentAcknowledged}
+                      onChange={(event) =>
+                        setForm((previous) => ({
+                          ...previous,
+                          consentAcknowledged:
+                            event.target.checked,
+                        }))
+                      }
+                      className="h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                    />
+                    Patient consent has been explained and acknowledged.
+                  </label>
+                </div>
+
                 <FormField label="Name">
                   <input
                     name="name"

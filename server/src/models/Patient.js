@@ -25,6 +25,8 @@ const patientSchema = new mongoose.Schema(
 
     dateOfBirth: Date,
 
+    estimatedAge: Number,
+
     sex: {
       type: String,
       enum: ["male", "female", "other"],
@@ -36,6 +38,28 @@ const patientSchema = new mongoose.Schema(
 
     nationalId: String,
 
+    payer: {
+      type: String,
+      enum: ["cash", "insurance", "corporate", "scheme"],
+      default: "cash",
+    },
+
+    payerDetails: {
+      scheme: String,
+      memberNumber: String,
+      principalMember: String,
+      validityStart: Date,
+      validityEnd: Date,
+      limit: Number,
+    },
+
+    isTemporary: {
+      type: Boolean,
+      default: false,
+    },
+
+    temporaryId: String,
+
     status: {
       type: String,
       enum: ["registered", "in_queue", "in_consultation", "closed", "voided"],
@@ -46,6 +70,8 @@ const patientSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
+    consentDate: Date,
 
     nextOfKin: {
       name: String,

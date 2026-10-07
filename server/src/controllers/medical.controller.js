@@ -3,6 +3,11 @@ import MedicalVisit from "../models/MedicalVisit.js";
 import MedicalLabResult from "../models/MedicalLabResult.js";
 import Prescription from "../models/Prescription.js";
 import { logAudit, softDeleteRecord } from "../utils/globalRules.js";
+import {
+  findPossibleDuplicates,
+  generatePatientNumber,
+  normalizePatientRegistration,
+} from "../utils/patientRegistration.js";
 
 // =====================================================
 // PATIENTS
@@ -10,7 +15,43 @@ import { logAudit, softDeleteRecord } from "../utils/globalRules.js";
 
 export const createPatient = async (req, res, next) => {
   try {
-    const patient = await Patient.create(req.body);
+    const normalizedPayload = normalizePatientRegistration(req.body);
+
+    if (!normalizedPayload.firstName || !normalizedPayload.lastName) {
+      return res.status(400).json({
+        success: false,
+        message: "Patient first name and last name are required.",
+      });
+    }
+
+    if (!normalizedPayload.consentAcknowledged) {
+      return res.status(400).json({
+        success: false,
+        message: "Patient consent must be acknowledged before registration.",
+      });
+    }
+
+    const existingPatients = await Patient.find({
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    }).lean();
+
+    const duplicates = findPossibleDuplicates(existingPatients, normalizedPayload);
+
+    if (duplicates.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "Possible duplicate patient record detected.",
+        duplicates,
+      });
+    }
+
+    const patientPayload = {
+      ...normalizedPayload,
+      patientNumber: normalizedPayload.patientNumber || generatePatientNumber(),
+      consentDate: normalizedPayload.consentAcknowledged ? new Date() : undefined,
+    };
+
+    const patient = await Patient.create(patientPayload);
 
     await logAudit({
       actor: req.user,
@@ -102,9 +143,39 @@ export const updatePatient = async (req, res, next) => {
       });
     }
 
+    const normalizedPayload = normalizePatientRegistration(req.body);
+
+    if (!normalizedPayload.firstName || !normalizedPayload.lastName) {
+      return res.status(400).json({
+        success: false,
+        message: "Patient first name and last name are required.",
+      });
+    }
+
+    const patientLookup = await Patient.find({
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    }).lean();
+
+    const otherDuplicates = findPossibleDuplicates(
+      patientLookup.filter((patient) => patient._id.toString() !== req.params.id),
+      normalizedPayload
+    );
+
+    if (otherDuplicates.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: "This update would create a duplicate patient record.",
+        duplicates: otherDuplicates,
+      });
+    }
+
     const patient = await Patient.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      {
+        ...normalizedPayload,
+        patientNumber: normalizedPayload.patientNumber || existingPatient.patientNumber,
+        consentDate: normalizedPayload.consentAcknowledged ? new Date() : existingPatient.consentDate,
+      },
       {
         new: true,
         runValidators: true,
