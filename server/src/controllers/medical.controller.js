@@ -8,6 +8,10 @@ import {
   generatePatientNumber,
   normalizePatientRegistration,
 } from "../utils/patientRegistration.js";
+import {
+  generateVisitNumber,
+  normalizeVisitStatus,
+} from "../utils/visitLifecycle.js";
 
 // =====================================================
 // PATIENTS
@@ -271,6 +275,8 @@ export const createMedicalVisit = async (
   try {
     const payload = {
       ...req.body,
+      status: normalizeVisitStatus(req.body?.status),
+      visitNumber: req.body?.visitNumber || generateVisitNumber(),
     };
 
     // Automatically assign logged-in user as clinician
@@ -387,9 +393,14 @@ export const updateMedicalVisit = async (
       });
     }
 
+    const payload = {
+      ...req.body,
+      status: normalizeVisitStatus(req.body?.status),
+    };
+
     const visit = await MedicalVisit.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      payload,
       {
         new: true,
         runValidators: true,

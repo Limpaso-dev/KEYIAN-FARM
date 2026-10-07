@@ -28,7 +28,7 @@ const initialForm = {
   clinicalNotes: "",
   diagnosis: "",
   treatmentPlan: "",
-  status: "open",
+  status: "registered",
 };
 
 const MedicalVisitsPage = () => {
@@ -150,7 +150,7 @@ const MedicalVisitsPage = () => {
       diagnosis: visit.diagnosis || "",
       treatmentPlan:
         visit.treatmentPlan || "",
-      status: visit.status || "open",
+      status: visit.status || "registered",
     });
 
     setShowForm(true);
@@ -338,12 +338,23 @@ const MedicalVisitsPage = () => {
 
   const totalVisits = visits.length;
 
-  const openVisits = visits.filter(
-    (visit) => visit.status === "open"
+  const openVisits = visits.filter((visit) =>
+    [
+      "registered",
+      "waiting_for_triage",
+      "in_triage",
+      "waiting_for_doctor",
+      "in_consultation",
+      "awaiting_investigations",
+      "awaiting_results",
+      "awaiting_pharmacy",
+      "admitted",
+      "discharge_pending",
+    ].includes(visit.status)
   ).length;
 
-  const completedVisits = visits.filter(
-    (visit) => visit.status === "completed"
+  const completedVisits = visits.filter((visit) =>
+    ["cleared", "closed"].includes(visit.status)
   ).length;
 
   const emergencyVisits = visits.filter(
@@ -479,13 +490,18 @@ const MedicalVisitsPage = () => {
             <option value="all">
               All Statuses
             </option>
-            <option value="open">Open</option>
-            <option value="completed">
-              Completed
+            <option value="registered">Registered</option>
+            <option value="waiting_for_triage">
+              Waiting for Triage
             </option>
-            <option value="cancelled">
-              Cancelled
+            <option value="in_consultation">
+              In Consultation
             </option>
+            <option value="awaiting_results">
+              Awaiting Results
+            </option>
+            <option value="cleared">Cleared</option>
+            <option value="cancelled">Cancelled</option>
           </select>
         </div>
       </div>
@@ -798,14 +814,50 @@ const VisitFormModal = ({
                     onChange={onChange}
                     className="form-input"
                   >
-                    <option value="open">
-                      Open
+                    <option value="registered">
+                      Registered
                     </option>
-                    <option value="completed">
-                      Completed
+                    <option value="waiting_for_triage">
+                      Waiting for Triage
+                    </option>
+                    <option value="in_triage">
+                      In Triage
+                    </option>
+                    <option value="waiting_for_doctor">
+                      Waiting for Doctor
+                    </option>
+                    <option value="in_consultation">
+                      In Consultation
+                    </option>
+                    <option value="awaiting_investigations">
+                      Awaiting Investigations
+                    </option>
+                    <option value="awaiting_results">
+                      Awaiting Results
+                    </option>
+                    <option value="awaiting_pharmacy">
+                      Awaiting Pharmacy
+                    </option>
+                    <option value="admitted">
+                      Admitted
+                    </option>
+                    <option value="discharge_pending">
+                      Discharge Pending
+                    </option>
+                    <option value="cleared">
+                      Cleared
+                    </option>
+                    <option value="closed">
+                      Closed
                     </option>
                     <option value="cancelled">
                       Cancelled
+                    </option>
+                    <option value="referred">
+                      Referred
+                    </option>
+                    <option value="left_without_being_seen">
+                      Left without being seen
                     </option>
                   </select>
                 </FormField>
@@ -1333,20 +1385,90 @@ const VisitTypeBadge = ({ type }) => {
 
 const StatusBadge = ({ status }) => {
   const config = {
-    open: {
-      label: "Open",
+    registered: {
+      label: "Registered",
+      className:
+        "bg-sky-50 text-sky-700",
+    },
+    waiting_for_triage: {
+      label: "Waiting for Triage",
       className:
         "bg-amber-50 text-amber-700",
     },
-    completed: {
-      label: "Completed",
+    in_triage: {
+      label: "In Triage",
+      className:
+        "bg-orange-50 text-orange-700",
+    },
+    waiting_for_doctor: {
+      label: "Waiting for Doctor",
+      className:
+        "bg-yellow-50 text-yellow-700",
+    },
+    in_consultation: {
+      label: "In Consultation",
+      className:
+        "bg-indigo-50 text-indigo-700",
+    },
+    awaiting_investigations: {
+      label: "Awaiting Investigations",
+      className:
+        "bg-violet-50 text-violet-700",
+    },
+    awaiting_results: {
+      label: "Awaiting Results",
+      className:
+        "bg-fuchsia-50 text-fuchsia-700",
+    },
+    awaiting_pharmacy: {
+      label: "Awaiting Pharmacy",
+      className:
+        "bg-pink-50 text-pink-700",
+    },
+    admitted: {
+      label: "Admitted",
+      className:
+        "bg-red-50 text-red-700",
+    },
+    discharge_pending: {
+      label: "Discharge Pending",
+      className:
+        "bg-rose-50 text-rose-700",
+    },
+    cleared: {
+      label: "Cleared",
       className:
         "bg-emerald-50 text-emerald-700",
+    },
+    closed: {
+      label: "Closed",
+      className:
+        "bg-slate-100 text-slate-700",
     },
     cancelled: {
       label: "Cancelled",
       className:
         "bg-slate-100 text-slate-600",
+    },
+    referred: {
+      label: "Referred",
+      className:
+        "bg-cyan-50 text-cyan-700",
+    },
+    left_without_being_seen: {
+      label: "Left without being seen",
+      className:
+        "bg-gray-100 text-gray-700",
+    },
+    voided: {
+      label: "Voided",
+      className:
+        "bg-red-100 text-red-700",
+    },
+    deceased: {
+      label: "Deceased",
+      className:
+        "bg-black text-white",
     },
   };
 
