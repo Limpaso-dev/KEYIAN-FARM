@@ -23,6 +23,9 @@ import {
   normalizeDischargeSummary,
 } from "../utils/admission.js";
 import {
+  buildExceptionQueue,
+} from "../utils/exceptions.js";
+import {
   normalizeLabStatus,
 } from "../utils/lab.js";
 import {
@@ -1113,6 +1116,37 @@ export const deletePrescription = async (
   }
 };
 
+export const getMedicalExceptions = async (req, res, next) => {
+  try {
+    const visits = await MedicalVisit.find({
+      status: {
+        $in: [
+          "left_without_being_seen",
+          "referred",
+          "cancelled",
+          "voided",
+          "deceased",
+          "manual_back_entry",
+          "downtime_entry",
+        ],
+      },
+    })
+      .populate("patient", "firstName lastName patientNumber")
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    const queue = buildExceptionQueue(visits);
+
+    return res.status(200).json({
+      success: true,
+      count: queue.length,
+      data: queue,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 export const getMedicalSummary = async (req, res, next) => {
   try {
     const role = req.user.role;
@@ -1142,7 +1176,7 @@ export const getMedicalSummary = async (req, res, next) => {
     );
     const startOfTomorrow = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
 
-    const [patients, todaysVisits, pendingLab, prescriptions] = await Promise.all([
+    const [patients, todaysVisits, pendingLab, prescriptions, exceptions] = await Promise.all([
       canReadPatients ? Patient.countDocuments() : null,
       canReadVisits
         ? MedicalVisit.countDocuments({
@@ -1154,6 +1188,21 @@ export const getMedicalSummary = async (req, res, next) => {
         ? MedicalLabResult.countDocuments({ status: "pending" })
         : null,
       canReadPrescriptions ? Prescription.countDocuments() : null,
+      canReadVisits
+        ? MedicalVisit.countDocuments({
+            status: {
+              $in: [
+                "left_without_being_seen",
+                "referred",
+                "cancelled",
+                "voided",
+                "deceased",
+                "manual_back_entry",
+                "downtime_entry",
+              ],
+            },
+          })
+        : null,
     ]);
 
     return res.status(200).json({
@@ -1163,6 +1212,7 @@ export const getMedicalSummary = async (req, res, next) => {
         todaysVisits,
         pendingLab,
         prescriptions,
+        exceptions,
       },
     });
   } catch (error) {
