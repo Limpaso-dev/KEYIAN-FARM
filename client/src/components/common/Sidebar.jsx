@@ -153,7 +153,7 @@ const Sidebar = ({ mobileOpen = false, onClose = () => {} }) => {
     {mobileOpen && <button type="button" aria-label="Close navigation" onClick={onClose} className="fixed inset-0 z-30 bg-slate-950/35 lg:hidden" />}
     <aside className={`fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-[#dfe6dc] bg-[#edf2ea] transition-transform lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
       {/* Logo */}
-      <div className="flex h-20 items-center border-b border-slate-200 bg-white px-6">
+      <div className="flex h-20 items-center border-b border-[#dfe6dc] bg-[#f8faf6] px-6">
         <img
           src="/keiyian%20llogo.png"
           alt="Keiyian Farmers Cooperative Society"

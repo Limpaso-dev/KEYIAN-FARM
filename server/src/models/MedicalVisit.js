@@ -13,6 +13,12 @@ const medicalVisitSchema = new mongoose.Schema(
       ref: "User",
     },
 
+    visitNumber: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+
     visitDate: {
       type: Date,
       default: Date.now,
@@ -20,7 +26,15 @@ const medicalVisitSchema = new mongoose.Schema(
 
     visitType: {
       type: String,
-      enum: ["outpatient", "follow_up", "emergency"],
+      enum: [
+        "outpatient",
+        "follow_up",
+        "emergency",
+        "inpatient",
+        "antenatal",
+        "dental",
+        "specialty_clinic",
+      ],
       default: "outpatient",
     },
 
@@ -28,15 +42,78 @@ const medicalVisitSchema = new mongoose.Schema(
 
     clinicalNotes: String,
 
-    diagnosis: String,
+    triagePriority: {
+      type: String,
+      enum: ["routine", "urgent", "emergency"],
+      default: "routine",
+    },
 
+    temperature: Number,
+    pulseRate: Number,
+    respiratoryRate: Number,
+    bloodPressure: String,
+    oxygenSaturation: Number,
+    weightKg: Number,
+    heightCm: Number,
+    painScore: Number,
+    triageNotes: String,
+    triageCompletedAt: Date,
+
+    assessment: String,
+    diagnosis: String,
+    differentialDiagnosis: String,
     treatmentPlan: String,
+    disposition: {
+      type: String,
+      enum: ["observe", "follow_up", "admit", "discharge", "refer"],
+      default: "observe",
+    },
+    ward: String,
+    bedNumber: String,
+    admissionReason: String,
+    admittedAt: Date,
+    dischargeSummary: String,
+    dischargePlan: String,
+    dischargedAt: Date,
+    transferTo: String,
+    followUpDate: Date,
+    referredTo: String,
 
     status: {
       type: String,
-      enum: ["open", "completed", "cancelled"],
-      default: "open",
+      enum: [
+        "registered",
+        "waiting_for_triage",
+        "in_triage",
+        "waiting_for_doctor",
+        "in_consultation",
+        "awaiting_investigations",
+        "awaiting_results",
+        "awaiting_pharmacy",
+        "admitted",
+        "discharge_pending",
+        "cleared",
+        "closed",
+        "cancelled",
+        "voided",
+        "left_without_being_seen",
+        "referred",
+        "deceased",
+      ],
+      default: "registered",
     },
+
+    deletedAt: Date,
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    voidReason: String,
+    voidedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    voidedAt: Date,
   },
   {
     timestamps: true,

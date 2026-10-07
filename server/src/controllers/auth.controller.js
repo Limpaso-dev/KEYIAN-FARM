@@ -117,14 +117,6 @@ export const login = async (req, res, next) => {
       });
     }
 
-    if (!user.emailVerified) {
-      return res.status(403).json({
-        success: false,
-        code: "EMAIL_NOT_VERIFIED",
-        message: "Verify your email address before signing in",
-      });
-    }
-
     const token = generateToken(user._id);
 
     return res.status(200).json({
@@ -168,6 +160,7 @@ export const createUser = async (req, res, next) => {
       phone,
       role,
       department,
+      password,
     } = req.body;
 
     if (role === "super_admin" && req.user.role !== "super_admin") {
@@ -180,11 +173,13 @@ export const createUser = async (req, res, next) => {
     if (
       typeof name !== "string" ||
       !name.trim() ||
-      !isValidEmail(email)
+      !isValidEmail(email) ||
+      typeof password !== "string" ||
+      password.length < 12
     ) {
       return res.status(400).json({
         success: false,
-        message: "A valid name and email address are required",
+        message: "A valid name, email address, and password of at least 12 characters are required",
       });
     }
 
@@ -210,13 +205,6 @@ export const createUser = async (req, res, next) => {
       });
     }
 
-    if (!isEmailConfigured()) {
-      return res.status(503).json({
-        success: false,
-        message: "Email verification is not configured. Configure SMTP settings before inviting users.",
-      });
-    }
-
     const normalizedEmail = normalizeEmail(email);
 
     const existingUser = await User.findOne({
@@ -234,30 +222,18 @@ export const createUser = async (req, res, next) => {
       name: name.trim(),
       email: normalizedEmail,
       phone: phone?.trim(),
-      password: await bcrypt.hash(randomBytes(48).toString("hex"), 12),
+      password: await bcrypt.hash(password, 12),
       role: role || "staff",
       department: department?.trim(),
       isActive: true,
-      emailVerified: false,
+      emailVerified: true,
     });
 
-    const code = setVerificationCode(user);
     await user.save();
-
-    let emailSent = true;
-    try {
-      await sendVerificationEmail({ to: user.email, name: user.name, code });
-    } catch (emailError) {
-      emailSent = false;
-      console.error("Failed to send user verification email:", emailError.message);
-    }
 
     return res.status(201).json({
       success: true,
-      emailSent,
-      message: emailSent
-        ? "Account invitation sent. The user must verify their email and set a password."
-        : "Account created but the verification email could not be sent. Check SMTP settings and resend the code.",
+      message: "Account created. The user can sign in with the provided password.",
       user: sanitizeUser(user),
     });
   } catch (error) {

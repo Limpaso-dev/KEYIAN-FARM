@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../context/useAuth";
 import landingImage from "../../assets/keiyian-landing.jpg";
@@ -17,7 +17,6 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [verificationEmail, setVerificationEmail] = useState("");
 
   // If already logged in
   if (isAuthenticated) {
@@ -37,7 +36,6 @@ const Login = () => {
     e.preventDefault();
 
     setError("");
-    setVerificationEmail("");
     setLoading(true);
 
     try {
@@ -47,23 +45,17 @@ const Login = () => {
         replace: true,
       });
     } catch (error) {
-      const response = error.response?.data;
-      if (response?.code === "EMAIL_NOT_VERIFIED") {
-        setVerificationEmail(formData.email);
-        setError("Verify your email address before signing in.");
-      } else {
-        setError(
-          response?.message ||
-            "Unable to log in. Please check your credentials."
-        );
-      }
+      setError(
+        error.response?.data?.message ||
+          "Unable to log in. Please check your credentials."
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#f7f7f2] text-[#19271f] lg:grid lg:min-h-screen lg:grid-cols-[minmax(0,1.12fr)_minmax(430px,0.88fr)]">
+    <div className="min-h-screen bg-[#f3f7f1] text-[#19271f] lg:grid lg:min-h-screen lg:grid-cols-[minmax(0,1.12fr)_minmax(430px,0.88fr)]">
       <section className="relative isolate flex min-h-[350px] flex-col justify-between overflow-hidden bg-emerald-950 px-6 py-7 text-white sm:px-10 sm:py-9 lg:min-h-screen lg:px-14 lg:py-12">
         <img
           src={landingImage}
@@ -81,7 +73,7 @@ const Login = () => {
         </div>
 
         <div className="mt-14 max-w-xl lg:mb-8">
-          <p className="mb-4 text-xs font-semibold uppercase text-amber-300">
+          <p className="mb-4 text-xs font-semibold uppercase text-primary-200">
             Cooperative operations
           </p>
           <h1 className="max-w-lg font-serif text-4xl font-medium leading-tight sm:text-5xl lg:text-6xl">
@@ -97,12 +89,12 @@ const Login = () => {
         </div>
       </section>
 
-      <main className="flex min-h-[calc(100svh-350px)] flex-col border-t-4 border-amber-400 bg-[#fbfaf5] px-6 py-10 sm:px-10 lg:min-h-screen lg:border-l lg:border-t-0 lg:border-slate-200 lg:px-14 lg:py-12">
+      <main className="flex min-h-[calc(100svh-350px)] flex-col border-t-4 border-primary-300 bg-[#f8faf6] px-6 py-10 sm:px-10 lg:min-h-screen lg:border-l lg:border-t-0 lg:border-slate-200 lg:px-14 lg:py-12">
         <div className="mx-auto flex w-full max-w-[390px] flex-1 flex-col justify-center py-4">
           <div className="mb-8">
             <div className="mb-4 flex items-center gap-3">
-              <span className="h-0.5 w-8 bg-amber-600" />
-              <p className="text-[11px] font-semibold uppercase text-amber-800">
+              <span className="h-0.5 w-8 bg-primary-600" />
+              <p className="text-[11px] font-semibold uppercase text-primary-800">
                 Staff access
               </p>
             </div>
@@ -117,14 +109,6 @@ const Login = () => {
           {error && (
             <div role="alert" className="mb-6 rounded-md border border-red-200 border-l-2 border-l-red-600 bg-red-50 px-4 py-3 text-sm text-red-800">
               <p>{error}</p>
-              {verificationEmail && (
-                <Link
-                  to={`/verify-account?email=${encodeURIComponent(verificationEmail)}`}
-                  className="mt-2 inline-block font-semibold text-amber-900 underline underline-offset-2"
-                >
-                  Verify your email
-                </Link>
-              )}
             </div>
           )}
 
@@ -144,7 +128,7 @@ const Login = () => {
                   placeholder="Enter your email address"
                   autoComplete="email"
                   required
-                  className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-amber-700 focus:ring-2 focus:ring-amber-400/20"
+                  className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-600 focus:ring-2 focus:ring-primary-400/20"
                 />
               </div>
             </div>
@@ -164,13 +148,13 @@ const Login = () => {
                   placeholder="Enter your password"
                   autoComplete="current-password"
                   required
-                  className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-amber-700 focus:ring-2 focus:ring-amber-400/20"
+                  className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-600 focus:ring-2 focus:ring-primary-400/20"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((previous) => !previous)}
                   aria-label={showPassword ? "Hide password" : "Show password"}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 transition hover:text-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-400/30"
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-500 transition hover:text-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-400/30"
                 >
                   {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
                 </button>
@@ -180,7 +164,7 @@ const Login = () => {
             <button
               type="submit"
               disabled={loading}
-              className="mt-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-amber-800 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-primary-700 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-800 focus:outline-none focus:ring-2 focus:ring-primary-500/60 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? "Signing in..." : "Sign in"}
             </button>
@@ -195,7 +179,7 @@ const Login = () => {
               href="https://payiani-technologies.vercel.app/"
               target="_blank"
               rel="noreferrer"
-              className="font-bold text-amber-700 transition-colors hover:text-amber-800 hover:underline"
+              className="font-bold text-primary-700 transition-colors hover:text-primary-800 hover:underline"
             >
               Payiani Technologies
             </a>

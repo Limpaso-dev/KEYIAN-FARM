@@ -26,9 +26,24 @@ const initialForm = {
   visitType: "outpatient",
   chiefComplaint: "",
   clinicalNotes: "",
+  temperature: "",
+  pulseRate: "",
+  respiratoryRate: "",
+  bloodPressure: "",
+  oxygenSaturation: "",
+  weightKg: "",
+  heightCm: "",
+  painScore: "",
+  triagePriority: "routine",
+  triageNotes: "",
+  assessment: "",
   diagnosis: "",
+  differentialDiagnosis: "",
   treatmentPlan: "",
-  status: "open",
+  disposition: "observe",
+  followUpDate: "",
+  referredTo: "",
+  status: "registered",
 };
 
 const MedicalVisitsPage = () => {
@@ -147,10 +162,25 @@ const MedicalVisitsPage = () => {
         visit.chiefComplaint || "",
       clinicalNotes:
         visit.clinicalNotes || "",
+      temperature: visit.temperature ?? "",
+      pulseRate: visit.pulseRate ?? "",
+      respiratoryRate: visit.respiratoryRate ?? "",
+      bloodPressure: visit.bloodPressure || "",
+      oxygenSaturation: visit.oxygenSaturation ?? "",
+      weightKg: visit.weightKg ?? "",
+      heightCm: visit.heightCm ?? "",
+      painScore: visit.painScore ?? "",
+      triagePriority: visit.triagePriority || "routine",
+      triageNotes: visit.triageNotes || "",
+      assessment: visit.assessment || "",
       diagnosis: visit.diagnosis || "",
+      differentialDiagnosis: visit.differentialDiagnosis || "",
       treatmentPlan:
         visit.treatmentPlan || "",
-      status: visit.status || "open",
+      disposition: visit.disposition || "observe",
+      followUpDate: visit.followUpDate ? toDateTimeLocal(visit.followUpDate) : "",
+      referredTo: visit.referredTo || "",
+      status: visit.status || "registered",
     });
 
     setShowForm(true);
@@ -190,9 +220,26 @@ const MedicalVisitsPage = () => {
           form.chiefComplaint.trim(),
         clinicalNotes:
           form.clinicalNotes.trim(),
+        temperature: form.temperature === "" ? undefined : Number(form.temperature),
+        pulseRate: form.pulseRate === "" ? undefined : Number(form.pulseRate),
+        respiratoryRate: form.respiratoryRate === "" ? undefined : Number(form.respiratoryRate),
+        bloodPressure: form.bloodPressure.trim(),
+        oxygenSaturation: form.oxygenSaturation === "" ? undefined : Number(form.oxygenSaturation),
+        weightKg: form.weightKg === "" ? undefined : Number(form.weightKg),
+        heightCm: form.heightCm === "" ? undefined : Number(form.heightCm),
+        painScore: form.painScore === "" ? undefined : Number(form.painScore),
+        triagePriority: form.triagePriority,
+        triageNotes: form.triageNotes.trim(),
+        assessment: form.assessment.trim(),
         diagnosis: form.diagnosis.trim(),
+        differentialDiagnosis: form.differentialDiagnosis.trim(),
         treatmentPlan:
           form.treatmentPlan.trim(),
+        disposition: form.disposition,
+        followUpDate: form.followUpDate
+          ? new Date(form.followUpDate).toISOString()
+          : undefined,
+        referredTo: form.referredTo.trim(),
         status: form.status,
       };
 
@@ -338,12 +385,23 @@ const MedicalVisitsPage = () => {
 
   const totalVisits = visits.length;
 
-  const openVisits = visits.filter(
-    (visit) => visit.status === "open"
+  const openVisits = visits.filter((visit) =>
+    [
+      "registered",
+      "waiting_for_triage",
+      "in_triage",
+      "waiting_for_doctor",
+      "in_consultation",
+      "awaiting_investigations",
+      "awaiting_results",
+      "awaiting_pharmacy",
+      "admitted",
+      "discharge_pending",
+    ].includes(visit.status)
   ).length;
 
-  const completedVisits = visits.filter(
-    (visit) => visit.status === "completed"
+  const completedVisits = visits.filter((visit) =>
+    ["cleared", "closed"].includes(visit.status)
   ).length;
 
   const emergencyVisits = visits.filter(
@@ -479,13 +537,18 @@ const MedicalVisitsPage = () => {
             <option value="all">
               All Statuses
             </option>
-            <option value="open">Open</option>
-            <option value="completed">
-              Completed
+            <option value="registered">Registered</option>
+            <option value="waiting_for_triage">
+              Waiting for Triage
             </option>
-            <option value="cancelled">
-              Cancelled
+            <option value="in_consultation">
+              In Consultation
             </option>
+            <option value="awaiting_results">
+              Awaiting Results
+            </option>
+            <option value="cleared">Cleared</option>
+            <option value="cancelled">Cancelled</option>
           </select>
         </div>
       </div>
@@ -798,14 +861,50 @@ const VisitFormModal = ({
                     onChange={onChange}
                     className="form-input"
                   >
-                    <option value="open">
-                      Open
+                    <option value="registered">
+                      Registered
                     </option>
-                    <option value="completed">
-                      Completed
+                    <option value="waiting_for_triage">
+                      Waiting for Triage
+                    </option>
+                    <option value="in_triage">
+                      In Triage
+                    </option>
+                    <option value="waiting_for_doctor">
+                      Waiting for Doctor
+                    </option>
+                    <option value="in_consultation">
+                      In Consultation
+                    </option>
+                    <option value="awaiting_investigations">
+                      Awaiting Investigations
+                    </option>
+                    <option value="awaiting_results">
+                      Awaiting Results
+                    </option>
+                    <option value="awaiting_pharmacy">
+                      Awaiting Pharmacy
+                    </option>
+                    <option value="admitted">
+                      Admitted
+                    </option>
+                    <option value="discharge_pending">
+                      Discharge Pending
+                    </option>
+                    <option value="cleared">
+                      Cleared
+                    </option>
+                    <option value="closed">
+                      Closed
                     </option>
                     <option value="cancelled">
                       Cancelled
+                    </option>
+                    <option value="referred">
+                      Referred
+                    </option>
+                    <option value="left_without_being_seen">
+                      Left without being seen
                     </option>
                   </select>
                 </FormField>
@@ -843,6 +942,133 @@ const VisitFormModal = ({
                   />
                 </FormField>
 
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <FormField label="Temperature (°C)">
+                    <input
+                      type="number"
+                      step="0.1"
+                      name="temperature"
+                      value={form.temperature}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="37.5"
+                    />
+                  </FormField>
+
+                  <FormField label="Pulse Rate">
+                    <input
+                      type="number"
+                      name="pulseRate"
+                      value={form.pulseRate}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="72"
+                    />
+                  </FormField>
+
+                  <FormField label="Respiratory Rate">
+                    <input
+                      type="number"
+                      name="respiratoryRate"
+                      value={form.respiratoryRate}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="18"
+                    />
+                  </FormField>
+
+                  <FormField label="Blood Pressure">
+                    <input
+                      name="bloodPressure"
+                      value={form.bloodPressure}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="120/80"
+                    />
+                  </FormField>
+
+                  <FormField label="O2 Saturation (%)">
+                    <input
+                      type="number"
+                      name="oxygenSaturation"
+                      value={form.oxygenSaturation}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="98"
+                    />
+                  </FormField>
+
+                  <FormField label="Pain Score">
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      name="painScore"
+                      value={form.painScore}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="0-10"
+                    />
+                  </FormField>
+
+                  <FormField label="Weight (kg)">
+                    <input
+                      type="number"
+                      step="0.1"
+                      name="weightKg"
+                      value={form.weightKg}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="65.5"
+                    />
+                  </FormField>
+
+                  <FormField label="Height (cm)">
+                    <input
+                      type="number"
+                      step="0.1"
+                      name="heightCm"
+                      value={form.heightCm}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="170"
+                    />
+                  </FormField>
+
+                  <FormField label="Triage Priority">
+                    <select
+                      name="triagePriority"
+                      value={form.triagePriority}
+                      onChange={onChange}
+                      className="form-input"
+                    >
+                      <option value="routine">Routine</option>
+                      <option value="urgent">Urgent</option>
+                      <option value="emergency">Emergency</option>
+                    </select>
+                  </FormField>
+                </div>
+
+                <FormField label="Triage Notes">
+                  <textarea
+                    name="triageNotes"
+                    value={form.triageNotes}
+                    onChange={onChange}
+                    className="form-input min-h-[90px] resize-y"
+                    placeholder="Record triage observations and immediate concerns..."
+                  />
+                </FormField>
+
+                <FormField label="Assessment">
+                  <textarea
+                    name="assessment"
+                    value={form.assessment}
+                    onChange={onChange}
+                    className="form-input min-h-[90px] resize-y"
+                    placeholder="Clinical assessment and summary..."
+                  />
+                </FormField>
+
                 <FormField label="Diagnosis">
                   <textarea
                     name="diagnosis"
@@ -850,6 +1076,53 @@ const VisitFormModal = ({
                     onChange={onChange}
                     className="form-input min-h-[90px] resize-y"
                     placeholder="Enter diagnosis..."
+                  />
+                </FormField>
+
+                <FormField label="Differential Diagnosis">
+                  <textarea
+                    name="differentialDiagnosis"
+                    value={form.differentialDiagnosis}
+                    onChange={onChange}
+                    className="form-input min-h-[90px] resize-y"
+                    placeholder="Enter possible alternate diagnoses..."
+                  />
+                </FormField>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <FormField label="Disposition">
+                    <select
+                      name="disposition"
+                      value={form.disposition}
+                      onChange={onChange}
+                      className="form-input"
+                    >
+                      <option value="observe">Observe</option>
+                      <option value="follow_up">Follow Up</option>
+                      <option value="admit">Admit</option>
+                      <option value="discharge">Discharge</option>
+                      <option value="refer">Refer</option>
+                    </select>
+                  </FormField>
+
+                  <FormField label="Follow-up Date">
+                    <input
+                      type="datetime-local"
+                      name="followUpDate"
+                      value={form.followUpDate}
+                      onChange={onChange}
+                      className="form-input"
+                    />
+                  </FormField>
+                </div>
+
+                <FormField label="Referral Destination">
+                  <input
+                    name="referredTo"
+                    value={form.referredTo}
+                    onChange={onChange}
+                    className="form-input"
+                    placeholder="Ward, specialist, or partner facility"
                   />
                 </FormField>
 
@@ -1041,9 +1314,50 @@ const VisitViewModal = ({
               />
 
               <ClinicalSection
+                label="Assessment"
+                value={visit.assessment}
+              />
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <DetailItem label="Temperature" value={visit.temperature ? `${visit.temperature}°C` : "—"} />
+                <DetailItem label="Pulse Rate" value={visit.pulseRate ? `${visit.pulseRate} bpm` : "—"} />
+                <DetailItem label="Respiratory Rate" value={visit.respiratoryRate ? `${visit.respiratoryRate}/min` : "—"} />
+                <DetailItem label="Blood Pressure" value={visit.bloodPressure || "—"} />
+                <DetailItem label="Oxygen Saturation" value={visit.oxygenSaturation ? `${visit.oxygenSaturation}%` : "—"} />
+                <DetailItem label="Pain Score" value={visit.painScore ?? "—"} />
+                <DetailItem label="Weight" value={visit.weightKg ? `${visit.weightKg} kg` : "—"} />
+                <DetailItem label="Height" value={visit.heightCm ? `${visit.heightCm} cm` : "—"} />
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Triage Priority
+                </p>
+                <div className="mt-2">
+                  <PriorityBadge priority={visit.triagePriority} />
+                </div>
+              </div>
+
+              <ClinicalSection
+                label="Triage Notes"
+                value={visit.triageNotes}
+              />
+
+              <ClinicalSection
                 label="Diagnosis"
                 value={visit.diagnosis}
               />
+
+              <ClinicalSection
+                label="Differential Diagnosis"
+                value={visit.differentialDiagnosis}
+              />
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <DetailItem label="Disposition" value={formatDisposition(visit.disposition)} />
+                <DetailItem label="Follow-up Date" value={visit.followUpDate ? formatDateTime(visit.followUpDate) : "—"} />
+                <DetailItem label="Referral Destination" value={visit.referredTo || "—"} />
+              </div>
 
               <ClinicalSection
                 label="Treatment Plan"
@@ -1331,22 +1645,120 @@ const VisitTypeBadge = ({ type }) => {
 // STATUS BADGE
 // =====================================================
 
+const PriorityBadge = ({ priority }) => {
+  const config = {
+    routine: {
+      label: "Routine",
+      className: "bg-green-50 text-green-700",
+    },
+    urgent: {
+      label: "Urgent",
+      className: "bg-amber-50 text-amber-700",
+    },
+    emergency: {
+      label: "Emergency",
+      className: "bg-red-50 text-red-700",
+    },
+  };
+
+  const current = config[priority] || {
+    label: priority || "Routine",
+    className: "bg-slate-100 text-slate-700",
+  };
+
+  return (
+    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${current.className}`}>
+      {current.label}
+    </span>
+  );
+};
+
 const StatusBadge = ({ status }) => {
   const config = {
-    open: {
-      label: "Open",
+    registered: {
+      label: "Registered",
+      className:
+        "bg-sky-50 text-sky-700",
+    },
+    waiting_for_triage: {
+      label: "Waiting for Triage",
       className:
         "bg-amber-50 text-amber-700",
     },
-    completed: {
-      label: "Completed",
+    in_triage: {
+      label: "In Triage",
+      className:
+        "bg-orange-50 text-orange-700",
+    },
+    waiting_for_doctor: {
+      label: "Waiting for Doctor",
+      className:
+        "bg-yellow-50 text-yellow-700",
+    },
+    in_consultation: {
+      label: "In Consultation",
+      className:
+        "bg-indigo-50 text-indigo-700",
+    },
+    awaiting_investigations: {
+      label: "Awaiting Investigations",
+      className:
+        "bg-violet-50 text-violet-700",
+    },
+    awaiting_results: {
+      label: "Awaiting Results",
+      className:
+        "bg-fuchsia-50 text-fuchsia-700",
+    },
+    awaiting_pharmacy: {
+      label: "Awaiting Pharmacy",
+      className:
+        "bg-pink-50 text-pink-700",
+    },
+    admitted: {
+      label: "Admitted",
+      className:
+        "bg-red-50 text-red-700",
+    },
+    discharge_pending: {
+      label: "Discharge Pending",
+      className:
+        "bg-rose-50 text-rose-700",
+    },
+    cleared: {
+      label: "Cleared",
       className:
         "bg-emerald-50 text-emerald-700",
+    },
+    closed: {
+      label: "Closed",
+      className:
+        "bg-slate-100 text-slate-700",
     },
     cancelled: {
       label: "Cancelled",
       className:
         "bg-slate-100 text-slate-600",
+    },
+    referred: {
+      label: "Referred",
+      className:
+        "bg-cyan-50 text-cyan-700",
+    },
+    left_without_being_seen: {
+      label: "Left without being seen",
+      className:
+        "bg-gray-100 text-gray-700",
+    },
+    voided: {
+      label: "Voided",
+      className:
+        "bg-red-100 text-red-700",
+    },
+    deceased: {
+      label: "Deceased",
+      className:
+        "bg-black text-white",
     },
   };
 
@@ -1447,6 +1859,19 @@ const formatRole = (role) => {
   if (!role) return "";
 
   return role
+    .split("_")
+    .map(
+      (word) =>
+        word.charAt(0).toUpperCase() +
+        word.slice(1)
+    )
+    .join(" ");
+};
+
+const formatDisposition = (value) => {
+  if (!value) return "—";
+
+  return value
     .split("_")
     .map(
       (word) =>

@@ -66,9 +66,9 @@ const VerifyAccountPage = () => {
   };
 
   return (
-    <main className="flex min-h-screen flex-col bg-[#f7f7f2] px-5 py-8 text-[#19271f] sm:px-8 sm:py-12">
+    <main className="flex min-h-screen flex-col bg-[#f3f7f1] px-5 py-8 text-[#19271f] sm:px-8 sm:py-12">
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between">
-        <Link to="/login" aria-label="Back to sign in" className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-amber-800">
+        <Link to="/login" aria-label="Back to sign in" className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-primary-800">
           <ArrowLeft size={17} /> Sign in
         </Link>
         <img
@@ -79,10 +79,10 @@ const VerifyAccountPage = () => {
       </header>
 
       <section className="mx-auto my-auto w-full max-w-md py-10">
-        <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-800">
+        <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-full bg-primary-100 text-primary-800">
           {verified ? <CheckCircle2 size={23} /> : <ShieldCheck size={23} />}
         </div>
-        <p className="mb-3 text-[11px] font-semibold uppercase text-amber-800">Account activation</p>
+        <p className="mb-3 text-[11px] font-semibold uppercase text-primary-800">Account activation</p>
         <h1 className="text-3xl font-semibold sm:text-4xl">
           {verified ? "Email verified" : "Verify your email"}
         </h1>
@@ -104,7 +104,7 @@ const VerifyAccountPage = () => {
         )}
 
         {verified ? (
-          <Link to="/login" className="mt-8 flex min-h-12 w-full items-center justify-center rounded-md bg-amber-800 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:ring-offset-2">
+          <Link to="/login" className="mt-8 flex min-h-12 w-full items-center justify-center rounded-md bg-primary-700 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-800 focus:outline-none focus:ring-2 focus:ring-primary-500/60 focus:ring-offset-2">
             Continue to sign in
           </Link>
         ) : (
@@ -120,7 +120,7 @@ const VerifyAccountPage = () => {
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     required
-                    className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm font-normal text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-amber-700 focus:ring-2 focus:ring-amber-400/20"
+                    className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm font-normal text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-700 focus:ring-2 focus:ring-primary-400/20"
                     placeholder="Enter your invited email"
                   />
                 </span>
@@ -137,7 +137,7 @@ const VerifyAccountPage = () => {
                   value={code}
                   onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
                   required
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm font-semibold tracking-[0.25em] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-amber-700 focus:ring-2 focus:ring-amber-400/20"
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm font-semibold tracking-[0.25em] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-700 focus:ring-2 focus:ring-primary-400/20"
                   placeholder="000000"
                 />
               </label>
@@ -151,7 +151,7 @@ const VerifyAccountPage = () => {
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                   required
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm font-normal text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-amber-700 focus:ring-2 focus:ring-amber-400/20"
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm font-normal text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-700 focus:ring-2 focus:ring-primary-400/20"
                   placeholder="At least 12 characters"
                 />
               </label>
@@ -165,12 +165,12 @@ const VerifyAccountPage = () => {
                   value={confirmPassword}
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   required
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm font-normal text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-amber-700 focus:ring-2 focus:ring-amber-400/20"
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm font-normal text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-700 focus:ring-2 focus:ring-primary-400/20"
                   placeholder="Re-enter your password"
                 />
               </label>
 
-              <button type="submit" disabled={busy} className="flex min-h-12 w-full items-center justify-center rounded-md bg-amber-800 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-amber-900 focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60">
+              <button type="submit" disabled={busy} className="flex min-h-12 w-full items-center justify-center rounded-md bg-primary-700 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-800 focus:outline-none focus:ring-2 focus:ring-primary-500/60 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60">
                 {busy ? "Verifying..." : "Verify and activate account"}
               </button>
             </form>
@@ -179,7 +179,7 @@ const VerifyAccountPage = () => {
               type="button"
               onClick={handleResend}
               disabled={resending || !email.trim()}
-              className="mt-4 w-full py-2 text-center text-sm font-medium text-amber-800 transition hover:text-amber-950 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline"
+              className="mt-4 w-full py-2 text-center text-sm font-medium text-primary-700 transition hover:text-primary-900 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline"
             >
               {resending ? "Requesting a new code..." : "Resend verification code"}
             </button>
@@ -189,7 +189,7 @@ const VerifyAccountPage = () => {
 
       <footer className="mx-auto w-full max-w-5xl border-t border-slate-200 pt-4 text-center text-xs text-slate-500">
         Developed &amp; Managed by{" "}
-        <a href="https://payiani-technologies.vercel.app/" target="_blank" rel="noreferrer" className="font-bold text-amber-700 hover:text-amber-800 hover:underline">
+        <a href="https://payiani-technologies.vercel.app/" target="_blank" rel="noreferrer" className="font-bold text-primary-700 hover:text-primary-800 hover:underline">
           Payiani Technologies
         </a>
       </footer>

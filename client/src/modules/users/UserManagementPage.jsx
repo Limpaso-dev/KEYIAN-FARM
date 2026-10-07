@@ -2,11 +2,9 @@ import { useEffect, useState } from "react";
 import {
   Check,
   KeyRound,
-  MailCheck,
   Pencil,
   Plus,
   Search,
-  Send,
   ShieldCheck,
   UserCog,
   Users,
@@ -17,7 +15,6 @@ import { useAuth } from "../../context/useAuth";
 import {
   createUser,
   getUsers,
-  resendUserVerification,
   updateUser,
 } from "../../services/user.service";
 
@@ -183,20 +180,6 @@ const UserManagementPage = () => {
     }
   };
 
-  const handleResendVerification = async (account) => {
-    setError("");
-    setNotice("");
-    try {
-      const response = await resendUserVerification(account._id);
-      setNotice(response.message || `Verification email sent to ${account.email}.`);
-    } catch (requestError) {
-      setError(
-        requestError.response?.data?.message ||
-          "Unable to resend the verification email."
-      );
-    }
-  };
-
   const isSuperAdmin = currentUser?.role === "super_admin";
   const availableRoles = isSuperAdmin
     ? [["super_admin", "Super Admin"], ...roles]
@@ -214,9 +197,8 @@ const UserManagementPage = () => {
       (statusFilter === "active" ? account.isActive : !account.isActive);
     return matchesSearch && matchesStatus;
   });
-  const activeCount = users.filter((account) => account.isActive && account.emailVerified !== false).length;
-  const pendingCount = users.filter((account) => account.emailVerified === false).length;
-  const inactiveCount = users.filter((account) => !account.isActive && account.emailVerified !== false).length;
+  const activeCount = users.filter((account) => account.isActive).length;
+  const inactiveCount = users.filter((account) => !account.isActive).length;
   const canChangeOwnAccess = (account) =>
     account._id !== currentUser?._id;
 
@@ -252,10 +234,9 @@ const UserManagementPage = () => {
         </div>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Summary icon={Users} label="Accounts" value={users.length} />
         <Summary icon={Check} label="Active" value={activeCount} />
-        <Summary icon={MailCheck} label="Awaiting verification" value={pendingCount} />
         <Summary icon={ShieldCheck} label="Inactive" value={inactiveCount} />
       </section>
 
@@ -311,22 +292,12 @@ const UserManagementPage = () => {
                     </td>
                     <td className="px-4 py-3 text-slate-600">{account.department || "-"}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${account.emailVerified === false ? "bg-amber-50 text-amber-800" : account.isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
-                        {account.emailVerified === false ? "Awaiting verification" : account.isActive ? "Active" : "Inactive"}
+                      <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${account.isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                        {account.isActive ? "Active" : "Inactive"}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end">
-                        {account.emailVerified === false && (
-                          <button
-                            type="button"
-                            title="Resend verification email"
-                            onClick={() => handleResendVerification(account)}
-                            className="rounded p-2 text-amber-700 hover:bg-amber-50 hover:text-amber-900"
-                          >
-                            <Send size={16} />
-                          </button>
-                        )}
                         <button
                           type="button"
                           title="Edit account"
@@ -360,7 +331,7 @@ const UserManagementPage = () => {
                   {editingUser ? "Edit Account" : "Create Account"}
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  {editingUser ? "Leave password blank to keep it unchanged." : "We’ll email a verification code; the user sets their password after verifying."}
+                  {editingUser ? "Leave password blank to keep it unchanged." : "Set an initial password. Email verification is not required."}
                 </p>
               </div>
               <button type="button" onClick={closeForm} aria-label="Close form" className="rounded p-2 text-slate-500 hover:bg-slate-100">
@@ -386,8 +357,8 @@ const UserManagementPage = () => {
                   ))}
                 </select>
               </label>
-              {editingUser && <label className="grid gap-1.5 text-sm font-medium text-slate-700">
-                {editingUser ? "Reset password" : "Temporary password"}
+              <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+                {editingUser ? "Reset password" : "Initial password"}
                 <span className="relative">
                   <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
@@ -402,7 +373,7 @@ const UserManagementPage = () => {
                     className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
                   />
                 </span>
-              </label>}
+              </label>
               <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
                 <input
                   type="checkbox"

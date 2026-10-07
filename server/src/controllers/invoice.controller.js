@@ -6,7 +6,9 @@ import SupplierPayment from "../models/SupplierPayment.js";
 import MedicalBill from "../models/MedicalBill.js";
 import Transaction from "../models/Transaction.js";
 import Account from "../models/Account.js";
+import { logAudit } from "../utils/globalRules.js";
 import { getApprovalSteps } from "../services/approvalWorkflow.service.js";
+import { calculateBillBalance, normalizeBillStatus } from "../utils/billing.js";
 
 export const listSupplierInvoices = async (req, res, next) => {
   try {
@@ -98,7 +100,7 @@ export const recordMedicalBillPayment = async (req, res, next) => {
     const bill = await MedicalBill.findById(req.params.id);
     if (!bill || !["approved", "partially_paid"].includes(bill.status)) return res.status(409).json({ success: false, message: "Only an approved bill can be paid" });
     const amount = Number(req.body.amount);
-    const remaining = bill.totalAmount - bill.amountPaid;
+    const remaining = calculateBillBalance({ totalAmount: bill.totalAmount, amountPaid: bill.amountPaid });
     if (!Number.isFinite(amount) || amount <= 0 || amount > remaining + 0.0001) return res.status(400).json({ success: false, message: `Enter an amount up to the remaining balance KES ${remaining.toFixed(2)}` });
     const reference = String(req.body.reference || "").trim();
     if (!reference || !req.body.account) return res.status(400).json({ success: false, message: "Payment reference and finance account are required" });
@@ -107,8 +109,22 @@ export const recordMedicalBillPayment = async (req, res, next) => {
     const transaction = await Transaction.create({ reference: `HMIS-${reference}`, type: "receipt", account: req.body.account, amount, description: `Patient bill ${bill.billNumber}`, status: "posted", createdBy: req.user._id });
     bill.payments.push({ amount, method: req.body.paymentMethod, reference, account: req.body.account, receivedBy: req.user._id, transaction: transaction._id });
     bill.amountPaid += amount;
-    bill.status = bill.amountPaid >= bill.totalAmount ? "paid" : "partially_paid";
+    bill.status = normalizeBillStatus({ totalAmount: bill.totalAmount, amountPaid: bill.amountPaid, currentStatus: bill.status });
+    const beforeState = bill.toObject();
     await bill.save();
+    await logAudit({
+      actor: req.user,
+      action: "payment_recorded",
+      entity: "MedicalBill",
+      entityId: bill._id,
+      before: beforeState,
+      after: bill.toObject(),
+      metadata: {
+        reference,
+        amount,
+        ip: req.ip,
+      },
+    });
     res.status(201).json({ success: true, message: "Patient payment recorded in Finance", data: bill });
   } catch (error) { res.status(error.code === 11000 ? 409 : 400).json({ success: false, message: error.code === 11000 ? "That payment reference already exists" : error.message }); }
 };

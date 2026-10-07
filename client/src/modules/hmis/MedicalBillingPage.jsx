@@ -55,7 +55,7 @@ const MedicalBillingPage = () => {
 
   const payable = bills.filter((bill) => ["approved", "partially_paid"].includes(bill.status));
   const selectedBill = payable.find((bill) => bill._id === payment.bill);
-  const balance = selectedBill ? selectedBill.totalAmount - selectedBill.amountPaid : 0;
+  const balance = selectedBill ? Math.max(selectedBill.totalAmount - selectedBill.amountPaid, 0) : 0;
 
   return <div className="space-y-6">
     <div className="flex items-center gap-3"><div className="rounded-xl bg-rose-100 p-3 text-rose-700"><ReceiptText size={22}/></div><div><h1 className="text-2xl font-bold text-slate-900">HMIS billing</h1><p className="text-sm text-slate-500">Clinical charges go to Finance for approval. Approved balances can be collected and posted to accounts.</p></div></div>
