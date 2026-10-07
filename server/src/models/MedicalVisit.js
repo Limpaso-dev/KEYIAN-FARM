@@ -42,6 +42,23 @@ const medicalVisitSchema = new mongoose.Schema(
 
     clinicalNotes: String,
 
+    triagePriority: {
+      type: String,
+      enum: ["routine", "urgent", "emergency"],
+      default: "routine",
+    },
+
+    temperature: Number,
+    pulseRate: Number,
+    respiratoryRate: Number,
+    bloodPressure: String,
+    oxygenSaturation: Number,
+    weightKg: Number,
+    heightCm: Number,
+    painScore: Number,
+    triageNotes: String,
+    triageCompletedAt: Date,
+
     diagnosis: String,
 
     treatmentPlan: String,

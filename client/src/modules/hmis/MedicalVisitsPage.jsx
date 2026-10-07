@@ -26,6 +26,16 @@ const initialForm = {
   visitType: "outpatient",
   chiefComplaint: "",
   clinicalNotes: "",
+  temperature: "",
+  pulseRate: "",
+  respiratoryRate: "",
+  bloodPressure: "",
+  oxygenSaturation: "",
+  weightKg: "",
+  heightCm: "",
+  painScore: "",
+  triagePriority: "routine",
+  triageNotes: "",
   diagnosis: "",
   treatmentPlan: "",
   status: "registered",
@@ -147,6 +157,16 @@ const MedicalVisitsPage = () => {
         visit.chiefComplaint || "",
       clinicalNotes:
         visit.clinicalNotes || "",
+      temperature: visit.temperature ?? "",
+      pulseRate: visit.pulseRate ?? "",
+      respiratoryRate: visit.respiratoryRate ?? "",
+      bloodPressure: visit.bloodPressure || "",
+      oxygenSaturation: visit.oxygenSaturation ?? "",
+      weightKg: visit.weightKg ?? "",
+      heightCm: visit.heightCm ?? "",
+      painScore: visit.painScore ?? "",
+      triagePriority: visit.triagePriority || "routine",
+      triageNotes: visit.triageNotes || "",
       diagnosis: visit.diagnosis || "",
       treatmentPlan:
         visit.treatmentPlan || "",
@@ -190,6 +210,16 @@ const MedicalVisitsPage = () => {
           form.chiefComplaint.trim(),
         clinicalNotes:
           form.clinicalNotes.trim(),
+        temperature: form.temperature === "" ? undefined : Number(form.temperature),
+        pulseRate: form.pulseRate === "" ? undefined : Number(form.pulseRate),
+        respiratoryRate: form.respiratoryRate === "" ? undefined : Number(form.respiratoryRate),
+        bloodPressure: form.bloodPressure.trim(),
+        oxygenSaturation: form.oxygenSaturation === "" ? undefined : Number(form.oxygenSaturation),
+        weightKg: form.weightKg === "" ? undefined : Number(form.weightKg),
+        heightCm: form.heightCm === "" ? undefined : Number(form.heightCm),
+        painScore: form.painScore === "" ? undefined : Number(form.painScore),
+        triagePriority: form.triagePriority,
+        triageNotes: form.triageNotes.trim(),
         diagnosis: form.diagnosis.trim(),
         treatmentPlan:
           form.treatmentPlan.trim(),
@@ -895,6 +925,123 @@ const VisitFormModal = ({
                   />
                 </FormField>
 
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <FormField label="Temperature (°C)">
+                    <input
+                      type="number"
+                      step="0.1"
+                      name="temperature"
+                      value={form.temperature}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="37.5"
+                    />
+                  </FormField>
+
+                  <FormField label="Pulse Rate">
+                    <input
+                      type="number"
+                      name="pulseRate"
+                      value={form.pulseRate}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="72"
+                    />
+                  </FormField>
+
+                  <FormField label="Respiratory Rate">
+                    <input
+                      type="number"
+                      name="respiratoryRate"
+                      value={form.respiratoryRate}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="18"
+                    />
+                  </FormField>
+
+                  <FormField label="Blood Pressure">
+                    <input
+                      name="bloodPressure"
+                      value={form.bloodPressure}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="120/80"
+                    />
+                  </FormField>
+
+                  <FormField label="O2 Saturation (%)">
+                    <input
+                      type="number"
+                      name="oxygenSaturation"
+                      value={form.oxygenSaturation}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="98"
+                    />
+                  </FormField>
+
+                  <FormField label="Pain Score">
+                    <input
+                      type="number"
+                      min="0"
+                      max="10"
+                      name="painScore"
+                      value={form.painScore}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="0-10"
+                    />
+                  </FormField>
+
+                  <FormField label="Weight (kg)">
+                    <input
+                      type="number"
+                      step="0.1"
+                      name="weightKg"
+                      value={form.weightKg}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="65.5"
+                    />
+                  </FormField>
+
+                  <FormField label="Height (cm)">
+                    <input
+                      type="number"
+                      step="0.1"
+                      name="heightCm"
+                      value={form.heightCm}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="170"
+                    />
+                  </FormField>
+
+                  <FormField label="Triage Priority">
+                    <select
+                      name="triagePriority"
+                      value={form.triagePriority}
+                      onChange={onChange}
+                      className="form-input"
+                    >
+                      <option value="routine">Routine</option>
+                      <option value="urgent">Urgent</option>
+                      <option value="emergency">Emergency</option>
+                    </select>
+                  </FormField>
+                </div>
+
+                <FormField label="Triage Notes">
+                  <textarea
+                    name="triageNotes"
+                    value={form.triageNotes}
+                    onChange={onChange}
+                    className="form-input min-h-[90px] resize-y"
+                    placeholder="Record triage observations and immediate concerns..."
+                  />
+                </FormField>
+
                 <FormField label="Diagnosis">
                   <textarea
                     name="diagnosis"
@@ -1090,6 +1237,31 @@ const VisitViewModal = ({
               <ClinicalSection
                 label="Clinical Notes"
                 value={visit.clinicalNotes}
+              />
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <DetailItem label="Temperature" value={visit.temperature ? `${visit.temperature}°C` : "—"} />
+                <DetailItem label="Pulse Rate" value={visit.pulseRate ? `${visit.pulseRate} bpm` : "—"} />
+                <DetailItem label="Respiratory Rate" value={visit.respiratoryRate ? `${visit.respiratoryRate}/min` : "—"} />
+                <DetailItem label="Blood Pressure" value={visit.bloodPressure || "—"} />
+                <DetailItem label="Oxygen Saturation" value={visit.oxygenSaturation ? `${visit.oxygenSaturation}%` : "—"} />
+                <DetailItem label="Pain Score" value={visit.painScore ?? "—"} />
+                <DetailItem label="Weight" value={visit.weightKg ? `${visit.weightKg} kg` : "—"} />
+                <DetailItem label="Height" value={visit.heightCm ? `${visit.heightCm} cm` : "—"} />
+              </div>
+
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+                  Triage Priority
+                </p>
+                <div className="mt-2">
+                  <PriorityBadge priority={visit.triagePriority} />
+                </div>
+              </div>
+
+              <ClinicalSection
+                label="Triage Notes"
+                value={visit.triageNotes}
               />
 
               <ClinicalSection
@@ -1382,6 +1554,34 @@ const VisitTypeBadge = ({ type }) => {
 // =====================================================
 // STATUS BADGE
 // =====================================================
+
+const PriorityBadge = ({ priority }) => {
+  const config = {
+    routine: {
+      label: "Routine",
+      className: "bg-green-50 text-green-700",
+    },
+    urgent: {
+      label: "Urgent",
+      className: "bg-amber-50 text-amber-700",
+    },
+    emergency: {
+      label: "Emergency",
+      className: "bg-red-50 text-red-700",
+    },
+  };
+
+  const current = config[priority] || {
+    label: priority || "Routine",
+    className: "bg-slate-100 text-slate-700",
+  };
+
+  return (
+    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${current.className}`}>
+      {current.label}
+    </span>
+  );
+};
 
 const StatusBadge = ({ status }) => {
   const config = {
