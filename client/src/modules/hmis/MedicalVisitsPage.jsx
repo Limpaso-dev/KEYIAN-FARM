@@ -36,8 +36,13 @@ const initialForm = {
   painScore: "",
   triagePriority: "routine",
   triageNotes: "",
+  assessment: "",
   diagnosis: "",
+  differentialDiagnosis: "",
   treatmentPlan: "",
+  disposition: "observe",
+  followUpDate: "",
+  referredTo: "",
   status: "registered",
 };
 
@@ -167,9 +172,14 @@ const MedicalVisitsPage = () => {
       painScore: visit.painScore ?? "",
       triagePriority: visit.triagePriority || "routine",
       triageNotes: visit.triageNotes || "",
+      assessment: visit.assessment || "",
       diagnosis: visit.diagnosis || "",
+      differentialDiagnosis: visit.differentialDiagnosis || "",
       treatmentPlan:
         visit.treatmentPlan || "",
+      disposition: visit.disposition || "observe",
+      followUpDate: visit.followUpDate ? toDateTimeLocal(visit.followUpDate) : "",
+      referredTo: visit.referredTo || "",
       status: visit.status || "registered",
     });
 
@@ -220,9 +230,16 @@ const MedicalVisitsPage = () => {
         painScore: form.painScore === "" ? undefined : Number(form.painScore),
         triagePriority: form.triagePriority,
         triageNotes: form.triageNotes.trim(),
+        assessment: form.assessment.trim(),
         diagnosis: form.diagnosis.trim(),
+        differentialDiagnosis: form.differentialDiagnosis.trim(),
         treatmentPlan:
           form.treatmentPlan.trim(),
+        disposition: form.disposition,
+        followUpDate: form.followUpDate
+          ? new Date(form.followUpDate).toISOString()
+          : undefined,
+        referredTo: form.referredTo.trim(),
         status: form.status,
       };
 
@@ -1042,6 +1059,16 @@ const VisitFormModal = ({
                   />
                 </FormField>
 
+                <FormField label="Assessment">
+                  <textarea
+                    name="assessment"
+                    value={form.assessment}
+                    onChange={onChange}
+                    className="form-input min-h-[90px] resize-y"
+                    placeholder="Clinical assessment and summary..."
+                  />
+                </FormField>
+
                 <FormField label="Diagnosis">
                   <textarea
                     name="diagnosis"
@@ -1049,6 +1076,53 @@ const VisitFormModal = ({
                     onChange={onChange}
                     className="form-input min-h-[90px] resize-y"
                     placeholder="Enter diagnosis..."
+                  />
+                </FormField>
+
+                <FormField label="Differential Diagnosis">
+                  <textarea
+                    name="differentialDiagnosis"
+                    value={form.differentialDiagnosis}
+                    onChange={onChange}
+                    className="form-input min-h-[90px] resize-y"
+                    placeholder="Enter possible alternate diagnoses..."
+                  />
+                </FormField>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <FormField label="Disposition">
+                    <select
+                      name="disposition"
+                      value={form.disposition}
+                      onChange={onChange}
+                      className="form-input"
+                    >
+                      <option value="observe">Observe</option>
+                      <option value="follow_up">Follow Up</option>
+                      <option value="admit">Admit</option>
+                      <option value="discharge">Discharge</option>
+                      <option value="refer">Refer</option>
+                    </select>
+                  </FormField>
+
+                  <FormField label="Follow-up Date">
+                    <input
+                      type="datetime-local"
+                      name="followUpDate"
+                      value={form.followUpDate}
+                      onChange={onChange}
+                      className="form-input"
+                    />
+                  </FormField>
+                </div>
+
+                <FormField label="Referral Destination">
+                  <input
+                    name="referredTo"
+                    value={form.referredTo}
+                    onChange={onChange}
+                    className="form-input"
+                    placeholder="Ward, specialist, or partner facility"
                   />
                 </FormField>
 
@@ -1239,6 +1313,11 @@ const VisitViewModal = ({
                 value={visit.clinicalNotes}
               />
 
+              <ClinicalSection
+                label="Assessment"
+                value={visit.assessment}
+              />
+
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <DetailItem label="Temperature" value={visit.temperature ? `${visit.temperature}°C` : "—"} />
                 <DetailItem label="Pulse Rate" value={visit.pulseRate ? `${visit.pulseRate} bpm` : "—"} />
@@ -1268,6 +1347,17 @@ const VisitViewModal = ({
                 label="Diagnosis"
                 value={visit.diagnosis}
               />
+
+              <ClinicalSection
+                label="Differential Diagnosis"
+                value={visit.differentialDiagnosis}
+              />
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <DetailItem label="Disposition" value={formatDisposition(visit.disposition)} />
+                <DetailItem label="Follow-up Date" value={visit.followUpDate ? formatDateTime(visit.followUpDate) : "—"} />
+                <DetailItem label="Referral Destination" value={visit.referredTo || "—"} />
+              </div>
 
               <ClinicalSection
                 label="Treatment Plan"
@@ -1769,6 +1859,19 @@ const formatRole = (role) => {
   if (!role) return "";
 
   return role
+    .split("_")
+    .map(
+      (word) =>
+        word.charAt(0).toUpperCase() +
+        word.slice(1)
+    )
+    .join(" ");
+};
+
+const formatDisposition = (value) => {
+  if (!value) return "—";
+
+  return value
     .split("_")
     .map(
       (word) =>

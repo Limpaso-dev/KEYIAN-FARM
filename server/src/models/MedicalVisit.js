@@ -59,9 +59,17 @@ const medicalVisitSchema = new mongoose.Schema(
     triageNotes: String,
     triageCompletedAt: Date,
 
+    assessment: String,
     diagnosis: String,
-
+    differentialDiagnosis: String,
     treatmentPlan: String,
+    disposition: {
+      type: String,
+      enum: ["observe", "follow_up", "admit", "discharge", "refer"],
+      default: "observe",
+    },
+    followUpDate: Date,
+    referredTo: String,
 
     status: {
       type: String,

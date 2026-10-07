@@ -15,6 +15,9 @@ import {
 import {
   normalizeTriageAssessment,
 } from "../utils/triage.js";
+import {
+  normalizeConsultationSummary,
+} from "../utils/consultation.js";
 
 // =====================================================
 // PATIENTS
@@ -281,6 +284,7 @@ export const createMedicalVisit = async (
       status: normalizeVisitStatus(req.body?.status),
       visitNumber: req.body?.visitNumber || generateVisitNumber(),
       ...normalizeTriageAssessment(req.body),
+      ...normalizeConsultationSummary(req.body),
     };
 
     // Automatically assign logged-in user as clinician
@@ -401,6 +405,7 @@ export const updateMedicalVisit = async (
       ...req.body,
       status: normalizeVisitStatus(req.body?.status),
       ...normalizeTriageAssessment(req.body),
+      ...normalizeConsultationSummary(req.body),
     };
 
     const visit = await MedicalVisit.findByIdAndUpdate(
