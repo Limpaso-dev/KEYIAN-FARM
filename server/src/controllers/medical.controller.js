@@ -18,6 +18,12 @@ import {
 import {
   normalizeConsultationSummary,
 } from "../utils/consultation.js";
+import {
+  normalizeLabStatus,
+} from "../utils/lab.js";
+import {
+  normalizePrescriptionStatus,
+} from "../utils/prescription.js";
 
 // =====================================================
 // PATIENTS
@@ -512,6 +518,7 @@ export const createMedicalLabResult = async (
   try {
     const payload = {
       ...req.body,
+      status: normalizeLabStatus(req.body?.status, req.body),
     };
 
     // Automatically assign logged-in user as lab performer
@@ -640,10 +647,19 @@ export const updateMedicalLabResult = async (
       });
     }
 
+    const normalizedPayload = {
+      ...existingLabResult.toObject(),
+      ...req.body,
+      status: normalizeLabStatus(req.body?.status ?? existingLabResult.status, {
+        ...existingLabResult.toObject(),
+        ...req.body,
+      }),
+    };
+
     const labResult =
       await MedicalLabResult.findByIdAndUpdate(
         req.params.id,
-        req.body,
+        normalizedPayload,
         {
           new: true,
           runValidators: true,
@@ -746,6 +762,7 @@ export const createPrescription = async (
   try {
     const payload = {
       ...req.body,
+      status: normalizePrescriptionStatus(req.body?.status, req.body),
     };
 
     // Automatically assign logged-in user as prescriber
@@ -869,10 +886,19 @@ export const updatePrescription = async (
       });
     }
 
+    const normalizedPayload = {
+      ...existingPrescription.toObject(),
+      ...req.body,
+      status: normalizePrescriptionStatus(req.body?.status ?? existingPrescription.status, {
+        ...existingPrescription.toObject(),
+        ...req.body,
+      }),
+    };
+
     const prescription =
       await Prescription.findByIdAndUpdate(
         req.params.id,
-        req.body,
+        normalizedPayload,
         {
           new: true,
           runValidators: true,
