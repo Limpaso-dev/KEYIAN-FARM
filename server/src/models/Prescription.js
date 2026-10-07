@@ -31,9 +31,21 @@ const prescriptionSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["prescribed", "dispensed", "cancelled"],
+      enum: ["prescribed", "dispensed", "cancelled", "voided"],
       default: "prescribed",
     },
+
+    deletedAt: Date,
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    voidReason: String,
+    voidedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    voidedAt: Date,
   },
   {
     timestamps: true,

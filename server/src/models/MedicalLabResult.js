@@ -24,8 +24,8 @@ const medicalLabResultSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["pending", "completed", "cancelled"],
-      default: "pending",
+      enum: ["ordered", "collected", "received", "pending", "completed", "cancelled", "voided"],
+      default: "ordered",
     },
 
     performedBy: {
@@ -34,6 +34,18 @@ const medicalLabResultSchema = new mongoose.Schema(
     },
 
     performedAt: Date,
+
+    deletedAt: Date,
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    voidReason: String,
+    voidedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    voidedAt: Date,
   },
   {
     timestamps: true,

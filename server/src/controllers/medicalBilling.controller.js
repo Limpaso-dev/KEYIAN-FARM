@@ -1,13 +1,14 @@
 import { randomInt } from "node:crypto";
 import MedicalBill from "../models/MedicalBill.js";
 import MedicalVisit from "../models/MedicalVisit.js";
+import { logAudit } from "../utils/globalRules.js";
 import { getApprovalSteps } from "../services/approvalWorkflow.service.js";
 
 export const listMedicalBills = async (req, res, next) => {
   try {
     const filter = ["finance", "admin", "super_admin", "manager"].includes(req.user.role)
-      ? {}
-      : { createdBy: req.user._id };
+      ? { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] }
+      : { createdBy: req.user._id, $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] };
     const bills = await MedicalBill.find(filter)
       .populate("patient", "patientNumber")
       .populate("visit", "visitDate visitType")
@@ -42,6 +43,15 @@ export const createMedicalBill = async (req, res, next) => {
       patient: visit.patient, visit: visit._id, createdBy: req.user._id,
       items, totalAmount, status: "pending_approval", approvalSteps: steps,
       policy: policyId, history: [{ action: "submitted", by: req.user._id }],
+    });
+    await logAudit({
+      actor: req.user,
+      action: "create",
+      entity: "MedicalBill",
+      entityId: bill._id,
+      before: null,
+      after: bill.toObject(),
+      metadata: { ip: req.ip },
     });
     await bill.populate([{ path: "patient", select: "patientNumber" }, { path: "visit", select: "visitDate visitType" }, { path: "createdBy", select: "name role" }]);
     res.status(201).json({ success: true, message: "Patient bill sent to Finance for approval", data: bill });

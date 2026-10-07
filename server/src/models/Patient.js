@@ -34,11 +34,36 @@ const patientSchema = new mongoose.Schema(
 
     address: String,
 
+    nationalId: String,
+
+    status: {
+      type: String,
+      enum: ["registered", "in_queue", "in_consultation", "closed", "voided"],
+      default: "registered",
+    },
+
+    consentAcknowledged: {
+      type: Boolean,
+      default: false,
+    },
+
     nextOfKin: {
       name: String,
       phone: String,
       relationship: String,
     },
+
+    deletedAt: Date,
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    voidReason: String,
+    voidedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    voidedAt: Date,
   },
   {
     timestamps: true,

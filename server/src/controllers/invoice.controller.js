@@ -6,6 +6,7 @@ import SupplierPayment from "../models/SupplierPayment.js";
 import MedicalBill from "../models/MedicalBill.js";
 import Transaction from "../models/Transaction.js";
 import Account from "../models/Account.js";
+import { logAudit } from "../utils/globalRules.js";
 import { getApprovalSteps } from "../services/approvalWorkflow.service.js";
 
 export const listSupplierInvoices = async (req, res, next) => {
@@ -108,7 +109,21 @@ export const recordMedicalBillPayment = async (req, res, next) => {
     bill.payments.push({ amount, method: req.body.paymentMethod, reference, account: req.body.account, receivedBy: req.user._id, transaction: transaction._id });
     bill.amountPaid += amount;
     bill.status = bill.amountPaid >= bill.totalAmount ? "paid" : "partially_paid";
+    const beforeState = bill.toObject();
     await bill.save();
+    await logAudit({
+      actor: req.user,
+      action: "payment_recorded",
+      entity: "MedicalBill",
+      entityId: bill._id,
+      before: beforeState,
+      after: bill.toObject(),
+      metadata: {
+        reference,
+        amount,
+        ip: req.ip,
+      },
+    });
     res.status(201).json({ success: true, message: "Patient payment recorded in Finance", data: bill });
   } catch (error) { res.status(error.code === 11000 ? 409 : 400).json({ success: false, message: error.code === 11000 ? "That payment reference already exists" : error.message }); }
 };

@@ -2,6 +2,7 @@ import Patient from "../models/Patient.js";
 import MedicalVisit from "../models/MedicalVisit.js";
 import MedicalLabResult from "../models/MedicalLabResult.js";
 import Prescription from "../models/Prescription.js";
+import { logAudit, softDeleteRecord } from "../utils/globalRules.js";
 
 // =====================================================
 // PATIENTS
@@ -10,6 +11,18 @@ import Prescription from "../models/Prescription.js";
 export const createPatient = async (req, res, next) => {
   try {
     const patient = await Patient.create(req.body);
+
+    await logAudit({
+      actor: req.user,
+      action: "create",
+      entity: "Patient",
+      entityId: patient._id,
+      before: null,
+      after: patient.toObject(),
+      metadata: {
+        ip: req.ip,
+      },
+    });
 
     const populatedPatient = await Patient.findById(
       patient._id
@@ -30,7 +43,9 @@ export const createPatient = async (req, res, next) => {
 
 export const getPatients = async (req, res, next) => {
   try {
-    const patients = await Patient.find()
+    const patients = await Patient.find({
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    })
       .populate(
         "farmer",
         "firstName lastName membershipNumber phone"
@@ -49,7 +64,10 @@ export const getPatients = async (req, res, next) => {
 
 export const getPatientById = async (req, res, next) => {
   try {
-    const patient = await Patient.findById(req.params.id).populate(
+    const patient = await Patient.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    }).populate(
       "farmer",
       "firstName lastName membershipNumber phone"
     );
@@ -72,6 +90,18 @@ export const getPatientById = async (req, res, next) => {
 
 export const updatePatient = async (req, res, next) => {
   try {
+    const existingPatient = await Patient.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
+
+    if (!existingPatient) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient not found",
+      });
+    }
+
     const patient = await Patient.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -84,12 +114,17 @@ export const updatePatient = async (req, res, next) => {
       "firstName lastName membershipNumber phone"
     );
 
-    if (!patient) {
-      return res.status(404).json({
-        success: false,
-        message: "Patient not found",
-      });
-    }
+    await logAudit({
+      actor: req.user,
+      action: "update",
+      entity: "Patient",
+      entityId: patient._id,
+      before: existingPatient.toObject(),
+      after: patient.toObject(),
+      metadata: {
+        ip: req.ip,
+      },
+    });
 
     res.status(200).json({
       success: true,
@@ -103,9 +138,10 @@ export const updatePatient = async (req, res, next) => {
 
 export const deletePatient = async (req, res, next) => {
   try {
-    const patient = await Patient.findByIdAndDelete(
-      req.params.id
-    );
+    const patient = await Patient.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
 
     if (!patient) {
       return res.status(404).json({
@@ -114,9 +150,38 @@ export const deletePatient = async (req, res, next) => {
       });
     }
 
+    const softDeletedPatient = softDeleteRecord(patient.toObject(), {
+      actor: req.user,
+      reason: req.body?.reason || "Administrative void",
+      metadata: { ip: req.ip },
+    });
+
+    const updatedPatient = await Patient.findByIdAndUpdate(
+      req.params.id,
+      softDeletedPatient,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    await logAudit({
+      actor: req.user,
+      action: "void",
+      entity: "Patient",
+      entityId: patient._id,
+      before: patient.toObject(),
+      after: updatedPatient.toObject(),
+      metadata: {
+        reason: req.body?.reason || "Administrative void",
+        ip: req.ip,
+      },
+    });
+
     res.status(200).json({
       success: true,
-      message: "Patient deleted successfully",
+      message: "Patient voided successfully",
+      data: updatedPatient,
     });
   } catch (error) {
     next(error);
@@ -144,6 +209,18 @@ export const createMedicalVisit = async (
 
     const visit = await MedicalVisit.create(payload);
 
+    await logAudit({
+      actor: req.user,
+      action: "create",
+      entity: "MedicalVisit",
+      entityId: visit._id,
+      before: null,
+      after: visit.toObject(),
+      metadata: {
+        ip: req.ip,
+      },
+    });
+
     const populatedVisit = await MedicalVisit.findById(
       visit._id
     )
@@ -169,7 +246,9 @@ export const getMedicalVisits = async (
   next
 ) => {
   try {
-    const visits = await MedicalVisit.find()
+    const visits = await MedicalVisit.find({
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    })
       .populate("patient")
       .populate(
         "clinician",
@@ -193,9 +272,10 @@ export const getMedicalVisitById = async (
   next
 ) => {
   try {
-    const visit = await MedicalVisit.findById(
-      req.params.id
-    )
+    const visit = await MedicalVisit.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    })
       .populate("patient")
       .populate(
         "clinician",
@@ -224,6 +304,18 @@ export const updateMedicalVisit = async (
   next
 ) => {
   try {
+    const existingVisit = await MedicalVisit.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
+
+    if (!existingVisit) {
+      return res.status(404).json({
+        success: false,
+        message: "Medical visit not found",
+      });
+    }
+
     const visit = await MedicalVisit.findByIdAndUpdate(
       req.params.id,
       req.body,
@@ -238,12 +330,17 @@ export const updateMedicalVisit = async (
         "name email role department"
       );
 
-    if (!visit) {
-      return res.status(404).json({
-        success: false,
-        message: "Medical visit not found",
-      });
-    }
+    await logAudit({
+      actor: req.user,
+      action: "update",
+      entity: "MedicalVisit",
+      entityId: visit._id,
+      before: existingVisit.toObject(),
+      after: visit.toObject(),
+      metadata: {
+        ip: req.ip,
+      },
+    });
 
     res.status(200).json({
       success: true,
@@ -261,9 +358,10 @@ export const deleteMedicalVisit = async (
   next
 ) => {
   try {
-    const visit = await MedicalVisit.findByIdAndDelete(
-      req.params.id
-    );
+    const visit = await MedicalVisit.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
 
     if (!visit) {
       return res.status(404).json({
@@ -272,9 +370,38 @@ export const deleteMedicalVisit = async (
       });
     }
 
+    const softDeletedVisit = softDeleteRecord(visit.toObject(), {
+      actor: req.user,
+      reason: req.body?.reason || "Administrative void",
+      metadata: { ip: req.ip },
+    });
+
+    const updatedVisit = await MedicalVisit.findByIdAndUpdate(
+      req.params.id,
+      softDeletedVisit,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    await logAudit({
+      actor: req.user,
+      action: "void",
+      entity: "MedicalVisit",
+      entityId: visit._id,
+      before: visit.toObject(),
+      after: updatedVisit.toObject(),
+      metadata: {
+        reason: req.body?.reason || "Administrative void",
+        ip: req.ip,
+      },
+    });
+
     res.status(200).json({
       success: true,
-      message: "Medical visit deleted successfully",
+      message: "Medical visit voided successfully",
+      data: updatedVisit,
     });
   } catch (error) {
     next(error);
@@ -309,6 +436,18 @@ export const createMedicalLabResult = async (
       payload
     );
 
+    await logAudit({
+      actor: req.user,
+      action: "create",
+      entity: "MedicalLabResult",
+      entityId: labResult._id,
+      before: null,
+      after: labResult.toObject(),
+      metadata: {
+        ip: req.ip,
+      },
+    });
+
     const populatedLabResult =
       await MedicalLabResult.findById(
         labResult._id
@@ -336,7 +475,9 @@ export const getMedicalLabResults = async (
   next
 ) => {
   try {
-    const labResults = await MedicalLabResult.find()
+    const labResults = await MedicalLabResult.find({
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    })
       .populate("patient")
       .populate("visit")
       .populate(
@@ -362,9 +503,10 @@ export const getMedicalLabResultById = async (
 ) => {
   try {
     const labResult =
-      await MedicalLabResult.findById(
-        req.params.id
-      )
+      await MedicalLabResult.findOne({
+        _id: req.params.id,
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      })
         .populate("patient")
         .populate("visit")
         .populate(
@@ -394,6 +536,18 @@ export const updateMedicalLabResult = async (
   next
 ) => {
   try {
+    const existingLabResult = await MedicalLabResult.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
+
+    if (!existingLabResult) {
+      return res.status(404).json({
+        success: false,
+        message: "Medical lab result not found",
+      });
+    }
+
     const labResult =
       await MedicalLabResult.findByIdAndUpdate(
         req.params.id,
@@ -410,12 +564,17 @@ export const updateMedicalLabResult = async (
           "name email role department"
         );
 
-    if (!labResult) {
-      return res.status(404).json({
-        success: false,
-        message: "Medical lab result not found",
-      });
-    }
+    await logAudit({
+      actor: req.user,
+      action: "update",
+      entity: "MedicalLabResult",
+      entityId: labResult._id,
+      before: existingLabResult.toObject(),
+      after: labResult.toObject(),
+      metadata: {
+        ip: req.ip,
+      },
+    });
 
     res.status(200).json({
       success: true,
@@ -433,10 +592,10 @@ export const deleteMedicalLabResult = async (
   next
 ) => {
   try {
-    const labResult =
-      await MedicalLabResult.findByIdAndDelete(
-        req.params.id
-      );
+    const labResult = await MedicalLabResult.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
 
     if (!labResult) {
       return res.status(404).json({
@@ -445,9 +604,38 @@ export const deleteMedicalLabResult = async (
       });
     }
 
+    const softDeletedLabResult = softDeleteRecord(labResult.toObject(), {
+      actor: req.user,
+      reason: req.body?.reason || "Administrative void",
+      metadata: { ip: req.ip },
+    });
+
+    const updatedLabResult = await MedicalLabResult.findByIdAndUpdate(
+      req.params.id,
+      softDeletedLabResult,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    await logAudit({
+      actor: req.user,
+      action: "void",
+      entity: "MedicalLabResult",
+      entityId: labResult._id,
+      before: labResult.toObject(),
+      after: updatedLabResult.toObject(),
+      metadata: {
+        reason: req.body?.reason || "Administrative void",
+        ip: req.ip,
+      },
+    });
+
     res.status(200).json({
       success: true,
-      message: "Medical lab result deleted successfully",
+      message: "Medical lab result voided successfully",
+      data: updatedLabResult,
     });
   } catch (error) {
     next(error);
@@ -475,6 +663,18 @@ export const createPrescription = async (
 
     const prescription =
       await Prescription.create(payload);
+
+    await logAudit({
+      actor: req.user,
+      action: "create",
+      entity: "Prescription",
+      entityId: prescription._id,
+      before: null,
+      after: prescription.toObject(),
+      metadata: {
+        ip: req.ip,
+      },
+    });
 
     const populatedPrescription =
       await Prescription.findById(
@@ -504,7 +704,9 @@ export const getPrescriptions = async (
 ) => {
   try {
     const prescriptions =
-      await Prescription.find()
+      await Prescription.find({
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      })
         .populate("patient")
         .populate("visit")
         .populate(
@@ -530,9 +732,10 @@ export const getPrescriptionById = async (
 ) => {
   try {
     const prescription =
-      await Prescription.findById(
-        req.params.id
-      )
+      await Prescription.findOne({
+        _id: req.params.id,
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      })
         .populate("patient")
         .populate("visit")
         .populate(
@@ -562,6 +765,18 @@ export const updatePrescription = async (
   next
 ) => {
   try {
+    const existingPrescription = await Prescription.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
+
+    if (!existingPrescription) {
+      return res.status(404).json({
+        success: false,
+        message: "Prescription not found",
+      });
+    }
+
     const prescription =
       await Prescription.findByIdAndUpdate(
         req.params.id,
@@ -578,12 +793,17 @@ export const updatePrescription = async (
           "name email role department"
         );
 
-    if (!prescription) {
-      return res.status(404).json({
-        success: false,
-        message: "Prescription not found",
-      });
-    }
+    await logAudit({
+      actor: req.user,
+      action: "update",
+      entity: "Prescription",
+      entityId: prescription._id,
+      before: existingPrescription.toObject(),
+      after: prescription.toObject(),
+      metadata: {
+        ip: req.ip,
+      },
+    });
 
     res.status(200).json({
       success: true,
@@ -601,10 +821,10 @@ export const deletePrescription = async (
   next
 ) => {
   try {
-    const prescription =
-      await Prescription.findByIdAndDelete(
-        req.params.id
-      );
+    const prescription = await Prescription.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
 
     if (!prescription) {
       return res.status(404).json({
@@ -613,9 +833,38 @@ export const deletePrescription = async (
       });
     }
 
+    const softDeletedPrescription = softDeleteRecord(prescription.toObject(), {
+      actor: req.user,
+      reason: req.body?.reason || "Administrative void",
+      metadata: { ip: req.ip },
+    });
+
+    const updatedPrescription = await Prescription.findByIdAndUpdate(
+      req.params.id,
+      softDeletedPrescription,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    await logAudit({
+      actor: req.user,
+      action: "void",
+      entity: "Prescription",
+      entityId: prescription._id,
+      before: prescription.toObject(),
+      after: updatedPrescription.toObject(),
+      metadata: {
+        reason: req.body?.reason || "Administrative void",
+        ip: req.ip,
+      },
+    });
+
     res.status(200).json({
       success: true,
-      message: "Prescription deleted successfully",
+      message: "Prescription voided successfully",
+      data: updatedPrescription,
     });
   } catch (error) {
     next(error);
