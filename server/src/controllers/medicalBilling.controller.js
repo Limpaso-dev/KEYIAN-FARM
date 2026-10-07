@@ -3,6 +3,7 @@ import MedicalBill from "../models/MedicalBill.js";
 import MedicalVisit from "../models/MedicalVisit.js";
 import { logAudit } from "../utils/globalRules.js";
 import { getApprovalSteps } from "../services/approvalWorkflow.service.js";
+import { normalizeBillStatus, calculateBillBalance } from "../utils/billing.js";
 
 export const listMedicalBills = async (req, res, next) => {
   try {
@@ -41,7 +42,7 @@ export const createMedicalBill = async (req, res, next) => {
     const bill = await MedicalBill.create({
       billNumber: `HB-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}-${randomInt(100, 1000)}`,
       patient: visit.patient, visit: visit._id, createdBy: req.user._id,
-      items, totalAmount, status: "pending_approval", approvalSteps: steps,
+      items, totalAmount, amountPaid: 0, status: "pending_approval", approvalSteps: steps,
       policy: policyId, history: [{ action: "submitted", by: req.user._id }],
     });
     await logAudit({
