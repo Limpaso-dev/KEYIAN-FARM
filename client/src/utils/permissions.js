@@ -29,6 +29,7 @@ const moduleRoles = {
 
 const readOnlyModuleRoles = {
   inventory: ["stores"],
+  livestock: ["farm_officer"],
   salesReports: ["finance"],
   milkCollection: ["laboratory"],
   suppliers: ["livestock", "dairy", "farm_officer", "sales"],

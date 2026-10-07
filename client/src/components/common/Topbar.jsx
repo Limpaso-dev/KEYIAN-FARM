@@ -76,7 +76,7 @@ const Topbar = ({ onMenuClick = () => {} }) => {
   };
 
   return (
-    <header className="fixed left-0 right-0 top-0 z-30 h-20 border-b border-slate-200 bg-white lg:left-64">
+    <header className="fixed left-0 right-0 top-0 z-30 h-20 border-b border-[#dfe8dc] bg-[#f8faf6] lg:left-64">
       <div className="flex h-full items-center justify-between gap-3 px-3 sm:px-6">
         <button type="button" aria-label="Open navigation" onClick={onMenuClick} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"><Menu size={20} /></button>
         {/* Search */}

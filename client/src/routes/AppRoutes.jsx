@@ -2,7 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import Login from "../pages/auth/Login";
 import VerifyAccountPage from "../pages/auth/VerifyAccountPage";
-import Dashboard from "../pages/dashboard/Dashboard";
+import ModuleDashboard from "../pages/dashboard/ModuleDashboard";
 
 import DashboardLayout from "../layouts/DashboardLayout";
 import ProtectedRoute from "./ProtectedRoute";
@@ -73,7 +73,7 @@ const AppRoutes = () => {
 
           <Route
             path="/dashboard"
-            element={<Dashboard />}
+            element={<ModuleDashboard />}
           />
 
           <Route path="/workflows" element={<WorkflowInboxPage />} />

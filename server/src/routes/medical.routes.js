@@ -36,7 +36,7 @@ import {
 
 import { protect } from "../middleware/auth.middleware.js";
 import { authorizeModule } from "../middleware/role.middleware.js";
-import { createMedicalBill, listMedicalBills } from "../controllers/medicalBilling.controller.js";
+import { createMedicalBill, getPatientBillSummary, listMedicalBills } from "../controllers/medicalBilling.controller.js";
 import { recordMedicalBillPayment } from "../controllers/invoice.controller.js";
 
 const router = express.Router();
@@ -50,6 +50,7 @@ router.use(protect);
 
 router.get("/summary", authorizeModule("hmisSummary"), getMedicalSummary);
 router.get("/bills", authorizeModule("hmisBilling"), listMedicalBills);
+router.get("/visits/:id/billing-summary", authorizeModule("hmisBilling"), getPatientBillSummary);
 router.post("/bills", authorizeModule("hmisBilling"), createMedicalBill);
 router.post("/bills/:id/payments", authorizeModule("hmisBilling"), recordMedicalBillPayment);
 
