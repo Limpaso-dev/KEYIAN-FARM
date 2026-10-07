@@ -14,6 +14,8 @@ import {
   getMedicalVisitById,
   updateMedicalVisit,
   deleteMedicalVisit,
+  admitMedicalVisit,
+  dischargeMedicalVisit,
 
   // Medical Lab Results
   createMedicalLabResult,
@@ -75,6 +77,10 @@ router.get("/visits", authorizeModule("hmisVisits"), getMedicalVisits);
 router.get("/visits/:id", authorizeModule("hmisVisits"), getMedicalVisitById);
 
 router.put("/visits/:id", authorizeModule("hmisVisits"), updateMedicalVisit);
+
+router.post("/visits/:id/admit", authorizeModule("hmisVisits"), admitMedicalVisit);
+
+router.post("/visits/:id/discharge", authorizeModule("hmisVisits"), dischargeMedicalVisit);
 
 router.delete("/visits/:id", authorizeModule("hmisVisits"), deleteMedicalVisit);
 

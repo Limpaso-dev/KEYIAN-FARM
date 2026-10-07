@@ -19,6 +19,10 @@ import {
   normalizeConsultationSummary,
 } from "../utils/consultation.js";
 import {
+  normalizeAdmissionRequest,
+  normalizeDischargeSummary,
+} from "../utils/admission.js";
+import {
   normalizeLabStatus,
 } from "../utils/lab.js";
 import {
@@ -500,6 +504,126 @@ export const deleteMedicalVisit = async (
       success: true,
       message: "Medical visit voided successfully",
       data: updatedVisit,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const admitMedicalVisit = async (req, res, next) => {
+  try {
+    const existingVisit = await MedicalVisit.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
+
+    if (!existingVisit) {
+      return res.status(404).json({
+        success: false,
+        message: "Medical visit not found",
+      });
+    }
+
+    const normalizedAdmission = normalizeAdmissionRequest({
+      ...existingVisit.toObject(),
+      ...req.body,
+    });
+
+    const visit = await MedicalVisit.findByIdAndUpdate(
+      req.params.id,
+      {
+        ...existingVisit.toObject(),
+        ...req.body,
+        ...normalizedAdmission,
+        disposition: req.body?.disposition || "admit",
+        status: normalizedAdmission.status,
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .populate("patient")
+      .populate("clinician", "name email role department");
+
+    await logAudit({
+      actor: req.user,
+      action: "admit",
+      entity: "MedicalVisit",
+      entityId: visit._id,
+      before: existingVisit.toObject(),
+      after: visit.toObject(),
+      metadata: {
+        ward: normalizedAdmission.ward,
+        bedNumber: normalizedAdmission.bedNumber,
+        ip: req.ip,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Patient admitted successfully",
+      data: visit,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const dischargeMedicalVisit = async (req, res, next) => {
+  try {
+    const existingVisit = await MedicalVisit.findOne({
+      _id: req.params.id,
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    });
+
+    if (!existingVisit) {
+      return res.status(404).json({
+        success: false,
+        message: "Medical visit not found",
+      });
+    }
+
+    const normalizedDischarge = normalizeDischargeSummary({
+      ...existingVisit.toObject(),
+      ...req.body,
+    });
+
+    const visit = await MedicalVisit.findByIdAndUpdate(
+      req.params.id,
+      {
+        ...existingVisit.toObject(),
+        ...req.body,
+        ...normalizedDischarge,
+        disposition: req.body?.disposition || "discharge",
+        status: normalizedDischarge.status,
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    )
+      .populate("patient")
+      .populate("clinician", "name email role department");
+
+    await logAudit({
+      actor: req.user,
+      action: "discharge",
+      entity: "MedicalVisit",
+      entityId: visit._id,
+      before: existingVisit.toObject(),
+      after: visit.toObject(),
+      metadata: {
+        dischargeSummary: normalizedDischarge.dischargeSummary,
+        dischargePlan: normalizedDischarge.dischargePlan,
+        ip: req.ip,
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Patient discharge summary saved successfully",
+      data: visit,
     });
   } catch (error) {
     next(error);
