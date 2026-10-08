@@ -4,6 +4,7 @@ import PurchaseOrder from "../models/PurchaseOrder.js";
 import SupplierInvoice from "../models/SupplierInvoice.js";
 import SupplierPayment from "../models/SupplierPayment.js";
 import MedicalBill from "../models/MedicalBill.js";
+import MedicalVisit from "../models/MedicalVisit.js";
 import Transaction from "../models/Transaction.js";
 import Account from "../models/Account.js";
 import { logAudit } from "../utils/globalRules.js";
@@ -96,22 +97,48 @@ export const requestSupplierPayment = async (req, res, next) => {
 
 export const recordMedicalBillPayment = async (req, res, next) => {
   try {
-    if (req.user.role !== "finance" && !["admin", "super_admin"].includes(req.user.role)) return res.status(403).json({ success: false, message: "Only Finance can record patient payments" });
+    if (!new Set(["finance", "cashier", "admin", "super_admin"]).has(req.user.role)) return res.status(403).json({ success: false, message: "Only Finance or Cashier can record patient payments" });
     const bill = await MedicalBill.findById(req.params.id);
     if (!bill || !["approved", "partially_paid"].includes(bill.status)) return res.status(409).json({ success: false, message: "Only an approved bill can be paid" });
     const amount = Number(req.body.amount);
     const remaining = calculateBillBalance({ totalAmount: bill.totalAmount, amountPaid: bill.amountPaid });
     if (!Number.isFinite(amount) || amount <= 0 || amount > remaining + 0.0001) return res.status(400).json({ success: false, message: `Enter an amount up to the remaining balance KES ${remaining.toFixed(2)}` });
     const reference = String(req.body.reference || "").trim();
-    if (!reference || !req.body.account) return res.status(400).json({ success: false, message: "Payment reference and finance account are required" });
-    const account = await Account.findOne({ _id: req.body.account, status: "active", accountType: "asset" });
-    if (!account) return res.status(400).json({ success: false, message: "Select an active cash or bank account" });
-    const transaction = await Transaction.create({ reference: `HMIS-${reference}`, type: "receipt", account: req.body.account, amount, description: `Patient bill ${bill.billNumber}`, status: "posted", createdBy: req.user._id });
-    bill.payments.push({ amount, method: req.body.paymentMethod, reference, account: req.body.account, receivedBy: req.user._id, transaction: transaction._id });
+    const paymentMethod = String(req.body.paymentMethod || "cash");
+    if (!reference) return res.status(400).json({ success: false, message: "Payment reference is required" });
+    let account;
+    if (paymentMethod === "cash") {
+      const cashAccounts = await Account.find({ status: "active", accountType: "asset", accountName: { $regex: /cash/i } }).select("accountCode accountName").lean();
+      const rank = (name) => {
+        const normalized = name.trim().toLowerCase();
+        if (normalized === "cash on hand") return 0;
+        if (normalized === "cash drawer") return 1;
+        if (normalized === "cash in hand") return 2;
+        if (normalized === "cash") return 3;
+        return 4;
+      };
+      account = cashAccounts.sort((a, b) => rank(a.accountName) - rank(b.accountName) || a.accountCode.localeCompare(b.accountCode))[0];
+      if (!account) return res.status(400).json({ success: false, message: "Set up an active asset account named Cash on Hand (or Cash Drawer) before recording cash receipts" });
+    } else {
+      if (!req.body.account) return res.status(400).json({ success: false, message: "Select the bank or mobile money account that received the payment" });
+      account = await Account.findOne({ _id: req.body.account, status: "active", accountType: "asset" });
+      if (!account) return res.status(400).json({ success: false, message: "Select an active cash or bank account" });
+    }
+    const transaction = await Transaction.create({ reference: `HMIS-${reference}`, type: "receipt", account: account._id, amount, description: `Patient bill ${bill.billNumber}`, status: "posted", createdBy: req.user._id });
+    bill.payments.push({ amount, method: paymentMethod, reference, account: account._id, receivedBy: req.user._id, transaction: transaction._id });
     bill.amountPaid += amount;
     bill.status = normalizeBillStatus({ totalAmount: bill.totalAmount, amountPaid: bill.amountPaid, currentStatus: bill.status });
     const beforeState = bill.toObject();
     await bill.save();
+    if (bill.status === "paid" && bill.visit) {
+      const visit = await MedicalVisit.findOne({ _id: bill.visit, status: "awaiting_billing" });
+      if (visit) {
+        const beforeVisit = visit.toObject();
+        visit.status = "cleared";
+        await visit.save();
+        await logAudit({ actor: req.user, action: "payment_cleared_visit", entity: "MedicalVisit", entityId: visit._id, before: beforeVisit, after: visit.toObject(), metadata: { bill: bill._id, ip: req.ip } });
+      }
+    }
     await logAudit({
       actor: req.user,
       action: "payment_recorded",

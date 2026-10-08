@@ -18,8 +18,16 @@ import {
   updateUser,
 } from "../../services/user.service";
 
-const roles = [
-  ["admin", "Administrator"],
+const hmisRoles = [
+  ["receptionist", "Receptionist"],
+  ["nurse", "Nurse / Triage"],
+  ["doctor", "Doctor / Clinician"],
+  ["laboratory", "Laboratory Technician"],
+  ["pharmacist", "Pharmacist"],
+  ["cashier", "Cashier"],
+];
+
+const otherRoles = [
   ["manager", "Manager"],
   ["finance", "Finance"],
   ["hr", "HR"],
@@ -27,13 +35,46 @@ const roles = [
   ["stores", "Stores / Receiving"],
   ["livestock", "Livestock"],
   ["dairy", "Dairy"],
-  ["laboratory", "Laboratory"],
-  ["doctor", "Doctor"],
-  ["nurse", "Nurse"],
-  ["pharmacist", "Pharmacist"],
   ["sales", "Sales"],
   ["farm_officer", "Farm Officer"],
   ["staff", "Staff"],
+];
+
+const roleDepartment = {
+  receptionist: "reception",
+  nurse: "nursing",
+  doctor: "medical",
+  laboratory: "laboratory",
+  pharmacist: "pharmacy",
+  cashier: "finance",
+};
+
+const roleAccessDescriptions = {
+  receptionist: "Registration, patient demographics, and visit tracking. No diagnosis or clinical-note access.",
+  nurse: "Patient history, triage, vitals, nursing notes, and visit tracking. No prescribing or finance access.",
+  doctor: "Full clinical workflow: diagnosis, treatment plan, lab orders, prescriptions, and clinical history.",
+  laboratory: "Lab worklist, limited patient identifiers, doctor diagnosis, requested tests, and lab results.",
+  pharmacist: "Medication-relevant patient history, prescriptions, and dispense status. No billing or lab-result access.",
+  cashier: "HMIS bills, approved payment collection, and deposit-account selection. No general finance access.",
+};
+
+const departments = [
+  ["reception", "Reception"],
+  ["nursing", "Nursing"],
+  ["medical", "Medical / Clinical"],
+  ["laboratory", "Laboratory"],
+  ["pharmacy", "Pharmacy"],
+  ["radiology", "Radiology"],
+  ["finance", "Finance"],
+  ["procurement", "Procurement"],
+  ["stores", "Stores"],
+  ["human_resources", "Human Resources"],
+  ["agriculture", "Agriculture"],
+  ["dairy", "Dairy"],
+  ["livestock", "Livestock"],
+  ["sales", "Sales"],
+  ["administration", "Administration"],
+  ["general", "General"],
 ];
 
 const initialForm = {
@@ -113,7 +154,7 @@ const UserManagementPage = () => {
       name: account.name || "",
       email: account.email || "",
       phone: account.phone || "",
-      department: account.department || "",
+      department: roleDepartment[account.role] || account.department || "",
       role: account.role || "staff",
       password: "",
       isActive: account.isActive !== false,
@@ -134,6 +175,9 @@ const UserManagementPage = () => {
     const { name, value, type, checked } = event.target;
     setForm((previous) => ({
       ...previous,
+      ...(name === "role" && roleDepartment[value]
+        ? { department: roleDepartment[value] }
+        : {}),
       [name]: type === "checkbox" ? checked : value,
     }));
   };
@@ -181,9 +225,6 @@ const UserManagementPage = () => {
   };
 
   const isSuperAdmin = currentUser?.role === "super_admin";
-  const availableRoles = isSuperAdmin
-    ? [["super_admin", "Super Admin"], ...roles]
-    : roles;
   const normalizedSearch = search.trim().toLowerCase();
   const visibleUsers = users.filter((account) => {
     const matchesSearch = [
@@ -201,6 +242,11 @@ const UserManagementPage = () => {
   const inactiveCount = users.filter((account) => !account.isActive).length;
   const canChangeOwnAccess = (account) =>
     account._id !== currentUser?._id;
+  const canEditAccount = (account) =>
+    canChangeOwnAccess(account) && (
+      currentUser?.role === "super_admin" ||
+      !["admin", "super_admin"].includes(account.role)
+    );
 
   return (
     <div className="space-y-6">
@@ -300,9 +346,10 @@ const UserManagementPage = () => {
                       <div className="flex justify-end">
                         <button
                           type="button"
-                          title="Edit account"
+                          title={canEditAccount(account) ? "Edit account" : "Only a super admin can manage this account"}
+                          disabled={!canEditAccount(account)}
                           onClick={() => openEditForm(account)}
-                          className="rounded p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                          className="rounded p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Pencil size={16} />
                         </button>
@@ -342,7 +389,21 @@ const UserManagementPage = () => {
               <Field label="Full name" name="name" value={form.name} onChange={handleChange} required autoComplete="name" />
               <Field label="Email address" name="email" value={form.email} onChange={handleChange} type="email" required autoComplete="email" />
               <Field label="Phone" name="phone" value={form.phone} onChange={handleChange} type="tel" autoComplete="tel" />
-              <Field label="Department" name="department" value={form.department} onChange={handleChange} />
+              <label className="grid gap-1.5 text-sm font-medium text-slate-700">
+                Department
+                <select
+                  name="department"
+                  value={form.department}
+                  onChange={handleChange}
+                  disabled={Boolean(roleDepartment[form.role])}
+                  className="rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+                >
+                  <option value="">Select department</option>
+                  {departments.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
               <label className="grid gap-1.5 text-sm font-medium text-slate-700">
                 Role
                 <select
@@ -352,10 +413,26 @@ const UserManagementPage = () => {
                   disabled={editingUser && !canChangeOwnAccess(editingUser)}
                   className="rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 disabled:bg-slate-100"
                 >
-                  {availableRoles.map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
+                  {isSuperAdmin && <>
+                    <option value="super_admin">Super Admin</option>
+                    <option value="admin">Administrator</option>
+                  </>}
+                  <optgroup label="HMIS">
+                    {hmisRoles.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="ERP">
+                    {otherRoles.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </optgroup>
                 </select>
+                {roleAccessDescriptions[form.role] && (
+                  <span className="text-xs font-normal leading-5 text-slate-500">
+                    {roleAccessDescriptions[form.role]}
+                  </span>
+                )}
               </label>
               <label className="grid gap-1.5 text-sm font-medium text-slate-700">
                 {editingUser ? "Reset password" : "Initial password"}

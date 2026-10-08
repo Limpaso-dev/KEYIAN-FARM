@@ -10,6 +10,15 @@ import {
 const VERIFICATION_EXPIRY_MS = 10 * 60 * 1000;
 const VERIFICATION_RESEND_DELAY_MS = 60 * 1000;
 const MAX_VERIFICATION_ATTEMPTS = 5;
+const HMIS_ROLE_DEPARTMENTS = {
+  receptionist: "reception",
+  nurse: "nursing",
+  doctor: "medical",
+  laboratory: "laboratory",
+  pharmacist: "pharmacy",
+  cashier: "finance",
+  radiology: "radiology",
+};
 
 const normalizeEmail = (email) => email.trim().toLowerCase();
 
@@ -163,10 +172,10 @@ export const createUser = async (req, res, next) => {
       password,
     } = req.body;
 
-    if (role === "super_admin" && req.user.role !== "super_admin") {
+    if (["admin", "super_admin"].includes(role) && req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
-        message: "Only a super admin can create another super admin",
+        message: "Only a super admin can create administrator accounts",
       });
     }
 
@@ -205,6 +214,11 @@ export const createUser = async (req, res, next) => {
       });
     }
 
+    const requiredDepartment = HMIS_ROLE_DEPARTMENTS[role];
+    if (requiredDepartment && department?.trim().toLowerCase() && department.trim().toLowerCase() !== requiredDepartment) {
+      return res.status(400).json({ success: false, message: `${role} accounts must belong to the ${requiredDepartment} department` });
+    }
+
     const normalizedEmail = normalizeEmail(email);
 
     const existingUser = await User.findOne({
@@ -224,7 +238,7 @@ export const createUser = async (req, res, next) => {
       phone: phone?.trim(),
       password: await bcrypt.hash(password, 12),
       role: role || "staff",
-      department: department?.trim(),
+      department: requiredDepartment || department?.trim().toLowerCase(),
       isActive: true,
       emailVerified: true,
     });
@@ -362,10 +376,10 @@ export const resendUserVerification = async (req, res, next) => {
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
-    if (user.role === "super_admin" && req.user.role !== "super_admin") {
+    if (["admin", "super_admin"].includes(user.role) && req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
-        message: "Only a super admin can manage a super-admin account",
+        message: "Only a super admin can manage administrator accounts",
       });
     }
     if (user.emailVerified) {
@@ -438,17 +452,17 @@ export const updateUser = async (req, res, next) => {
 
     const isSelf = user._id.toString() === req.user._id.toString();
     let emailChanged = false;
-    if (user.role === "super_admin" && req.user.role !== "super_admin") {
+    if (["admin", "super_admin"].includes(user.role) && req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
-        message: "Only a super admin can manage a super-admin account",
+        message: "Only a super admin can manage administrator accounts",
       });
     }
 
-    if (req.body.role === "super_admin" && req.user.role !== "super_admin") {
+    if (["admin", "super_admin"].includes(req.body.role) && req.user.role !== "super_admin") {
       return res.status(403).json({
         success: false,
-        message: "Only a super admin can assign the super-admin role",
+        message: "Only a super admin can assign administrator roles",
       });
     }
 
@@ -530,6 +544,16 @@ export const updateUser = async (req, res, next) => {
         });
       }
       user.role = req.body.role;
+    }
+
+    const requiredDepartment = HMIS_ROLE_DEPARTMENTS[user.role];
+    if (requiredDepartment) {
+      if (req.body.department !== undefined && req.body.department.trim().toLowerCase() !== requiredDepartment) {
+        return res.status(400).json({ success: false, message: `${user.role} accounts must belong to the ${requiredDepartment} department` });
+      }
+      user.department = requiredDepartment;
+    } else if (req.body.department !== undefined) {
+      user.department = req.body.department.trim().toLowerCase();
     }
     if (req.body.isActive !== undefined) {
       if (typeof req.body.isActive !== "boolean") {

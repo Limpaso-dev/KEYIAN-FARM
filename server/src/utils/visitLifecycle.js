@@ -7,6 +7,7 @@ const VALID_VISIT_STATUSES = [
   "awaiting_investigations",
   "awaiting_results",
   "awaiting_pharmacy",
+  "awaiting_billing",
   "admitted",
   "discharge_pending",
   "cleared",
@@ -40,6 +41,14 @@ export const normalizeVisitStatus = (status) => {
   return VALID_VISIT_STATUSES.includes(normalized)
     ? normalized
     : "registered";
+};
+
+export const isAllowedDoctorVisitTransition = (currentStatus, nextStatus) => {
+  const transitions = {
+    waiting_for_doctor: ["in_consultation"],
+    in_consultation: ["in_consultation", "waiting_for_doctor", "awaiting_results", "awaiting_pharmacy", "awaiting_billing"],
+  };
+  return transitions[currentStatus]?.includes(nextStatus) || false;
 };
 
 export const generateVisitNumber = () => {

@@ -18,6 +18,8 @@ const medicalLabResultSchema = new mongoose.Schema(
       required: true,
     },
 
+    unitPrice: { type: Number, min: 0, default: 2000 },
+
     result: String,
 
     referenceRange: String,

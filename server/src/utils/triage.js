@@ -39,6 +39,11 @@ export const deriveTriagePriority = (vitals = {}) => {
   return "routine";
 };
 
+export const isAllowedNurseTriageTransition = (currentStatus, nextStatus) => (
+  currentStatus === "waiting_for_triage" && nextStatus === "in_triage" ||
+  currentStatus === "in_triage" && ["in_triage", "waiting_for_doctor"].includes(nextStatus)
+);
+
 export const normalizeTriageAssessment = (payload = {}) => {
   const temperature = toNumber(payload.temperature);
   const pulseRate = toNumber(payload.pulseRate);
@@ -48,16 +53,20 @@ export const normalizeTriageAssessment = (payload = {}) => {
   const weightKg = toNumber(payload.weightKg);
   const heightCm = toNumber(payload.heightCm);
 
-  const triagePriority =
-    payload.triagePriority && ["routine", "urgent", "emergency"].includes(String(payload.triagePriority).toLowerCase())
-      ? String(payload.triagePriority).toLowerCase()
-      : deriveTriagePriority({
-          temperature,
-          pulseRate,
-          respiratoryRate,
-          oxygenSaturation,
-          painScore,
-        });
+  const priorityRank = { routine: 0, urgent: 1, emergency: 2 };
+  const requestedPriority = ["routine", "urgent", "emergency"].includes(String(payload.triagePriority || "").toLowerCase())
+    ? String(payload.triagePriority).toLowerCase()
+    : "routine";
+  const derivedPriority = deriveTriagePriority({
+    temperature,
+    pulseRate,
+    respiratoryRate,
+    oxygenSaturation,
+    painScore,
+  });
+  const triagePriority = priorityRank[requestedPriority] >= priorityRank[derivedPriority]
+    ? requestedPriority
+    : derivedPriority;
 
   return {
     temperature,
@@ -70,6 +79,6 @@ export const normalizeTriageAssessment = (payload = {}) => {
     painScore,
     triagePriority,
     triageNotes: normalizeText(payload.triageNotes),
-    triageCompletedAt: payload.triageCompletedAt || new Date(),
+    triageCompletedAt: payload.triageCompletedAt,
   };
 };
