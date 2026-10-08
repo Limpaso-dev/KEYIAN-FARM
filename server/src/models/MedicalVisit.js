@@ -62,6 +62,7 @@ const medicalVisitSchema = new mongoose.Schema(
     assessment: String,
     diagnosis: String,
     differentialDiagnosis: String,
+    labOrders: { type: [String], default: [] },
     treatmentPlan: String,
     disposition: {
       type: String,
@@ -90,6 +91,7 @@ const medicalVisitSchema = new mongoose.Schema(
         "awaiting_investigations",
         "awaiting_results",
         "awaiting_pharmacy",
+        "awaiting_billing",
         "admitted",
         "discharge_pending",
         "cleared",

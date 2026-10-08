@@ -17,7 +17,6 @@ const ensureIndexes = async () => {
       await collection.createIndex({ patientNumber: 1 }, { unique: true, sparse: true });
       await collection.createIndex({ deletedAt: 1, status: 1 });
       await collection.createIndex({ phone: 1 });
-      await collection.createIndex({ nationalId: 1 }, { sparse: true, unique: false });
     }
 
     if (collectionName === "medicalvisits") {

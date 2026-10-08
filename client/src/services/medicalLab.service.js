@@ -1,5 +1,15 @@
 import api from "./api";
 
+export const getMedicalLabWorklist = async () => {
+  const response = await api.get("/medical/lab-worklist");
+  return response.data;
+};
+
+export const getMedicalLabPatients = async () => {
+  const response = await api.get("/medical/lab-patients");
+  return response.data;
+};
+
 export const getMedicalLabResults = async () => {
   const response = await api.get(
     "/medical/lab-results"

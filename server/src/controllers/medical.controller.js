@@ -10,10 +10,12 @@ import {
 } from "../utils/patientRegistration.js";
 import {
   generateVisitNumber,
+  isAllowedDoctorVisitTransition,
   normalizeVisitStatus,
 } from "../utils/visitLifecycle.js";
 import {
   normalizeTriageAssessment,
+  isAllowedNurseTriageTransition,
 } from "../utils/triage.js";
 import {
   normalizeConsultationSummary,
@@ -27,6 +29,9 @@ import {
 } from "../utils/exceptions.js";
 import {
   normalizeLabStatus,
+  normalizeLabOrders,
+  hasRequestedLabOrder,
+  getOutstandingLabOrders,
 } from "../utils/lab.js";
 import {
   normalizePrescriptionStatus,
@@ -52,6 +57,10 @@ export const createPatient = async (req, res, next) => {
         success: false,
         message: "Patient consent must be acknowledged before registration.",
       });
+    }
+
+    if (normalizedPayload.nationalId && await Patient.exists({ nationalId: normalizedPayload.nationalId })) {
+      return res.status(409).json({ success: false, message: "This National ID / Birth Certificate number is already registered to a patient" });
     }
 
     const existingPatients = await Patient.find({
@@ -101,20 +110,24 @@ export const createPatient = async (req, res, next) => {
       data: populatedPatient,
     });
   } catch (error) {
+    if (error.code === 11000 && (error.keyPattern?.nationalId || error.keyValue?.nationalId !== undefined)) {
+      return res.status(409).json({ success: false, message: "This National ID / Birth Certificate number is already registered to a patient" });
+    }
     next(error);
   }
 };
 
 export const getPatients = async (req, res, next) => {
   try {
-    const patients = await Patient.find({
+    const patientQuery = Patient.find({
       $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    })
-      .populate(
+    }).sort({ createdAt: -1 });
+    const patients = ["pharmacist", "pharmacy"].includes(req.user.role)
+      ? await patientQuery.select("firstName lastName patientNumber estimatedAge dateOfBirth sex status")
+      : await patientQuery.populate(
         "farmer",
         "firstName lastName membershipNumber phone"
-      )
-      .sort({ createdAt: -1 });
+      );
 
     res.status(200).json({
       success: true,
@@ -128,13 +141,14 @@ export const getPatients = async (req, res, next) => {
 
 export const getPatientById = async (req, res, next) => {
   try {
+    const isPharmacyRole = ["pharmacist", "pharmacy"].includes(req.user.role);
     const patient = await Patient.findOne({
       _id: req.params.id,
       $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    }).populate(
-      "farmer",
-      "firstName lastName membershipNumber phone"
-    );
+    });
+    if (!isPharmacyRole) {
+      await patient?.populate("farmer", "firstName lastName membershipNumber phone");
+    }
 
     if (!patient) {
       return res.status(404).json({
@@ -143,9 +157,70 @@ export const getPatientById = async (req, res, next) => {
       });
     }
 
+    if (req.user.role === "receptionist") {
+      return res.status(200).json({ success: true, data: patient });
+    }
+
+    const [visits, labResults, prescriptions] = await Promise.all([
+      MedicalVisit.find({
+        patient: patient._id,
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      })
+        .populate("clinician", "name role department")
+        .sort({ visitDate: -1 })
+        .lean(),
+      isPharmacyRole ? Promise.resolve([]) : MedicalLabResult.find({
+        patient: patient._id,
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      })
+        .populate("visit", "visitNumber visitDate")
+        .populate("performedBy", "name role department")
+        .sort({ createdAt: -1 })
+        .lean(),
+      Prescription.find({
+        patient: patient._id,
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      })
+        .populate("visit", "visitNumber visitDate")
+        .populate("prescribedBy", "name role department")
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+
+    if (isPharmacyRole) {
+      const patientRecord = patient.toObject();
+      const data = {
+        _id: patientRecord._id,
+        firstName: patientRecord.firstName,
+        lastName: patientRecord.lastName,
+        patientNumber: patientRecord.patientNumber,
+        estimatedAge: patientRecord.estimatedAge,
+        dateOfBirth: patientRecord.dateOfBirth,
+        sex: patientRecord.sex,
+        status: patientRecord.status,
+        history: {
+          visits: visits.map((visit) => ({
+            _id: visit._id,
+            visitNumber: visit.visitNumber,
+            visitDate: visit.visitDate,
+            visitType: visit.visitType,
+            diagnosis: visit.diagnosis,
+            treatmentPlan: visit.treatmentPlan,
+            clinician: visit.clinician,
+          })),
+          prescriptions,
+        },
+      };
+
+      return res.status(200).json({ success: true, data });
+    }
+
     res.status(200).json({
       success: true,
-      data: patient,
+      data: {
+        ...patient.toObject(),
+        history: { visits, labResults, prescriptions },
+      },
     });
   } catch (error) {
     next(error);
@@ -173,6 +248,10 @@ export const updatePatient = async (req, res, next) => {
         success: false,
         message: "Patient first name and last name are required.",
       });
+    }
+
+    if (normalizedPayload.nationalId && await Patient.exists({ nationalId: normalizedPayload.nationalId, _id: { $ne: existingPatient._id } })) {
+      return res.status(409).json({ success: false, message: "This National ID / Birth Certificate number is already registered to another patient" });
     }
 
     const patientLookup = await Patient.find({
@@ -226,6 +305,9 @@ export const updatePatient = async (req, res, next) => {
       data: patient,
     });
   } catch (error) {
+    if (error.code === 11000 && (error.keyPattern?.nationalId || error.keyValue?.nationalId !== undefined)) {
+      return res.status(409).json({ success: false, message: "This National ID / Birth Certificate number is already registered to another patient" });
+    }
     next(error);
   }
 };
@@ -286,18 +368,144 @@ export const deletePatient = async (req, res, next) => {
 // MEDICAL VISITS
 // =====================================================
 
+const pickVisitFields = (source, fields) => Object.fromEntries(
+  fields.filter((field) => source[field] !== undefined).map((field) => [field, source[field]])
+);
+
+const projectReceptionVisit = (visit) => {
+  const record = visit?.toObject ? visit.toObject() : visit;
+  const patient = record.patient?.toObject ? record.patient.toObject() : record.patient;
+  return {
+    _id: record._id,
+    patient: patient ? {
+      _id: patient._id,
+      patientNumber: patient.patientNumber,
+      firstName: patient.firstName,
+      lastName: patient.lastName,
+    } : null,
+    visitNumber: record.visitNumber,
+    visitDate: record.visitDate,
+    visitType: record.visitType,
+    status: record.status,
+  };
+};
+
+const projectNurseTriageVisit = (visit) => {
+  const record = visit?.toObject ? visit.toObject() : visit;
+  const patient = record.patient?.toObject ? record.patient.toObject() : record.patient;
+  return {
+    _id: record._id,
+    patient: patient ? pickVisitFields(patient, ["_id", "patientNumber", "firstName", "lastName", "estimatedAge", "dateOfBirth", "sex"]) : null,
+    visitNumber: record.visitNumber,
+    visitDate: record.visitDate,
+    visitType: record.visitType,
+    chiefComplaint: record.chiefComplaint,
+    temperature: record.temperature,
+    pulseRate: record.pulseRate,
+    respiratoryRate: record.respiratoryRate,
+    bloodPressure: record.bloodPressure,
+    oxygenSaturation: record.oxygenSaturation,
+    weightKg: record.weightKg,
+    heightCm: record.heightCm,
+    painScore: record.painScore,
+    triagePriority: record.triagePriority,
+    triageNotes: record.triageNotes,
+    triageCompletedAt: record.triageCompletedAt,
+    status: record.status,
+  };
+};
+
+const attachLabResultsToVisits = async (visits) => {
+  if (!visits.length) return visits;
+  const visitIds = visits.map((visit) => visit._id);
+  const results = await MedicalLabResult.find({
+    visit: { $in: visitIds },
+    $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+  })
+    .populate("performedBy", "name role department")
+    .sort({ createdAt: -1 })
+    .lean();
+  const resultsByVisit = new Map();
+  results.forEach((result) => {
+    const key = String(result.visit);
+    resultsByVisit.set(key, [...(resultsByVisit.get(key) || []), result]);
+  });
+  return visits.map((visit) => ({
+    ...(visit.toObject ? visit.toObject() : visit),
+    labResults: resultsByVisit.get(String(visit._id)) || [],
+  }));
+};
+
+const areVisitLabOrdersComplete = async (visit) => {
+  const orders = normalizeLabOrders(visit?.labOrders);
+  if (!orders.length) return true;
+  const completedResults = await MedicalLabResult.find({
+    visit: visit._id,
+    status: "completed",
+    $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+  }).select("testName").lean();
+  const completedNames = new Set(completedResults.map((result) => String(result.testName).trim().toLowerCase()));
+  return orders.every((order) => completedNames.has(order.toLowerCase()));
+};
+
+const returnVisitToDoctorWhenLabsComplete = async (visitId, actor) => {
+  const visit = await MedicalVisit.findById(visitId);
+  if (!visit || visit.status !== "awaiting_results" || !(await areVisitLabOrdersComplete(visit))) return;
+  const before = visit.toObject();
+  visit.status = "waiting_for_doctor";
+  await visit.save();
+  await logAudit({
+    actor,
+    action: "lab_results_completed",
+    entity: "MedicalVisit",
+    entityId: visit._id,
+    before,
+    after: visit.toObject(),
+  });
+};
+
+const isVisitStatusAllowed = (role, status, currentStatus) => {
+  const statusByRole = {
+    receptionist: ["registered", "waiting_for_triage"],
+    nurse: ["in_triage", "waiting_for_doctor"],
+  };
+  const allowedStatuses = statusByRole[role];
+  if (!allowedStatuses || !status) return true;
+  const normalizedStatus = normalizeVisitStatus(status);
+  if (role === "nurse" && !["waiting_for_triage", "in_triage"].includes(currentStatus)) return false;
+  return normalizedStatus === currentStatus || allowedStatuses.includes(normalizedStatus);
+};
+
 export const createMedicalVisit = async (
   req,
   res,
   next
 ) => {
   try {
+    const role = req.user.role;
+    if (role === "receptionist" && Object.hasOwn(req.body || {}, "status")) {
+      return res.status(403).json({ success: false, message: "Receptionists cannot set a patient visit status" });
+    }
+    const visitInput = role === "receptionist"
+      ? pickVisitFields(req.body, ["patient", "visitDate", "visitType"])
+      : req.body;
+    const labOrders = normalizeLabOrders(visitInput?.labOrders);
+    if (!isVisitStatusAllowed(role, visitInput?.status)) {
+      return res.status(403).json({ success: false, message: "This role cannot set that visit status" });
+    }
+    if (labOrders.length && req.user.role !== "doctor") {
+      return res.status(403).json({ success: false, message: "Only doctors can request laboratory tests" });
+    }
+    if (labOrders.length && !String(req.body?.diagnosis || "").trim()) {
+      return res.status(400).json({ success: false, message: "A diagnosis is required before ordering laboratory tests" });
+    }
+
     const payload = {
-      ...req.body,
-      status: normalizeVisitStatus(req.body?.status),
-      visitNumber: req.body?.visitNumber || generateVisitNumber(),
-      ...normalizeTriageAssessment(req.body),
-      ...normalizeConsultationSummary(req.body),
+      ...visitInput,
+      labOrders: req.user.role === "doctor" ? labOrders : [],
+      status: normalizeVisitStatus(visitInput?.status || (role === "receptionist" ? "waiting_for_triage" : undefined)),
+      visitNumber: visitInput?.visitNumber || generateVisitNumber(),
+      ...(role === "doctor" ? normalizeConsultationSummary(visitInput) : {}),
     };
 
     // Automatically assign logged-in user as clinician
@@ -331,7 +539,7 @@ export const createMedicalVisit = async (
     res.status(201).json({
       success: true,
       message: "Medical visit created successfully",
-      data: populatedVisit,
+      data: role === "receptionist" ? projectReceptionVisit(populatedVisit) : populatedVisit,
     });
   } catch (error) {
     next(error);
@@ -344,9 +552,12 @@ export const getMedicalVisits = async (
   next
 ) => {
   try {
-    const visits = await MedicalVisit.find({
+    const filter = {
       $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    })
+    };
+    if (req.user.role === "nurse") filter.status = { $in: ["waiting_for_triage", "in_triage"] };
+    if (req.user.role === "doctor") filter.status = { $in: ["waiting_for_doctor", "in_consultation"] };
+    const visits = await MedicalVisit.find(filter)
       .populate("patient")
       .populate(
         "clinician",
@@ -354,10 +565,17 @@ export const getMedicalVisits = async (
       )
       .sort({ visitDate: -1, createdAt: -1 });
 
+    const doctorVisits = req.user.role === "doctor" ? await attachLabResultsToVisits(visits) : visits;
+    const data = req.user.role === "receptionist"
+      ? visits.map(projectReceptionVisit)
+      : req.user.role === "nurse"
+        ? visits.map(projectNurseTriageVisit)
+        : doctorVisits;
+
     res.status(200).json({
       success: true,
-      count: visits.length,
-      data: visits,
+      count: data.length,
+      data,
     });
   } catch (error) {
     next(error);
@@ -370,10 +588,13 @@ export const getMedicalVisitById = async (
   next
 ) => {
   try {
-    const visit = await MedicalVisit.findOne({
+    const filter = {
       _id: req.params.id,
       $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    })
+    };
+    if (req.user.role === "nurse") filter.status = { $in: ["waiting_for_triage", "in_triage"] };
+    if (req.user.role === "doctor") filter.status = { $in: ["waiting_for_doctor", "in_consultation"] };
+    const visit = await MedicalVisit.findOne(filter)
       .populate("patient")
       .populate(
         "clinician",
@@ -387,9 +608,17 @@ export const getMedicalVisitById = async (
       });
     }
 
+    const data = req.user.role === "doctor"
+      ? (await attachLabResultsToVisits([visit]))[0]
+      : req.user.role === "receptionist"
+        ? projectReceptionVisit(visit)
+        : req.user.role === "nurse"
+          ? projectNurseTriageVisit(visit)
+          : visit;
+
     res.status(200).json({
       success: true,
-      data: visit,
+      data,
     });
   } catch (error) {
     next(error);
@@ -414,12 +643,93 @@ export const updateMedicalVisit = async (
       });
     }
 
-    const payload = {
-      ...req.body,
-      status: normalizeVisitStatus(req.body?.status),
-      ...normalizeTriageAssessment(req.body),
-      ...normalizeConsultationSummary(req.body),
+    const role = req.user.role;
+    if (role === "receptionist" && Object.hasOwn(req.body || {}, "status")) {
+      return res.status(403).json({ success: false, message: "Receptionists cannot change a patient visit status" });
+    }
+    const visitInput = role === "receptionist"
+      ? pickVisitFields(req.body, ["visitDate", "visitType"])
+      : role === "nurse"
+        ? pickVisitFields(req.body, ["chiefComplaint", "temperature", "pulseRate", "respiratoryRate", "bloodPressure", "oxygenSaturation", "weightKg", "heightCm", "painScore", "triagePriority", "triageNotes", "status"])
+        : role === "doctor"
+          ? pickVisitFields(req.body, ["clinicalNotes", "assessment", "diagnosis", "differentialDiagnosis", "labOrders", "treatmentPlan", "disposition", "followUpDate", "referredTo", "status"])
+        : req.body;
+
+    if (role === "nurse" && !isAllowedNurseTriageTransition(
+      existingVisit.status,
+      normalizeVisitStatus(visitInput.status ?? existingVisit.status)
+    )) {
+      return res.status(409).json({ success: false, message: "This visit is no longer in the nurse triage queue or the requested transition is invalid" });
+    }
+
+    if (req.body?.labOrders !== undefined && role !== "doctor") {
+      return res.status(403).json({ success: false, message: "Only doctors can update laboratory requests" });
+    }
+
+    const labOrders = visitInput?.labOrders === undefined
+      ? undefined
+      : normalizeLabOrders(visitInput.labOrders);
+    const diagnosis = visitInput?.diagnosis ?? existingVisit.diagnosis;
+    const visitForLabCheck = {
+      ...existingVisit.toObject(),
+      labOrders: labOrders ?? existingVisit.labOrders,
     };
+    const hasPendingLabOrders = role === "doctor" && !await areVisitLabOrdersComplete(visitForLabCheck);
+    const nextStatus = hasPendingLabOrders
+      ? "awaiting_results"
+      : normalizeVisitStatus(visitInput?.status ?? existingVisit.status);
+    if (role === "doctor" && !isAllowedDoctorVisitTransition(existingVisit.status, nextStatus)) {
+      return res.status(409).json({ success: false, message: "This doctor handoff is not valid from the current visit state" });
+    }
+    if (!isVisitStatusAllowed(role, visitInput?.status, existingVisit.status)) {
+      return res.status(403).json({ success: false, message: "This role cannot set that visit status" });
+    }
+    if (labOrders?.length && !String(diagnosis || "").trim()) {
+      return res.status(400).json({ success: false, message: "A diagnosis is required before ordering laboratory tests" });
+    }
+    if (role === "doctor" && nextStatus === "awaiting_results" && !labOrders?.length && !existingVisit.labOrders?.length) {
+      return res.status(400).json({ success: false, message: "Order at least one laboratory test before sending the visit to the lab" });
+    }
+    if (role === "doctor" && nextStatus === "awaiting_pharmacy" && !await Prescription.exists({
+      visit: existingVisit._id,
+      status: "prescribed",
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    })) {
+      return res.status(400).json({ success: false, message: "Create a prescription before sending the patient to Pharmacy" });
+    }
+    if (role === "doctor" && nextStatus === "awaiting_billing") {
+      if (!(await areVisitLabOrdersComplete({ ...existingVisit.toObject(), labOrders: labOrders ?? existingVisit.labOrders }))) {
+        return res.status(409).json({ success: false, message: "Wait for all ordered laboratory results before billing" });
+      }
+      if (await Prescription.exists({
+        visit: existingVisit._id,
+        status: "prescribed",
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      })) {
+        return res.status(409).json({ success: false, message: "Send prescribed medication through Pharmacy before billing" });
+      }
+    }
+
+    const payload = role === "doctor"
+      ? {
+          ...visitInput,
+          ...(labOrders === undefined ? {} : { labOrders }),
+          status: nextStatus,
+          ...normalizeConsultationSummary(visitInput),
+        }
+      : role === "nurse"
+        ? {
+            ...visitInput,
+            status: normalizeVisitStatus(visitInput?.status ?? existingVisit.status),
+            ...normalizeTriageAssessment(visitInput),
+            triageCompletedAt: normalizeVisitStatus(visitInput?.status ?? existingVisit.status) === "waiting_for_doctor"
+              ? new Date()
+              : existingVisit.triageCompletedAt,
+          }
+        : {
+            ...visitInput,
+            status: normalizeVisitStatus(visitInput?.status ?? existingVisit.status),
+          };
 
     const visit = await MedicalVisit.findByIdAndUpdate(
       req.params.id,
@@ -450,7 +760,7 @@ export const updateMedicalVisit = async (
     res.status(200).json({
       success: true,
       message: "Medical visit updated successfully",
-      data: visit,
+      data: role === "receptionist" ? projectReceptionVisit(visit) : visit,
     });
   } catch (error) {
     next(error);
@@ -637,12 +947,100 @@ export const dischargeMedicalVisit = async (req, res, next) => {
 // MEDICAL LAB RESULTS
 // =====================================================
 
+export const getMedicalLabWorklist = async (req, res, next) => {
+  try {
+    const visits = await MedicalVisit.find({
+      diagnosis: { $exists: true, $nin: [null, ""] },
+      labOrders: { $exists: true, $ne: [] },
+      status: { $nin: ["cancelled", "voided", "deceased"] },
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    })
+      .populate({
+        path: "patient",
+        match: { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] },
+        select: "firstName lastName patientNumber estimatedAge dateOfBirth sex",
+      })
+      .populate("clinician", "name role department")
+      .sort({ visitDate: -1 })
+      .lean();
+
+    const completedResults = await MedicalLabResult.find({
+      visit: { $in: visits.map((visit) => visit._id) },
+      status: "completed",
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    }).select("visit testName").lean();
+    const completedByVisit = new Map();
+    completedResults.forEach((result) => {
+      const key = String(result.visit);
+      completedByVisit.set(key, new Set([...(completedByVisit.get(key) || []), String(result.testName).trim().toLowerCase()]));
+    });
+
+    const data = visits
+      .filter((visit) => visit.patient)
+      .map((visit) => {
+        const completed = completedByVisit.get(String(visit._id)) || new Set();
+        return {
+          _id: visit._id,
+          patient: visit.patient,
+          clinician: visit.clinician,
+          visitNumber: visit.visitNumber,
+          visitDate: visit.visitDate,
+          visitType: visit.visitType,
+          diagnosis: visit.diagnosis,
+          labOrders: getOutstandingLabOrders(visit.labOrders || [], [...completed]),
+        };
+      })
+      .filter((visit) => visit.labOrders.length > 0);
+
+    res.status(200).json({ success: true, count: data.length, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getMedicalLabPatients = async (req, res, next) => {
+  try {
+    const patients = await Patient.find({
+      status: { $ne: "voided" },
+      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    })
+      .select("firstName lastName patientNumber estimatedAge dateOfBirth sex")
+      .sort({ lastName: 1, firstName: 1 })
+      .lean();
+
+    res.status(200).json({ success: true, count: patients.length, data: patients });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const populateMedicalLabResult = (query) => query
+  .populate("patient", "firstName lastName patientNumber estimatedAge dateOfBirth sex nationalId phone address status")
+  .populate({
+    path: "visit",
+    select: "visitDate visitType visitNumber diagnosis labOrders clinician",
+    populate: { path: "clinician", select: "name role department" },
+  })
+  .populate("performedBy", "name role department");
+
 export const createMedicalLabResult = async (
   req,
   res,
   next
 ) => {
   try {
+    if (req.user.role === "laboratory") {
+      const visit = await MedicalVisit.findOne({
+        _id: req.body.visit,
+        patient: req.body.patient,
+        diagnosis: { $exists: true, $nin: [null, ""] },
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      });
+      if (!visit || !hasRequestedLabOrder(visit, req.body.testName)) {
+        return res.status(400).json({ success: false, message: "Select a patient visit and test ordered by a doctor" });
+      }
+    }
+
     const payload = {
       ...req.body,
       status: normalizeLabStatus(req.body?.status, req.body),
@@ -662,6 +1060,10 @@ export const createMedicalLabResult = async (
       payload
     );
 
+    if (labResult.visit && labResult.status === "completed") {
+      await returnVisitToDoctorWhenLabsComplete(labResult.visit, req.user);
+    }
+
     await logAudit({
       actor: req.user,
       action: "create",
@@ -674,16 +1076,9 @@ export const createMedicalLabResult = async (
       },
     });
 
-    const populatedLabResult =
-      await MedicalLabResult.findById(
-        labResult._id
-      )
-        .populate("patient")
-        .populate("visit")
-        .populate(
-          "performedBy",
-          "name email role department"
-        );
+    const populatedLabResult = await populateMedicalLabResult(
+      MedicalLabResult.findById(labResult._id)
+    );
 
     res.status(201).json({
       success: true,
@@ -701,16 +1096,9 @@ export const getMedicalLabResults = async (
   next
 ) => {
   try {
-    const labResults = await MedicalLabResult.find({
+    const labResults = await populateMedicalLabResult(MedicalLabResult.find({
       $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    })
-      .populate("patient")
-      .populate("visit")
-      .populate(
-        "performedBy",
-        "name email role department"
-      )
-      .sort({ createdAt: -1 });
+    })).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -728,17 +1116,10 @@ export const getMedicalLabResultById = async (
   next
 ) => {
   try {
-    const labResult =
-      await MedicalLabResult.findOne({
+    const labResult = await populateMedicalLabResult(MedicalLabResult.findOne({
         _id: req.params.id,
         $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-      })
-        .populate("patient")
-        .populate("visit")
-        .populate(
-          "performedBy",
-          "name email role department"
-        );
+      }));
 
     if (!labResult) {
       return res.status(404).json({
@@ -774,6 +1155,16 @@ export const updateMedicalLabResult = async (
       });
     }
 
+    if (req.user.role === "laboratory") {
+      const visitId = req.body.visit || existingLabResult.visit;
+      const patientId = req.body.patient || existingLabResult.patient;
+      const testName = req.body.testName || existingLabResult.testName;
+      const visit = await MedicalVisit.findOne({ _id: visitId, patient: patientId });
+      if (!visit || !hasRequestedLabOrder(visit, testName)) {
+        return res.status(400).json({ success: false, message: "Laboratory results must match a doctor-ordered test" });
+      }
+    }
+
     const normalizedPayload = {
       ...existingLabResult.toObject(),
       ...req.body,
@@ -783,21 +1174,18 @@ export const updateMedicalLabResult = async (
       }),
     };
 
-    const labResult =
-      await MedicalLabResult.findByIdAndUpdate(
+    const labResult = await populateMedicalLabResult(MedicalLabResult.findByIdAndUpdate(
         req.params.id,
         normalizedPayload,
         {
           new: true,
           runValidators: true,
         }
-      )
-        .populate("patient")
-        .populate("visit")
-        .populate(
-          "performedBy",
-          "name email role department"
-        );
+      ));
+
+    if (labResult.visit && labResult.status === "completed") {
+      await returnVisitToDoctorWhenLabsComplete(labResult.visit._id || labResult.visit, req.user);
+    }
 
     await logAudit({
       actor: req.user,
@@ -881,19 +1269,45 @@ export const deleteMedicalLabResult = async (
 // PRESCRIPTIONS
 // =====================================================
 
+const populatePrescription = (query) => query
+  .populate("patient", "firstName lastName patientNumber estimatedAge dateOfBirth sex nationalId phone address status")
+  .populate("visit", "visitNumber visitDate visitType diagnosis treatmentPlan")
+  .populate("prescribedBy", "name role department");
+
 export const createPrescription = async (
   req,
   res,
   next
 ) => {
   try {
+    let consultationVisit = null;
+    if (req.user.role === "doctor") {
+      if (!req.body.visit) {
+        return res.status(400).json({ success: false, message: "Link the prescription to the active medical visit" });
+      }
+      consultationVisit = await MedicalVisit.findOne({
+        _id: req.body.visit,
+        patient: req.body.patient,
+        status: "in_consultation",
+        diagnosis: { $exists: true, $nin: [null, ""] },
+      });
+      if (!consultationVisit) {
+        return res.status(409).json({ success: false, message: "Prescriptions require a diagnosed visit in consultation" });
+      }
+      if (!(await areVisitLabOrdersComplete(consultationVisit))) {
+        return res.status(409).json({ success: false, message: "Review all ordered laboratory results before prescribing" });
+      }
+    }
+
     const payload = {
       ...req.body,
-      status: normalizePrescriptionStatus(req.body?.status, req.body),
+      status: req.user.role === "doctor" ? "prescribed" : normalizePrescriptionStatus(req.body?.status, req.body),
     };
 
     // Automatically assign logged-in user as prescriber
-    if (!payload.prescribedBy && req.user?._id) {
+    if (req.user.role === "doctor") {
+      payload.prescribedBy = req.user._id;
+    } else if (!payload.prescribedBy && req.user?._id) {
       payload.prescribedBy = req.user._id;
     }
 
@@ -912,16 +1326,24 @@ export const createPrescription = async (
       },
     });
 
-    const populatedPrescription =
-      await Prescription.findById(
-        prescription._id
-      )
-        .populate("patient")
-        .populate("visit")
-        .populate(
-          "prescribedBy",
-          "name email role department"
-        );
+    if (consultationVisit) {
+      const beforeVisit = consultationVisit.toObject();
+      consultationVisit.status = "awaiting_pharmacy";
+      await consultationVisit.save();
+      await logAudit({
+        actor: req.user,
+        action: "prescription_sent_to_pharmacy",
+        entity: "MedicalVisit",
+        entityId: consultationVisit._id,
+        before: beforeVisit,
+        after: consultationVisit.toObject(),
+        metadata: { prescription: prescription._id, ip: req.ip },
+      });
+    }
+
+    const populatedPrescription = await populatePrescription(
+      Prescription.findById(prescription._id)
+    );
 
     res.status(201).json({
       success: true,
@@ -939,17 +1361,9 @@ export const getPrescriptions = async (
   next
 ) => {
   try {
-    const prescriptions =
-      await Prescription.find({
+    const prescriptions = await populatePrescription(Prescription.find({
         $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-      })
-        .populate("patient")
-        .populate("visit")
-        .populate(
-          "prescribedBy",
-          "name email role department"
-        )
-        .sort({ createdAt: -1 });
+      })).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -967,17 +1381,10 @@ export const getPrescriptionById = async (
   next
 ) => {
   try {
-    const prescription =
-      await Prescription.findOne({
+    const prescription = await populatePrescription(Prescription.findOne({
         _id: req.params.id,
         $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-      })
-        .populate("patient")
-        .populate("visit")
-        .populate(
-          "prescribedBy",
-          "name email role department"
-        );
+      }));
 
     if (!prescription) {
       return res.status(404).json({
@@ -1013,6 +1420,19 @@ export const updatePrescription = async (
       });
     }
 
+    if (["pharmacist", "pharmacy"].includes(req.user.role)) {
+      const submittedFields = Object.keys(req.body || {});
+      if (submittedFields.some((field) => field !== "status") || req.body.status !== "dispensed") {
+        return res.status(403).json({
+          success: false,
+          message: "Pharmacy staff may only mark a prescribed medication as dispensed",
+        });
+      }
+      if (existingPrescription.status !== "prescribed") {
+        return res.status(409).json({ success: false, message: "Only prescribed medication can be dispensed" });
+      }
+    }
+
     const normalizedPayload = {
       ...existingPrescription.toObject(),
       ...req.body,
@@ -1022,21 +1442,14 @@ export const updatePrescription = async (
       }),
     };
 
-    const prescription =
-      await Prescription.findByIdAndUpdate(
+    const prescription = await populatePrescription(Prescription.findByIdAndUpdate(
         req.params.id,
         normalizedPayload,
         {
           new: true,
           runValidators: true,
         }
-      )
-        .populate("patient")
-        .populate("visit")
-        .populate(
-          "prescribedBy",
-          "name email role department"
-        );
+      ));
 
     await logAudit({
       actor: req.user,
@@ -1049,6 +1462,30 @@ export const updatePrescription = async (
         ip: req.ip,
       },
     });
+
+    if (["pharmacist", "pharmacy"].includes(req.user.role) && prescription.status === "dispensed" && prescription.visit) {
+      const visitId = prescription.visit._id || prescription.visit;
+      const remainingPrescriptions = await Prescription.countDocuments({
+        visit: visitId,
+        status: "prescribed",
+        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      });
+      const visit = await MedicalVisit.findOne({ _id: visitId, status: "awaiting_pharmacy" });
+      if (visit && remainingPrescriptions === 0) {
+        const beforeVisit = visit.toObject();
+        visit.status = "awaiting_billing";
+        await visit.save();
+        await logAudit({
+          actor: req.user,
+          action: "pharmacy_handoff_completed",
+          entity: "MedicalVisit",
+          entityId: visit._id,
+          before: beforeVisit,
+          after: visit.toObject(),
+          metadata: { prescription: prescription._id, ip: req.ip },
+        });
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -1153,10 +1590,10 @@ export const getMedicalSummary = async (req, res, next) => {
     const canRead = (roles) =>
       ["admin", "super_admin", "manager"].includes(role) ||
       roles.includes(role);
-    const canReadPatients = canRead(["doctor", "nurse"]);
-    const canReadVisits = canRead(["doctor", "nurse"]);
+    const canReadPatients = canRead(["doctor", "nurse", "receptionist"]);
+    const canReadVisits = canRead(["doctor", "nurse", "receptionist"]);
     const canReadLab = canRead(["doctor", "nurse", "laboratory"]);
-    const canReadPrescriptions = canRead(["doctor", "pharmacist"]);
+    const canReadPrescriptions = canRead(["doctor", "pharmacist", "pharmacy"]);
 
     const nairobiParts = new Intl.DateTimeFormat("en-CA", {
       timeZone: "Africa/Nairobi",

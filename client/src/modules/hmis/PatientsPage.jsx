@@ -14,11 +14,13 @@ import {
 import {
   createPatient,
   deletePatient,
+  getPatientById,
   getPatients,
   updatePatient,
 } from "../../services/medicalPatient.service";
 
 import { getFarmers } from "../../services/farmer.service";
+import { useAuth } from "../../context/useAuth";
 
 const initialForm = {
   patientNumber: "",
@@ -49,6 +51,11 @@ const initialForm = {
 };
 
 const PatientsPage = () => {
+  const { user } = useAuth();
+  const canRegisterPatients = ["admin", "super_admin", "receptionist"].includes(user?.role);
+  const canEditPatients = ["admin", "super_admin", "receptionist"].includes(user?.role);
+  const canVoidPatients = ["admin", "super_admin"].includes(user?.role);
+  const canViewFarmers = !["pharmacist", "pharmacy"].includes(user?.role);
   const [patients, setPatients] = useState([]);
   const [farmers, setFarmers] = useState([]);
 
@@ -63,6 +70,8 @@ const PatientsPage = () => {
 
   const [showForm, setShowForm] = useState(false);
   const [showView, setShowView] = useState(false);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [viewError, setViewError] = useState("");
 
   const [editingId, setEditingId] = useState(null);
   const [selectedPatient, setSelectedPatient] =
@@ -110,8 +119,8 @@ const PatientsPage = () => {
 
   useEffect(() => {
     loadPatients();
-    loadFarmers();
-  }, []);
+    if (canViewFarmers) loadFarmers();
+  }, [canViewFarmers]);
 
   // =====================================================
   // FORM HANDLERS
@@ -318,14 +327,26 @@ const PatientsPage = () => {
   // VIEW
   // =====================================================
 
-  const openView = (patient) => {
+  const openView = async (patient) => {
     setSelectedPatient(patient);
     setShowView(true);
+    setViewLoading(true);
+    setViewError("");
+
+    try {
+      const response = await getPatientById(patient._id);
+      setSelectedPatient(response?.data || patient);
+    } catch (err) {
+      setViewError(err.response?.data?.message || "Failed to load patient history.");
+    } finally {
+      setViewLoading(false);
+    }
   };
 
   const closeView = () => {
     setShowView(false);
     setSelectedPatient(null);
+    setViewError("");
   };
 
   // =====================================================
@@ -401,19 +422,22 @@ const PatientsPage = () => {
           </h1>
 
           <p className="mt-2 text-sm text-slate-500">
-            Register and manage patients attending the
-            Keiyian Medical Centre.
+            {canRegisterPatients
+              ? "Register and manage patients attending the Keiyian Medical Centre."
+              : "View patient demographics and clinical history."}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
-        >
-          <Plus size={18} />
-          Register Patient
-        </button>
+        {canRegisterPatients && (
+          <button
+            type="button"
+            onClick={openCreateForm}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
+          >
+            <Plus size={18} />
+            Register Patient
+          </button>
+        )}
       </div>
 
       {/* Alerts */}
@@ -546,7 +570,7 @@ const PatientsPage = () => {
                 : "No patients have been registered yet."}
             </p>
 
-            {!search && (
+            {!search && canRegisterPatients && (
               <button
                 type="button"
                 onClick={openCreateForm}
@@ -676,24 +700,26 @@ const PatientsPage = () => {
                           <Eye size={17} />
                         </ActionButton>
 
-                        <ActionButton
-                          title="Edit patient"
-                          onClick={() =>
-                            openEditForm(patient)
-                          }
-                        >
-                          <Edit size={17} />
-                        </ActionButton>
+                        {canEditPatients && (
+                          <>
+                            <ActionButton
+                              title="Edit patient"
+                              onClick={() => openEditForm(patient)}
+                            >
+                              <Edit size={17} />
+                            </ActionButton>
 
-                        <ActionButton
-                          title="Delete patient"
-                          danger
-                          onClick={() =>
-                            handleDelete(patient)
-                          }
-                        >
-                          <Trash2 size={17} />
-                        </ActionButton>
+                            {canVoidPatients && (
+                              <ActionButton
+                                title="Void patient"
+                                danger
+                                onClick={() => handleDelete(patient)}
+                              >
+                                <Trash2 size={17} />
+                              </ActionButton>
+                            )}
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -725,6 +751,8 @@ const PatientsPage = () => {
       {showView && selectedPatient && (
         <PatientViewModal
           patient={selectedPatient}
+          loading={viewLoading}
+          error={viewError}
           onClose={closeView}
         />
       )}
@@ -934,13 +962,13 @@ const PatientFormModal = ({
                   />
                 </FormField>
 
-                <FormField label="National ID">
+                <FormField label="National ID / Birth Certificate number">
                   <input
                     name="nationalId"
                     value={form.nationalId}
                     onChange={onChange}
                     className="form-input"
-                    placeholder="National ID number"
+                    placeholder="Unique ID or birth certificate number"
                   />
                 </FormField>
 
@@ -1185,6 +1213,8 @@ const PatientFormModal = ({
 
 const PatientViewModal = ({
   patient,
+  loading,
+  error,
   onClose,
 }) => {
   return (
@@ -1238,11 +1268,9 @@ const PatientViewModal = ({
           </div>
 
           {/* Basic Details */}
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-700">
-              Patient Details
-            </h3>
-
+          <details className="rounded-xl border border-slate-200">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800">Patient details <span className="ml-2 font-normal text-slate-500">ID, phone, demographics</span></summary>
+            <div className="border-t border-slate-200 p-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <DetailItem
                 label="Patient Number"
@@ -1250,10 +1278,20 @@ const PatientViewModal = ({
               />
 
               <DetailItem
+                label="National ID / Birth Certificate number"
+                value={patient.nationalId}
+              />
+
+              <DetailItem
                 label="Sex"
                 value={capitalize(
                   patient.sex
                 )}
+              />
+
+              <DetailItem
+                label="Estimated Age"
+                value={patient.estimatedAge ? `${patient.estimatedAge} years` : "—"}
               />
 
               <DetailItem
@@ -1276,14 +1314,50 @@ const PatientViewModal = ({
                 label="Address"
                 value={patient.address}
               />
+
+              <DetailItem
+                label="Patient Status"
+                value={capitalize(patient.status)}
+              />
             </div>
-          </div>
+            </div>
+          </details>
+
+          <details className="rounded-xl border border-slate-200">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800">Payer & consent</summary>
+            <div className="border-t border-slate-200 p-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <DetailItem label="Payer Type" value={capitalize(patient.payer)} />
+              <DetailItem label="Scheme / Insurer" value={patient.payerDetails?.scheme} />
+              <DetailItem label="Member Number" value={patient.payerDetails?.memberNumber} />
+              <DetailItem label="Principal Member" value={patient.payerDetails?.principalMember} />
+              <DetailItem
+                label="Coverage Validity"
+                value={[
+                  patient.payerDetails?.validityStart && formatDate(patient.payerDetails.validityStart),
+                  patient.payerDetails?.validityEnd && formatDate(patient.payerDetails.validityEnd),
+                ].filter(Boolean).join(" to ")}
+              />
+              <DetailItem
+                label="Coverage Limit"
+                value={patient.payerDetails?.limit ? `KES ${patient.payerDetails.limit}` : "—"}
+              />
+              <DetailItem
+                label="Consent Acknowledged"
+                value={patient.consentAcknowledged ? "Yes" : "No"}
+              />
+              <DetailItem
+                label="Consent Date"
+                value={patient.consentDate ? formatDate(patient.consentDate) : "—"}
+              />
+            </div>
+            </div>
+          </details>
 
           {/* Farmer */}
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-700">
-              Cooperative Link
-            </h3>
+          <details className="rounded-xl border border-slate-200">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800">Cooperative link</summary>
+            <div className="border-t border-slate-200 p-4">
 
             {patient.farmer ? (
               <div className="rounded-lg border border-slate-200 p-4">
@@ -1313,13 +1387,13 @@ const PatientViewModal = ({
                 cooperative farmer.
               </p>
             )}
-          </div>
+            </div>
+          </details>
 
           {/* Next of Kin */}
-          <div>
-            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-700">
-              Next of Kin
-            </h3>
+          <details className="rounded-xl border border-slate-200">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800">Next of kin</summary>
+            <div className="border-t border-slate-200 p-4">
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <DetailItem
@@ -1344,7 +1418,20 @@ const PatientViewModal = ({
                 }
               />
             </div>
-          </div>
+            </div>
+          </details>
+
+          {error && (
+            <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {error}
+            </p>
+          )}
+
+          {loading ? (
+            <p className="text-sm text-slate-500">Loading clinical history...</p>
+          ) : (
+            <PatientClinicalHistory history={patient.history} />
+          )}
         </div>
 
         <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 text-right">
@@ -1358,6 +1445,127 @@ const PatientViewModal = ({
         </div>
       </div>
     </div>
+  );
+};
+
+const PatientClinicalHistory = ({ history = {} }) => {
+  const visits = history.visits || [];
+  const labResults = history.labResults || [];
+  const prescriptions = history.prescriptions || [];
+
+  return (
+    <details className="border-t border-slate-200 pt-6">
+      <summary className="cursor-pointer text-sm font-semibold text-slate-800">Clinical history <span className="ml-2 font-normal text-slate-500">{visits.length} visits · {labResults.length} lab results · {prescriptions.length} prescriptions</span></summary>
+      <div className="mt-5 space-y-6">
+      <section>
+        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-700">
+          Visit & Consultation History
+        </h3>
+        {visits.length === 0 ? (
+          <p className="text-sm text-slate-500">No visits recorded.</p>
+        ) : (
+          <div className="divide-y divide-slate-200">
+            {visits.map((visit) => (
+              <article key={visit._id} className="py-4 first:pt-0 last:pb-0">
+                <div className="flex flex-wrap justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-900">
+                    {formatDate(visit.visitDate)} · {capitalize(visit.visitType)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {visit.visitNumber || "No visit number"} · {capitalize(visit.status)}
+                  </p>
+                </div>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <DetailItem label="Chief Complaint" value={visit.chiefComplaint} />
+                  <DetailItem label="Clinician" value={visit.clinician?.name} />
+                  <DetailItem label="Triage Notes" value={visit.triageNotes} />
+                  <DetailItem
+                    label="Vitals"
+                    value={[
+                      visit.temperature != null && `Temp ${visit.temperature}`,
+                      visit.pulseRate != null && `Pulse ${visit.pulseRate}`,
+                      visit.respiratoryRate != null && `Resp ${visit.respiratoryRate}`,
+                      visit.bloodPressure && `BP ${visit.bloodPressure}`,
+                      visit.oxygenSaturation != null && `SpO2 ${visit.oxygenSaturation}%`,
+                      visit.weightKg != null && `Weight ${visit.weightKg} kg`,
+                      visit.heightCm != null && `Height ${visit.heightCm} cm`,
+                    ].filter(Boolean).join(" · ")}
+                  />
+                  <DetailItem label="Assessment / Diagnosis" value={visit.assessment || visit.diagnosis} />
+                  <DetailItem label="Treatment Plan" value={visit.treatmentPlan} />
+                  <DetailItem label="Clinical Notes" value={visit.clinicalNotes} />
+                  <DetailItem label="Admission Reason" value={visit.admissionReason} />
+                  <DetailItem label="Ward / Bed" value={[visit.ward, visit.bedNumber].filter(Boolean).join(" / ")} />
+                  <DetailItem label="Discharge Summary" value={visit.dischargeSummary} />
+                  <DetailItem label="Discharge Plan" value={visit.dischargePlan} />
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-700">
+          Laboratory Results
+        </h3>
+        {labResults.length === 0 ? (
+          <p className="text-sm text-slate-500">No laboratory results recorded.</p>
+        ) : (
+          <div className="divide-y divide-slate-200">
+            {labResults.map((result) => (
+              <article key={result._id} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex flex-wrap justify-between gap-2">
+                  <p className="text-sm font-medium text-slate-900">{result.testName}</p>
+                  <p className="text-xs text-slate-500">
+                    {formatDate(result.performedAt || result.createdAt)} · {capitalize(result.status)}
+                  </p>
+                </div>
+                <p className="mt-1 text-sm text-slate-700">Result: {result.result || "Pending"}</p>
+                {result.referenceRange && (
+                  <p className="text-xs text-slate-500">Reference range: {result.referenceRange}</p>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-700">
+          Prescription History
+        </h3>
+        {prescriptions.length === 0 ? (
+          <p className="text-sm text-slate-500">No prescriptions recorded.</p>
+        ) : (
+          <div className="divide-y divide-slate-200">
+            {prescriptions.map((prescription) => (
+              <article key={prescription._id} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex flex-wrap justify-between gap-2">
+                  <p className="text-sm font-medium text-slate-900">
+                    Prescribed by {prescription.prescribedBy?.name || "Unknown clinician"}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {formatDate(prescription.createdAt)} · {capitalize(prescription.status)}
+                  </p>
+                </div>
+                <ul className="mt-2 space-y-1 text-sm text-slate-700">
+                  {(prescription.medications || []).map((medication, index) => (
+                    <li key={`${prescription._id}-${index}`}>
+                      <span className="font-medium">{medication.name || "Medication"}</span>
+                      {[medication.dosage, medication.frequency, medication.duration, medication.instructions]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      </div>
+    </details>
   );
 };
 

@@ -25,6 +25,7 @@ const prescriptionSchema = new mongoose.Schema(
         frequency: String,
         duration: String,
         quantity: Number,
+        unitPrice: { type: Number, min: 0, default: 250 },
         instructions: String,
       },
     ],

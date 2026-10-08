@@ -22,7 +22,7 @@ export const normalizePatientRegistration = (payload = {}) => {
   const dateOfBirth = normalizeText(payload.dateOfBirth);
   const phone = normalizePhone(payload.phone);
   const address = normalizeText(payload.address);
-  const nationalId = normalizeText(payload.nationalId);
+  const nationalId = normalizeText(payload.nationalId).toUpperCase().replace(/[\s-]+/g, "");
   const estimatedAge = payload.estimatedAge === undefined || payload.estimatedAge === null || payload.estimatedAge === ""
     ? undefined
     : Number(payload.estimatedAge);

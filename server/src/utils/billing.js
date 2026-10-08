@@ -73,13 +73,13 @@ export const calculatePatientBillingSummary = ({
     addLineItem(items, "Discharge summary & follow-up planning", 1, DEFAULT_STAGE_CHARGES.discharge, "discharge");
   }
 
-  (labResults || []).forEach((labResult) => {
+  (labResults || []).filter((labResult) => !["cancelled", "voided"].includes(labResult?.status) && !labResult?.deletedAt).forEach((labResult) => {
     const unitPrice = Number(labResult?.unitPrice || DEFAULT_STAGE_CHARGES.lab);
     const testName = labResult?.testName || "Investigation";
     addLineItem(items, `Lab: ${testName}`, 1, unitPrice, "lab");
   });
 
-  (prescriptions || []).forEach((prescription) => {
+  (prescriptions || []).filter((prescription) => !["cancelled", "voided"].includes(prescription?.status) && !prescription?.deletedAt).forEach((prescription) => {
     const medications = Array.isArray(prescription?.medications) ? prescription.medications : [];
 
     medications.forEach((medication, index) => {

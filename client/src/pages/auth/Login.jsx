@@ -7,7 +7,8 @@ import landingImage from "../../assets/keiyian-landing.jpg";
 
 const Login = () => {
   const navigate = useNavigate();
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, user } = useAuth();
+  const homePath = ["nurse", "doctor"].includes(user?.role) ? "/hmis/visits" : "/dashboard";
 
   const [formData, setFormData] = useState({
     email: "",
@@ -20,7 +21,7 @@ const Login = () => {
 
   // If already logged in
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={homePath} replace />;
   }
 
   const handleChange = (e) => {
@@ -39,9 +40,9 @@ const Login = () => {
     setLoading(true);
 
     try {
-      await login(formData);
+      const session = await login(formData);
 
-      navigate("/dashboard", {
+      navigate(["nurse", "doctor"].includes(session.user?.role) ? "/hmis/visits" : "/dashboard", {
         replace: true,
       });
     } catch (error) {

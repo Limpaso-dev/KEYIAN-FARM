@@ -13,6 +13,8 @@ import {
 import {
   createMedicalLabResult,
   deleteMedicalLabResult,
+  getMedicalLabPatients,
+  getMedicalLabWorklist,
   getMedicalLabResults,
   updateMedicalLabResult,
 } from "../../services/medicalLab.service";
@@ -20,6 +22,8 @@ import {
 import { getPatients } from "../../services/medicalPatient.service";
 
 import { getMedicalVisits } from "../../services/medicalVisit.service";
+import PatientProfilePanel from "../../components/hmis/PatientProfilePanel";
+import { useAuth } from "../../context/useAuth";
 
 const initialForm = {
   patient: "",
@@ -31,11 +35,16 @@ const initialForm = {
 };
 
 const MedicalLabPage = () => {
+  const { user } = useAuth();
+  const isLabTechnician = user?.role === "laboratory";
+  const canWriteLabResults = ["laboratory", "admin", "super_admin"].includes(user?.role);
+  const canVoidLabResults = ["admin", "super_admin"].includes(user?.role);
   const [labResults, setLabResults] = useState([]);
   const [patients, setPatients] = useState([]);
   const [visits, setVisits] = useState([]);
 
   const [loading, setLoading] = useState(true);
+  const [worklistLoading, setWorklistLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [error, setError] = useState("");
@@ -103,11 +112,35 @@ const MedicalLabPage = () => {
     }
   };
 
+  const loadLabWorklist = async () => {
+    setWorklistLoading(true);
+    try {
+      const [worklistResponse, patientsResponse] = await Promise.all([
+        getMedicalLabWorklist(),
+        getMedicalLabPatients(),
+      ]);
+      const worklist = worklistResponse?.data || [];
+      setVisits(worklist);
+      setPatients(patientsResponse?.data || []);
+    } catch (err) {
+      console.error(err);
+      setVisits([]);
+      setPatients([]);
+      setError(err.response?.data?.message || "Failed to load doctor-requested laboratory tests.");
+    } finally {
+      setWorklistLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadLabResults();
-    loadPatients();
-    loadVisits();
-  }, []);
+    if (isLabTechnician) {
+      loadLabWorklist();
+    } else {
+      loadPatients();
+      loadVisits();
+    }
+  }, [isLabTechnician]);
 
   // =====================================================
   // FORM
@@ -116,10 +149,11 @@ const MedicalLabPage = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    setForm((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
+    setForm((previous) => {
+      if (name === "patient") return { ...previous, patient: value, visit: "", testName: "" };
+      if (name === "visit") return { ...previous, visit: value, testName: "" };
+      return { ...previous, [name]: value };
+    });
   };
 
   const resetForm = () => {
@@ -133,6 +167,20 @@ const MedicalLabPage = () => {
     setError("");
     setSuccess("");
 
+    setShowForm(true);
+  };
+
+  const openRequestedTest = (visit, testName) => {
+    setEditingId(null);
+    setForm({
+      ...initialForm,
+      patient: visit.patient._id,
+      visit: visit._id,
+      testName,
+      status: "pending",
+    });
+    setError("");
+    setSuccess("");
     setShowForm(true);
   };
 
@@ -182,6 +230,10 @@ const MedicalLabPage = () => {
 
     if (!form.testName.trim()) {
       setError("Please enter the test name.");
+      return;
+    }
+    if (isLabTechnician && !form.visit) {
+      setError("Select a doctor-diagnosed visit with a requested test.");
       return;
     }
 
@@ -376,14 +428,16 @@ const MedicalLabPage = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
-        >
-          <Plus size={18} />
-          New Lab Result
-        </button>
+        {canWriteLabResults && (
+          <button
+            type="button"
+            onClick={openCreateForm}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
+          >
+            <Plus size={18} />
+            New Lab Result
+          </button>
+        )}
       </div>
 
       {/* Alerts */}
@@ -429,6 +483,56 @@ const MedicalLabPage = () => {
           icon={FlaskConical}
         />
       </div>
+
+      {isLabTechnician && (
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="border-b border-slate-200 px-5 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold text-slate-900">Doctor Requests</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {visits.reduce((count, visit) => count + (visit.labOrders?.length || 0), 0)} tests awaiting results
+                </p>
+              </div>
+              <FlaskConical size={19} className="text-primary-600" />
+            </div>
+          </div>
+          {worklistLoading ? (
+            <div className="p-6 text-sm text-slate-500">Loading doctor requests...</div>
+          ) : visits.length === 0 ? (
+            <div className="p-6 text-sm text-slate-500">No doctor-requested tests are waiting.</div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {visits.map((visit) => (
+                <article key={visit._id} className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(180px,0.8fr)_minmax(180px,1fr)_minmax(220px,1fr)] lg:items-center">
+                  <div>
+                    <p className="font-medium text-slate-900">{getPatientName(visit.patient)}</p>
+                    <p className="text-xs text-slate-500">{visit.patient?.patientNumber || "—"} · {formatDateTime(visit.visitDate)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-slate-400">Doctor diagnosis</p>
+                    <p className="mt-1 text-sm text-slate-700">{visit.diagnosis}</p>
+                    <p className="mt-1 text-xs text-slate-500">Ordered by {visit.clinician?.name || "Doctor"}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {(visit.labOrders || []).map((testName) => (
+                      <button
+                        key={testName}
+                        type="button"
+                        onClick={() => openRequestedTest(visit, testName)}
+                        className="inline-flex items-center gap-2 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm font-medium text-primary-800 hover:bg-primary-100"
+                      >
+                        <Plus size={15} />
+                        Record {testName}
+                      </button>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Filters */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -499,7 +603,7 @@ const MedicalLabPage = () => {
         ) : filteredResults.length === 0 ? (
           <EmptyState
             search={search}
-            onCreate={openCreateForm}
+            onCreate={canWriteLabResults ? openCreateForm : undefined}
           />
         ) : (
           <div className="overflow-x-auto">
@@ -611,24 +715,16 @@ const MedicalLabPage = () => {
                           <Eye size={17} />
                         </ActionButton>
 
-                        <ActionButton
-                          title="Edit result"
-                          onClick={() =>
-                            openEditForm(item)
-                          }
-                        >
-                          <Edit size={17} />
-                        </ActionButton>
-
-                        <ActionButton
-                          title="Delete result"
-                          danger
-                          onClick={() =>
-                            handleDelete(item)
-                          }
-                        >
-                          <Trash2 size={17} />
-                        </ActionButton>
+                        {canWriteLabResults && (
+                          <ActionButton title="Edit result" onClick={() => openEditForm(item)}>
+                            <Edit size={17} />
+                          </ActionButton>
+                        )}
+                        {canVoidLabResults && (
+                          <ActionButton title="Void result" danger onClick={() => handleDelete(item)}>
+                            <Trash2 size={17} />
+                          </ActionButton>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -650,6 +746,7 @@ const MedicalLabPage = () => {
           onClose={closeForm}
           onSubmit={handleSubmit}
           onChange={handleChange}
+          isLabTechnician={isLabTechnician}
         />
       )}
 
@@ -677,6 +774,7 @@ const LabFormModal = ({
   onClose,
   onSubmit,
   onChange,
+  isLabTechnician,
 }) => {
   const selectedPatientVisits =
     form.patient
@@ -688,6 +786,7 @@ const LabFormModal = ({
           return patientId === form.patient;
         })
       : [];
+  const selectedVisit = selectedPatientVisits.find((visit) => visit._id === form.visit);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
@@ -786,6 +885,15 @@ const LabFormModal = ({
                     )}
                   </select>
                 </FormField>
+
+                {isLabTechnician && selectedVisit && (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Doctor Diagnosis</p>
+                    <p className="mt-1 text-sm text-slate-800">{selectedVisit.diagnosis}</p>
+                    <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-blue-700">Requested Tests</p>
+                    <p className="mt-1 text-sm text-slate-800">{selectedVisit.labOrders.join(", ")}</p>
+                  </div>
+                )}
               </div>
             </section>
 
@@ -800,14 +908,30 @@ const LabFormModal = ({
                   label="Test Name"
                   required
                 >
-                  <input
-                    name="testName"
-                    value={form.testName}
-                    onChange={onChange}
-                    className="form-input"
-                    placeholder="e.g. Blood Glucose"
-                    required
-                  />
+                  {isLabTechnician ? (
+                    <select
+                      name="testName"
+                      value={form.testName}
+                      onChange={onChange}
+                      className="form-input"
+                      disabled={!selectedVisit}
+                      required
+                    >
+                      <option value="">Select a doctor-requested test</option>
+                      {(selectedVisit?.labOrders || []).map((order) => (
+                        <option key={order} value={order}>{order}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      name="testName"
+                      value={form.testName}
+                      onChange={onChange}
+                      className="form-input"
+                      placeholder="e.g. Blood Glucose"
+                      required
+                    />
+                  )}
                 </FormField>
 
                 <FormField label="Result">
@@ -946,25 +1070,8 @@ const LabViewModal = ({
         </div>
 
         <div className="space-y-6 p-6">
+          <PatientProfilePanel patient={result.patient} />
           {/* Patient */}
-          <div className="rounded-xl border border-slate-200 p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Patient
-            </p>
-
-            <p className="mt-1 font-semibold text-slate-900">
-              {getPatientName(
-                result.patient
-              )}
-            </p>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Patient No:{" "}
-              {result.patient
-                ?.patientNumber || "—"}
-            </p>
-          </div>
-
           {/* Test */}
           <div>
             <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-700">
@@ -1197,7 +1304,7 @@ const EmptyState = ({
           : "No laboratory results have been recorded yet."}
       </p>
 
-      {!search && (
+      {!search && onCreate && (
         <button
           type="button"
           onClick={onCreate}

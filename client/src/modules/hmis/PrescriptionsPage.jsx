@@ -20,6 +20,8 @@ import {
 import { getPatients } from "../../services/medicalPatient.service";
 
 import { getMedicalVisits } from "../../services/medicalVisit.service";
+import { useAuth } from "../../context/useAuth";
+import PatientProfilePanel from "../../components/hmis/PatientProfilePanel";
 
 const emptyMedication = {
   name: "",
@@ -38,6 +40,9 @@ const initialForm = {
 };
 
 const PrescriptionsPage = () => {
+  const { user } = useAuth();
+  const isDoctor = ["doctor", "admin", "super_admin"].includes(user?.role);
+  const isPharmacyStaff = ["pharmacist", "pharmacy"].includes(user?.role);
   const [prescriptions, setPrescriptions] =
     useState([]);
 
@@ -385,6 +390,18 @@ const PrescriptionsPage = () => {
     }
   };
 
+  const handleDispense = async (prescription) => {
+    try {
+      setError("");
+      setSuccess("");
+      await updatePrescription(prescription._id, { status: "dispensed" });
+      setSuccess("Prescription marked as dispensed.");
+      await loadPrescriptions();
+    } catch (err) {
+      setError(err.response?.data?.message || "Unable to dispense this prescription.");
+    }
+  };
+
   // =====================================================
   // VIEW
   // =====================================================
@@ -513,14 +530,16 @@ const PrescriptionsPage = () => {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
-        >
-          <Plus size={18} />
-          New Prescription
-        </button>
+        {isDoctor && (
+          <button
+            type="button"
+            onClick={openCreateForm}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
+          >
+            <Plus size={18} />
+            New Prescription
+          </button>
+        )}
       </div>
 
       {/* Alerts */}
@@ -823,28 +842,31 @@ const PrescriptionsPage = () => {
                             <Eye size={17} />
                           </ActionButton>
 
-                          <ActionButton
-                            title="Edit prescription"
-                            onClick={() =>
-                              openEditForm(
-                                prescription
-                              )
-                            }
-                          >
-                            <Edit size={17} />
-                          </ActionButton>
-
-                          <ActionButton
-                            title="Delete prescription"
-                            danger
-                            onClick={() =>
-                              handleDelete(
-                                prescription
-                              )
-                            }
-                          >
-                            <Trash2 size={17} />
-                          </ActionButton>
+                          {isDoctor && (
+                            <ActionButton
+                              title="Edit prescription"
+                              onClick={() => openEditForm(prescription)}
+                            >
+                              <Edit size={17} />
+                            </ActionButton>
+                          )}
+                          {isPharmacyStaff && prescription.status === "prescribed" && (
+                            <ActionButton
+                              title="Mark prescription as dispensed"
+                              onClick={() => handleDispense(prescription)}
+                            >
+                              <Pill size={17} />
+                            </ActionButton>
+                          )}
+                          {["admin", "super_admin"].includes(user?.role) && (
+                            <ActionButton
+                              title="Void prescription"
+                              danger
+                              onClick={() => handleDelete(prescription)}
+                            >
+                              <Trash2 size={17} />
+                            </ActionButton>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1288,16 +1310,10 @@ const PrescriptionViewModal = ({
               Prescription
             </p>
 
-            <h2 className="mt-1 text-xl font-bold text-slate-900">
-              {getPatientName(
-                prescription.patient
-              )}
-            </h2>
+            <h2 className="mt-1 text-xl font-bold text-slate-900">Prescription details</h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              {prescription.patient
-                ?.patientNumber ||
-                "No patient number"}
+              {formatDate(prescription.createdAt)}
             </p>
           </div>
 
@@ -1311,15 +1327,9 @@ const PrescriptionViewModal = ({
         </div>
 
         <div className="space-y-6 p-6">
+          <PatientProfilePanel patient={prescription.patient} />
           {/* Summary */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <DetailItem
-              label="Patient"
-              value={getPatientName(
-                prescription.patient
-              )}
-            />
-
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
                 Status

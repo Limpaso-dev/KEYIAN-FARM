@@ -19,6 +19,8 @@ import {
   getMedicalExceptions,
 
   // Medical Lab Results
+  getMedicalLabWorklist,
+  getMedicalLabPatients,
   createMedicalLabResult,
   getMedicalLabResults,
   getMedicalLabResultById,
@@ -35,8 +37,8 @@ import {
 } from "../controllers/medical.controller.js";
 
 import { protect } from "../middleware/auth.middleware.js";
-import { authorizeModule } from "../middleware/role.middleware.js";
-import { createMedicalBill, getPatientBillSummary, listMedicalBills } from "../controllers/medicalBilling.controller.js";
+import { authorizeHMIS } from "../middleware/role.middleware.js";
+import { createMedicalBill, getBillableMedicalVisits, getMedicalPaymentAccounts, getPatientBillSummary, listMedicalBills } from "../controllers/medicalBilling.controller.js";
 import { recordMedicalBillPayment } from "../controllers/invoice.controller.js";
 
 const router = express.Router();
@@ -48,72 +50,78 @@ const router = express.Router();
 // All HMIS routes require authentication
 router.use(protect);
 
-router.get("/summary", authorizeModule("hmisSummary"), getMedicalSummary);
-router.get("/bills", authorizeModule("hmisBilling"), listMedicalBills);
-router.get("/visits/:id/billing-summary", authorizeModule("hmisBilling"), getPatientBillSummary);
-router.post("/bills", authorizeModule("hmisBilling"), createMedicalBill);
-router.post("/bills/:id/payments", authorizeModule("hmisBilling"), recordMedicalBillPayment);
+router.get("/summary", authorizeHMIS("summary"), getMedicalSummary);
+router.get("/bills", authorizeHMIS("billsRead"), listMedicalBills);
+router.get("/payment-accounts", authorizeHMIS("billsPay"), getMedicalPaymentAccounts);
+router.get("/billable-visits", authorizeHMIS("billsRead"), getBillableMedicalVisits);
+router.get("/visits/:id/billing-summary", authorizeHMIS("billsRead"), getPatientBillSummary);
+router.post("/bills", authorizeHMIS("billsCreate"), createMedicalBill);
+router.post("/bills/:id/payments", authorizeHMIS("billsPay"), recordMedicalBillPayment);
 
 // =====================================================
 // PATIENTS
 // =====================================================
 
-router.post("/patients", authorizeModule("hmisPatients"), createPatient);
+router.post("/patients", authorizeHMIS("patientsCreate"), createPatient);
 
-router.get("/patients", authorizeModule("hmisPatients"), getPatients);
+router.get("/patients", authorizeHMIS("patientsRead"), getPatients);
 
-router.get("/patients/:id", authorizeModule("hmisPatients"), getPatientById);
+router.get("/patients/:id", authorizeHMIS("patientsRead"), getPatientById);
 
-router.put("/patients/:id", authorizeModule("hmisPatients"), updatePatient);
+router.put("/patients/:id", authorizeHMIS("patientsUpdate"), updatePatient);
 
-router.delete("/patients/:id", authorizeModule("hmisPatients"), deletePatient);
+router.delete("/patients/:id", authorizeHMIS("adminOnly"), deletePatient);
 
 // =====================================================
 // MEDICAL VISITS
 // =====================================================
 
-router.post("/visits", authorizeModule("hmisVisits"), createMedicalVisit);
+router.post("/visits", authorizeHMIS("visitsCreate"), createMedicalVisit);
 
-router.get("/visits", authorizeModule("hmisVisits"), getMedicalVisits);
+router.get("/visits", authorizeHMIS("visitsRead"), getMedicalVisits);
 
-router.get("/visits/:id", authorizeModule("hmisVisits"), getMedicalVisitById);
+router.get("/visits/:id", authorizeHMIS("visitsRead"), getMedicalVisitById);
 
-router.put("/visits/:id", authorizeModule("hmisVisits"), updateMedicalVisit);
+router.put("/visits/:id", authorizeHMIS("visitsUpdate"), updateMedicalVisit);
 
-router.get("/exceptions", authorizeModule("hmisVisits"), getMedicalExceptions);
+router.get("/exceptions", authorizeHMIS("visitsClinicalActions"), getMedicalExceptions);
 
-router.post("/visits/:id/admit", authorizeModule("hmisVisits"), admitMedicalVisit);
+router.post("/visits/:id/admit", authorizeHMIS("visitsClinicalActions"), admitMedicalVisit);
 
-router.post("/visits/:id/discharge", authorizeModule("hmisVisits"), dischargeMedicalVisit);
+router.post("/visits/:id/discharge", authorizeHMIS("visitsClinicalActions"), dischargeMedicalVisit);
 
-router.delete("/visits/:id", authorizeModule("hmisVisits"), deleteMedicalVisit);
+router.delete("/visits/:id", authorizeHMIS("adminOnly"), deleteMedicalVisit);
 
 // =====================================================
 // MEDICAL LAB RESULTS
 // =====================================================
 
-router.post("/lab-results", authorizeModule("hmisLab"), createMedicalLabResult);
+router.get("/lab-worklist", authorizeHMIS("labRead"), getMedicalLabWorklist);
 
-router.get("/lab-results", authorizeModule("hmisLab"), getMedicalLabResults);
+router.get("/lab-patients", authorizeHMIS("labRead"), getMedicalLabPatients);
 
-router.get("/lab-results/:id", authorizeModule("hmisLab"), getMedicalLabResultById);
+router.post("/lab-results", authorizeHMIS("labWrite"), createMedicalLabResult);
 
-router.put("/lab-results/:id", authorizeModule("hmisLab"), updateMedicalLabResult);
+router.get("/lab-results", authorizeHMIS("labRead"), getMedicalLabResults);
 
-router.delete("/lab-results/:id", authorizeModule("hmisLab"), deleteMedicalLabResult);
+router.get("/lab-results/:id", authorizeHMIS("labRead"), getMedicalLabResultById);
+
+router.put("/lab-results/:id", authorizeHMIS("labWrite"), updateMedicalLabResult);
+
+router.delete("/lab-results/:id", authorizeHMIS("adminOnly"), deleteMedicalLabResult);
 
 // =====================================================
 // PRESCRIPTIONS
 // =====================================================
 
-router.post("/prescriptions", authorizeModule("hmisPrescriptions"), createPrescription);
+router.post("/prescriptions", authorizeHMIS("prescriptionsCreate"), createPrescription);
 
-router.get("/prescriptions", authorizeModule("hmisPrescriptions"), getPrescriptions);
+router.get("/prescriptions", authorizeHMIS("prescriptionsRead"), getPrescriptions);
 
-router.get("/prescriptions/:id", authorizeModule("hmisPrescriptions"), getPrescriptionById);
+router.get("/prescriptions/:id", authorizeHMIS("prescriptionsRead"), getPrescriptionById);
 
-router.put("/prescriptions/:id", authorizeModule("hmisPrescriptions"), updatePrescription);
+router.put("/prescriptions/:id", authorizeHMIS("prescriptionsUpdate"), updatePrescription);
 
-router.delete("/prescriptions/:id", authorizeModule("hmisPrescriptions"), deletePrescription);
+router.delete("/prescriptions/:id", authorizeHMIS("adminOnly"), deletePrescription);
 
 export default router;

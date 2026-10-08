@@ -19,6 +19,8 @@ import {
 } from "../../services/medicalVisit.service";
 
 import { getPatients } from "../../services/medicalPatient.service";
+import { useAuth } from "../../context/useAuth";
+import PatientProfilePanel from "../../components/hmis/PatientProfilePanel";
 
 const initialForm = {
   patient: "",
@@ -39,6 +41,7 @@ const initialForm = {
   assessment: "",
   diagnosis: "",
   differentialDiagnosis: "",
+  labOrders: "",
   treatmentPlan: "",
   disposition: "observe",
   followUpDate: "",
@@ -47,6 +50,12 @@ const initialForm = {
 };
 
 const MedicalVisitsPage = () => {
+  const { user } = useAuth();
+  const isNurse = user?.role === "nurse";
+  const isDoctor = user?.role === "doctor";
+  const canOrderLabTests = user?.role === "doctor";
+  const canCreateVisits = ["admin", "super_admin", "receptionist"].includes(user?.role);
+  const canVoidVisits = ["admin", "super_admin"].includes(user?.role);
   const [visits, setVisits] = useState([]);
   const [patients, setPatients] = useState([]);
 
@@ -58,7 +67,7 @@ const MedicalVisitsPage = () => {
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState(() => user?.role === "nurse" ? "triage_queue" : user?.role === "doctor" ? "doctor_queue" : "all");
 
   const [showForm, setShowForm] = useState(false);
   const [showView, setShowView] = useState(false);
@@ -115,6 +124,11 @@ const MedicalVisitsPage = () => {
     loadPatients();
   }, []);
 
+  useEffect(() => {
+    if (isNurse) setStatusFilter("triage_queue");
+    if (isDoctor) setStatusFilter("doctor_queue");
+  }, [isNurse, isDoctor]);
+
   // =====================================================
   // FORM
   // =====================================================
@@ -141,6 +155,7 @@ const MedicalVisitsPage = () => {
     setForm({
       ...initialForm,
       visitDate: getCurrentDateTimeLocal(),
+      status: user?.role === "receptionist" ? "waiting_for_triage" : "registered",
     });
 
     setShowForm(true);
@@ -175,6 +190,7 @@ const MedicalVisitsPage = () => {
       assessment: visit.assessment || "",
       diagnosis: visit.diagnosis || "",
       differentialDiagnosis: visit.differentialDiagnosis || "",
+      labOrders: (visit.labOrders || []).join("\n"),
       treatmentPlan:
         visit.treatmentPlan || "",
       disposition: visit.disposition || "observe",
@@ -184,6 +200,34 @@ const MedicalVisitsPage = () => {
     });
 
     setShowForm(true);
+  };
+
+  const startTriage = async (visit) => {
+    setSaving(true);
+    setError("");
+    try {
+      await updateMedicalVisit(visit._id, { status: "in_triage" });
+      await loadVisits();
+      openEditForm({ ...visit, status: "in_triage" });
+    } catch (err) {
+      setError(err.response?.data?.message || "Unable to start triage for this visit.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startConsultation = async (visit) => {
+    setSaving(true);
+    setError("");
+    try {
+      await updateMedicalVisit(visit._id, { status: "in_consultation" });
+      await loadVisits();
+      openEditForm({ ...visit, status: "in_consultation" });
+    } catch (err) {
+      setError(err.response?.data?.message || "Unable to start this consultation.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeForm = () => {
@@ -199,6 +243,20 @@ const MedicalVisitsPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (isNurse && !editingId) {
+      setError("Nurses can only triage visits registered by Reception.");
+      return;
+    }
+
+    if (isNurse) {
+      const hasVital = [form.temperature, form.pulseRate, form.respiratoryRate, form.bloodPressure, form.oxygenSaturation]
+        .some((value) => String(value ?? "").trim() !== "");
+      if (!hasVital || !form.triageNotes.trim()) {
+        setError("Record at least one vital sign and triage notes before sending the patient to the doctor.");
+        return;
+      }
+    }
 
     if (!form.patient) {
       setError("Please select a patient.");
@@ -240,8 +298,15 @@ const MedicalVisitsPage = () => {
           ? new Date(form.followUpDate).toISOString()
           : undefined,
         referredTo: form.referredTo.trim(),
-        status: form.status,
+        ...(user?.role === "receptionist" ? {} : { status: isNurse ? "waiting_for_doctor" : form.status }),
       };
+
+      if (canOrderLabTests) {
+        payload.labOrders = form.labOrders
+          .split(/\r?\n/)
+          .map((order) => order.trim())
+          .filter(Boolean);
+      }
 
       if (editingId) {
         await updateMedicalVisit(
@@ -344,8 +409,7 @@ const MedicalVisitsPage = () => {
         visit.patient?.patientNumber
           ?.toLowerCase() || "";
 
-      const diagnosis =
-        visit.diagnosis?.toLowerCase() || "";
+      const diagnosis = isNurse ? "" : visit.diagnosis?.toLowerCase() || "";
 
       const complaint =
         visit.chiefComplaint?.toLowerCase() ||
@@ -362,9 +426,11 @@ const MedicalVisitsPage = () => {
         typeFilter === "all" ||
         visit.visitType === typeFilter;
 
-      const matchesStatus =
-        statusFilter === "all" ||
-        visit.status === statusFilter;
+      const matchesStatus = isNurse && statusFilter === "triage_queue"
+        ? ["waiting_for_triage", "in_triage"].includes(visit.status)
+        : isDoctor && statusFilter === "doctor_queue"
+          ? ["waiting_for_doctor", "in_consultation"].includes(visit.status)
+        : statusFilter === "all" || visit.status === statusFilter;
 
       return (
         matchesSearch &&
@@ -377,6 +443,8 @@ const MedicalVisitsPage = () => {
     search,
     typeFilter,
     statusFilter,
+    isNurse,
+    isDoctor,
   ]);
 
   // =====================================================
@@ -395,6 +463,7 @@ const MedicalVisitsPage = () => {
       "awaiting_investigations",
       "awaiting_results",
       "awaiting_pharmacy",
+      "awaiting_billing",
       "admitted",
       "discharge_pending",
     ].includes(visit.status)
@@ -405,8 +474,14 @@ const MedicalVisitsPage = () => {
   ).length;
 
   const emergencyVisits = visits.filter(
-    (visit) => visit.visitType === "emergency"
+    (visit) => isNurse
+      ? visit.triagePriority === "emergency"
+      : visit.visitType === "emergency"
   ).length;
+  const waitingForTriage = visits.filter((visit) => visit.status === "waiting_for_triage").length;
+  const inTriage = visits.filter((visit) => visit.status === "in_triage").length;
+  const waitingForDoctor = visits.filter((visit) => visit.status === "waiting_for_doctor").length;
+  const inConsultation = visits.filter((visit) => visit.status === "in_consultation").length;
 
   // =====================================================
   // RENDER
@@ -423,23 +498,28 @@ const MedicalVisitsPage = () => {
           </div>
 
           <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-            Medical Visits
+            {isNurse ? "Triage Queue" : isDoctor ? "Doctor Queue" : "Medical Visits"}
           </h1>
 
           <p className="mt-2 text-sm text-slate-500">
-            Record and manage patient clinical
-            encounters, diagnoses, and treatment plans.
+            {isNurse
+              ? "Review waiting patients, record triage observations, and hand off to the doctor."
+              : isDoctor
+                ? "Review triaged patients, document the consultation, and coordinate lab, pharmacy, and billing handoffs."
+              : "Record and manage patient clinical encounters, diagnoses, and treatment plans."}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateForm}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
-        >
-          <Plus size={18} />
-          New Medical Visit
-        </button>
+        {canCreateVisits && (
+          <button
+            type="button"
+            onClick={openCreateForm}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
+          >
+            <Plus size={18} />
+            New Medical Visit
+          </button>
+        )}
       </div>
 
       {/* Alerts */}
@@ -461,29 +541,26 @@ const MedicalVisitsPage = () => {
 
       {/* Summary */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard
-          label="Total Visits"
-          value={totalVisits}
-          icon={Stethoscope}
-        />
-
-        <SummaryCard
-          label="Open"
-          value={openVisits}
-          icon={FileText}
-        />
-
-        <SummaryCard
-          label="Completed"
-          value={completedVisits}
-          icon={FileText}
-        />
-
-        <SummaryCard
-          label="Emergency"
-          value={emergencyVisits}
-          icon={Stethoscope}
-        />
+        {isNurse ? (
+          <>
+            <SummaryCard label="Waiting for Triage" value={waitingForTriage} icon={Stethoscope} />
+            <SummaryCard label="In Triage" value={inTriage} icon={FileText} />
+            <SummaryCard label="Emergency Visits" value={emergencyVisits} icon={Stethoscope} />
+          </>
+        ) : isDoctor ? (
+          <>
+            <SummaryCard label="Waiting for Doctor" value={waitingForDoctor} icon={Stethoscope} />
+            <SummaryCard label="In Consultation" value={inConsultation} icon={FileText} />
+            <SummaryCard label="Emergency" value={emergencyVisits} icon={Stethoscope} />
+          </>
+        ) : (
+          <>
+            <SummaryCard label="Total Visits" value={totalVisits} icon={Stethoscope} />
+            <SummaryCard label="Open" value={openVisits} icon={FileText} />
+            <SummaryCard label="Completed" value={completedVisits} icon={FileText} />
+            <SummaryCard label="Emergency" value={emergencyVisits} icon={Stethoscope} />
+          </>
+        )}
       </div>
 
       {/* Filters */}
@@ -501,7 +578,7 @@ const MedicalVisitsPage = () => {
               onChange={(e) =>
                 setSearch(e.target.value)
               }
-              placeholder="Search patient, patient number, diagnosis or complaint..."
+              placeholder={isNurse ? "Search patient number or complaint..." : "Search patient, patient number, diagnosis or complaint..."}
               className="form-input pl-10"
             />
           </div>
@@ -534,21 +611,30 @@ const MedicalVisitsPage = () => {
             }
             className="form-input"
           >
-            <option value="all">
-              All Statuses
-            </option>
-            <option value="registered">Registered</option>
-            <option value="waiting_for_triage">
-              Waiting for Triage
-            </option>
-            <option value="in_consultation">
-              In Consultation
-            </option>
-            <option value="awaiting_results">
-              Awaiting Results
-            </option>
-            <option value="cleared">Cleared</option>
-            <option value="cancelled">Cancelled</option>
+            {isNurse ? (
+              <>
+                <option value="triage_queue">All Triage Queue</option>
+                <option value="waiting_for_triage">Waiting for Triage</option>
+                <option value="in_triage">In Triage</option>
+              </>
+            ) : isDoctor ? (
+              <>
+                <option value="doctor_queue">Doctor Queue</option>
+                <option value="waiting_for_doctor">Waiting for Doctor</option>
+                <option value="in_consultation">In Consultation</option>
+              </>
+            ) : (
+              <>
+                <option value="all">All Statuses</option>
+                <option value="registered">Registered</option>
+                <option value="waiting_for_triage">Waiting for Triage</option>
+                <option value="in_consultation">In Consultation</option>
+                <option value="awaiting_results">Awaiting Results</option>
+                <option value="awaiting_billing">Awaiting Billing</option>
+                <option value="cleared">Cleared</option>
+                <option value="cancelled">Cancelled</option>
+              </>
+            )}
           </select>
         </div>
       </div>
@@ -557,7 +643,7 @@ const MedicalVisitsPage = () => {
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 px-5 py-4">
           <h2 className="font-semibold text-slate-900">
-            Clinical Encounters
+            {isNurse ? "Patients Awaiting Triage" : isDoctor ? "Patients for Consultation" : "Clinical Encounters"}
           </h2>
 
           <p className="mt-1 text-sm text-slate-500">
@@ -579,7 +665,7 @@ const MedicalVisitsPage = () => {
         ) : filteredVisits.length === 0 ? (
           <EmptyState
             search={search}
-            onCreate={openCreateForm}
+            onCreate={canCreateVisits ? openCreateForm : undefined}
           />
         ) : (
           <div className="overflow-x-auto">
@@ -599,12 +685,12 @@ const MedicalVisitsPage = () => {
                   </TableHeading>
 
                   <TableHeading>
-                    Diagnosis
+                    {isNurse ? "Chief Complaint" : isDoctor ? "Complaint / Diagnosis" : "Diagnosis"}
                   </TableHeading>
 
-                  <TableHeading>
-                    Clinician
-                  </TableHeading>
+                  {(isNurse || isDoctor) && <TableHeading>Priority</TableHeading>}
+
+                  {!isNurse && !isDoctor && <TableHeading>Clinician</TableHeading>}
 
                   <TableHeading>
                     Status
@@ -652,11 +738,17 @@ const MedicalVisitsPage = () => {
 
                     <td className="max-w-[220px] px-5 py-4">
                       <p className="truncate text-sm text-slate-700">
-                        {visit.diagnosis || "—"}
+                        {isNurse ? visit.chiefComplaint || "—" : isDoctor ? visit.diagnosis || visit.chiefComplaint || "—" : visit.diagnosis || "—"}
                       </p>
                     </td>
 
-                    <td className="whitespace-nowrap px-5 py-4">
+                    {(isNurse || isDoctor) && (
+                      <td className="whitespace-nowrap px-5 py-4">
+                        <PriorityBadge priority={visit.triagePriority} />
+                      </td>
+                    )}
+
+                    {!isNurse && !isDoctor && <td className="whitespace-nowrap px-5 py-4">
                       <div>
                         <p className="text-sm font-medium text-slate-800">
                           {visit.clinician
@@ -673,7 +765,7 @@ const MedicalVisitsPage = () => {
                           </p>
                         )}
                       </div>
-                    </td>
+                    </td>}
 
                     <td className="whitespace-nowrap px-5 py-4">
                       <StatusBadge
@@ -683,33 +775,50 @@ const MedicalVisitsPage = () => {
 
                     <td className="whitespace-nowrap px-5 py-4">
                       <div className="flex justify-end gap-1">
-                        <ActionButton
-                          title="View visit"
-                          onClick={() =>
-                            openView(visit)
-                          }
-                        >
-                          <Eye size={17} />
-                        </ActionButton>
+                        {isNurse ? (
+                          <>
+                            <ActionButton title="View triage details" onClick={() => openView(visit)}>
+                              <Eye size={17} />
+                            </ActionButton>
+                            <ActionButton
+                              title={visit.status === "waiting_for_triage" ? "Start triage" : "Continue triage"}
+                              onClick={() => visit.status === "waiting_for_triage" ? startTriage(visit) : openEditForm(visit)}
+                            >
+                              <Stethoscope size={17} />
+                            </ActionButton>
+                          </>
+                        ) : isDoctor ? (
+                          <>
+                            <ActionButton title="Review visit" onClick={() => openView(visit)}>
+                              <Eye size={17} />
+                            </ActionButton>
+                            <ActionButton
+                              title={visit.status === "waiting_for_doctor" ? "Start consultation" : "Continue consultation"}
+                              onClick={() => visit.status === "waiting_for_doctor" ? startConsultation(visit) : openEditForm(visit)}
+                            >
+                              <Stethoscope size={17} />
+                            </ActionButton>
+                          </>
+                        ) : (
+                          <>
+                            <ActionButton title="View visit" onClick={() => openView(visit)}>
+                              <Eye size={17} />
+                            </ActionButton>
+                            <ActionButton title="Edit visit" onClick={() => openEditForm(visit)}>
+                              <Edit size={17} />
+                            </ActionButton>
+                          </>
+                        )}
 
-                        <ActionButton
-                          title="Edit visit"
-                          onClick={() =>
-                            openEditForm(visit)
-                          }
-                        >
-                          <Edit size={17} />
-                        </ActionButton>
-
-                        <ActionButton
-                          title="Delete visit"
-                          danger
-                          onClick={() =>
-                            handleDelete(visit)
-                          }
-                        >
-                          <Trash2 size={17} />
-                        </ActionButton>
+                        {canVoidVisits && (
+                          <ActionButton
+                            title="Void visit"
+                            danger
+                            onClick={() => handleDelete(visit)}
+                          >
+                            <Trash2 size={17} />
+                          </ActionButton>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -727,6 +836,8 @@ const MedicalVisitsPage = () => {
           patients={patients}
           editingId={editingId}
           saving={saving}
+          canOrderLabTests={canOrderLabTests}
+          userRole={user?.role}
           onClose={closeForm}
           onSubmit={handleSubmit}
           onChange={handleChange}
@@ -753,10 +864,42 @@ const VisitFormModal = ({
   patients,
   editingId,
   saving,
+  canOrderLabTests,
+  userRole,
   onClose,
   onSubmit,
   onChange,
 }) => {
+  const allStatusOptions = [
+    ["registered", "Registered"],
+    ["waiting_for_triage", "Waiting for Triage"],
+    ["in_triage", "In Triage"],
+    ["waiting_for_doctor", "Waiting for Doctor"],
+    ["in_consultation", "In Consultation"],
+    ["awaiting_investigations", "Awaiting Investigations"],
+    ["awaiting_results", "Awaiting Results"],
+    ["awaiting_pharmacy", "Awaiting Pharmacy"],
+    ["awaiting_billing", "Awaiting Billing"],
+    ["admitted", "Admitted"],
+    ["discharge_pending", "Discharge Pending"],
+    ["cleared", "Cleared"],
+    ["closed", "Closed"],
+    ["cancelled", "Cancelled"],
+    ["referred", "Referred"],
+    ["left_without_being_seen", "Left without being seen"],
+    ["deceased", "Deceased"],
+  ];
+  const statusOptions = userRole === "receptionist"
+    ? allStatusOptions.slice(0, 2)
+    : userRole === "nurse"
+      ? allStatusOptions.filter(([value]) => ["registered", "waiting_for_triage", "in_triage", "waiting_for_doctor", "awaiting_investigations", "awaiting_results", "awaiting_pharmacy"].includes(value))
+      : userRole === "doctor"
+        ? allStatusOptions.filter(([value]) => ["in_consultation", "awaiting_results", "awaiting_billing"].includes(value))
+        : allStatusOptions;
+  const visibleStatusOptions = statusOptions.some(([value]) => value === form.status)
+    ? statusOptions
+    : [...statusOptions, [form.status, form.status.replaceAll("_", " ")]];
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
       <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
@@ -764,13 +907,17 @@ const VisitFormModal = ({
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
           <div>
             <h2 className="text-lg font-bold text-slate-900">
-              {editingId
-                ? "Edit Medical Visit"
-                : "New Medical Visit"}
+              {userRole === "nurse"
+                ? "Triage Patient"
+                : editingId
+                  ? "Edit Medical Visit"
+                  : "New Medical Visit"}
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Record the patient's clinical encounter.
+              {userRole === "nurse"
+                ? "Record observations and complete the handoff to the doctor."
+                : "Record the patient's clinical encounter."}
             </p>
           </div>
 
@@ -801,6 +948,7 @@ const VisitFormModal = ({
                     name="patient"
                     value={form.patient}
                     onChange={onChange}
+                    disabled={userRole === "nurse" || userRole === "doctor"}
                     className="form-input"
                     required
                   >
@@ -830,6 +978,7 @@ const VisitFormModal = ({
                     name="visitDate"
                     value={form.visitDate}
                     onChange={onChange}
+                    disabled={userRole === "nurse" || userRole === "doctor"}
                     className="form-input"
                     required
                   />
@@ -840,6 +989,7 @@ const VisitFormModal = ({
                     name="visitType"
                     value={form.visitType}
                     onChange={onChange}
+                    disabled={userRole === "nurse" || userRole === "doctor"}
                     className="form-input"
                   >
                     <option value="outpatient">
@@ -854,64 +1004,23 @@ const VisitFormModal = ({
                   </select>
                 </FormField>
 
-                <FormField label="Status">
+                {userRole !== "nurse" && userRole !== "receptionist" && <FormField label="Status">
                   <select
                     name="status"
                     value={form.status}
                     onChange={onChange}
                     className="form-input"
                   >
-                    <option value="registered">
-                      Registered
-                    </option>
-                    <option value="waiting_for_triage">
-                      Waiting for Triage
-                    </option>
-                    <option value="in_triage">
-                      In Triage
-                    </option>
-                    <option value="waiting_for_doctor">
-                      Waiting for Doctor
-                    </option>
-                    <option value="in_consultation">
-                      In Consultation
-                    </option>
-                    <option value="awaiting_investigations">
-                      Awaiting Investigations
-                    </option>
-                    <option value="awaiting_results">
-                      Awaiting Results
-                    </option>
-                    <option value="awaiting_pharmacy">
-                      Awaiting Pharmacy
-                    </option>
-                    <option value="admitted">
-                      Admitted
-                    </option>
-                    <option value="discharge_pending">
-                      Discharge Pending
-                    </option>
-                    <option value="cleared">
-                      Cleared
-                    </option>
-                    <option value="closed">
-                      Closed
-                    </option>
-                    <option value="cancelled">
-                      Cancelled
-                    </option>
-                    <option value="referred">
-                      Referred
-                    </option>
-                    <option value="left_without_being_seen">
-                      Left without being seen
-                    </option>
+                    {visibleStatusOptions.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
                   </select>
-                </FormField>
+                </FormField>}
               </div>
             </section>
 
             {/* Clinical Information */}
+            {userRole !== "receptionist" && (
             <section className="border-t border-slate-200 pt-6">
               <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-700">
                 Clinical Information
@@ -925,12 +1034,13 @@ const VisitFormModal = ({
                       form.chiefComplaint
                     }
                     onChange={onChange}
+                    readOnly={userRole === "doctor"}
                     className="form-input min-h-[90px] resize-y"
                     placeholder="Describe the patient's main complaint..."
                   />
                 </FormField>
 
-                <FormField label="Clinical Notes">
+                {userRole === "doctor" && <FormField label="Clinical Notes">
                   <textarea
                     name="clinicalNotes"
                     value={
@@ -940,7 +1050,7 @@ const VisitFormModal = ({
                     className="form-input min-h-[120px] resize-y"
                     placeholder="Enter clinical observations and notes..."
                   />
-                </FormField>
+                </FormField>}
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                   <FormField label="Temperature (°C)">
@@ -950,6 +1060,7 @@ const VisitFormModal = ({
                       name="temperature"
                       value={form.temperature}
                       onChange={onChange}
+                      readOnly={userRole === "doctor"}
                       className="form-input"
                       placeholder="37.5"
                     />
@@ -961,6 +1072,7 @@ const VisitFormModal = ({
                       name="pulseRate"
                       value={form.pulseRate}
                       onChange={onChange}
+                      readOnly={userRole === "doctor"}
                       className="form-input"
                       placeholder="72"
                     />
@@ -972,6 +1084,7 @@ const VisitFormModal = ({
                       name="respiratoryRate"
                       value={form.respiratoryRate}
                       onChange={onChange}
+                      readOnly={userRole === "doctor"}
                       className="form-input"
                       placeholder="18"
                     />
@@ -982,6 +1095,7 @@ const VisitFormModal = ({
                       name="bloodPressure"
                       value={form.bloodPressure}
                       onChange={onChange}
+                      readOnly={userRole === "doctor"}
                       className="form-input"
                       placeholder="120/80"
                     />
@@ -993,6 +1107,7 @@ const VisitFormModal = ({
                       name="oxygenSaturation"
                       value={form.oxygenSaturation}
                       onChange={onChange}
+                      readOnly={userRole === "doctor"}
                       className="form-input"
                       placeholder="98"
                     />
@@ -1006,6 +1121,7 @@ const VisitFormModal = ({
                       name="painScore"
                       value={form.painScore}
                       onChange={onChange}
+                      readOnly={userRole === "doctor"}
                       className="form-input"
                       placeholder="0-10"
                     />
@@ -1018,6 +1134,7 @@ const VisitFormModal = ({
                       name="weightKg"
                       value={form.weightKg}
                       onChange={onChange}
+                      readOnly={userRole === "doctor"}
                       className="form-input"
                       placeholder="65.5"
                     />
@@ -1030,7 +1147,8 @@ const VisitFormModal = ({
                       name="heightCm"
                       value={form.heightCm}
                       onChange={onChange}
-                      className="form-input"
+                      disabled={userRole === "doctor"}
+                      className="form-input disabled:bg-slate-100"
                       placeholder="170"
                     />
                   </FormField>
@@ -1054,11 +1172,13 @@ const VisitFormModal = ({
                     name="triageNotes"
                     value={form.triageNotes}
                     onChange={onChange}
+                    readOnly={userRole === "doctor"}
                     className="form-input min-h-[90px] resize-y"
                     placeholder="Record triage observations and immediate concerns..."
                   />
                 </FormField>
 
+                {userRole === "doctor" && <>
                 <FormField label="Assessment">
                   <textarea
                     name="assessment"
@@ -1078,6 +1198,18 @@ const VisitFormModal = ({
                     placeholder="Enter diagnosis..."
                   />
                 </FormField>
+
+                {canOrderLabTests && (
+                  <FormField label="Laboratory Tests Requested">
+                    <textarea
+                      name="labOrders"
+                      value={form.labOrders}
+                      onChange={onChange}
+                      className="form-input min-h-[90px] resize-y"
+                      placeholder="Enter one requested investigation per line..."
+                    />
+                  </FormField>
+                )}
 
                 <FormField label="Differential Diagnosis">
                   <textarea
@@ -1137,8 +1269,10 @@ const VisitFormModal = ({
                     placeholder="Enter treatment plan and follow-up instructions..."
                   />
                 </FormField>
+                </>}
               </div>
             </section>
+            )}
 
             {/* Clinician Information */}
             <section className="rounded-lg border border-blue-100 bg-blue-50 p-4">
@@ -1154,9 +1288,9 @@ const VisitFormModal = ({
                   </h3>
 
                   <p className="mt-1 text-sm leading-5 text-slate-600">
-                    The logged-in medical-centre user
-                    will automatically be recorded as
-                    the clinician for this visit.
+                    {userRole === "nurse"
+                      ? "Triage completion and the logged-in nurse will be recorded before the visit is sent to the doctor queue."
+                      : "The logged-in medical-centre user will automatically be recorded as the clinician for this visit."}
                   </p>
                 </div>
               </div>
@@ -1186,9 +1320,11 @@ const VisitFormModal = ({
                 />
               )}
 
-              {editingId
-                ? "Update Visit"
-                : "Create Visit"}
+              {userRole === "nurse"
+                ? "Complete Triage & Send to Doctor"
+                : editingId
+                  ? "Update Visit"
+                  : "Create Visit"}
             </button>
           </div>
         </form>
@@ -1215,15 +1351,10 @@ const VisitViewModal = ({
               Clinical Encounter
             </p>
 
-            <h2 className="mt-1 text-xl font-bold text-slate-900">
-              {getPatientName(
-                visit.patient
-              )}
-            </h2>
+            <h2 className="mt-1 text-xl font-bold text-slate-900">Visit details</h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              {visit.patient?.patientNumber ||
-                "No patient number"}
+              Visit No: {visit.visitNumber || "Not assigned"}
             </p>
           </div>
 
@@ -1237,6 +1368,7 @@ const VisitViewModal = ({
         </div>
 
         <div className="space-y-6 p-6">
+          <PatientProfilePanel patient={visit.patient} />
           {/* Encounter Summary */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <DetailItem
@@ -1347,6 +1479,31 @@ const VisitViewModal = ({
                 label="Diagnosis"
                 value={visit.diagnosis}
               />
+
+              <ClinicalSection
+                label="Laboratory Tests Requested"
+                value={(visit.labOrders || []).join("\n")}
+              />
+
+              {visit.labResults?.length > 0 && (
+                <section>
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-700">
+                    Laboratory Results
+                  </h3>
+                  <div className="divide-y divide-slate-200 rounded-lg border border-slate-200 px-4">
+                    {visit.labResults.map((result) => (
+                      <article key={result._id} className="py-3">
+                        <div className="flex flex-wrap justify-between gap-2">
+                          <p className="text-sm font-semibold text-slate-900">{result.testName}</p>
+                          <StatusBadge status={result.status} />
+                        </div>
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{result.result || "No result recorded"}</p>
+                        {result.referenceRange && <p className="mt-1 text-xs text-slate-500">Reference range: {result.referenceRange}</p>}
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <ClinicalSection
                 label="Differential Diagnosis"
@@ -1471,7 +1628,7 @@ const EmptyState = ({
           : "No medical visits have been recorded yet."}
       </p>
 
-      {!search && (
+      {!search && onCreate && (
         <button
           type="button"
           onClick={onCreate}
