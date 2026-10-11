@@ -17,6 +17,7 @@ const moduleRoles = {
   hmisSummary: ["doctor", "nurse", "laboratory", "pharmacist", "receptionist", "cashier"],
   procurement: ["procurement"],
   suppliers: ["procurement"],
+  receiving: ["procurement", "stores"],
   inventory: ["procurement", "sales", "livestock", "dairy", "farm_officer"],
   finance: ["finance"],
   hr: ["hr"],
@@ -28,6 +29,7 @@ const moduleRoles = {
 };
 
 const readOnlyModuleRoles = {
+  farmers: ["livestock", "dairy", "doctor", "nurse", "receptionist"],
   hmisPatients: ["pharmacist", "pharmacy"],
   inventory: ["stores"],
   livestock: ["farm_officer"],
@@ -50,6 +52,7 @@ const routeModules = [
   ["/hmis/prescriptions", "hmisPrescriptions"],
   ["/hmis", "hmis"],
   ["/procurement", "procurement"],
+  ["/inventory/receiving", "receiving"],
   ["/inventory", "inventory"],
   ["/finance", "finance"],
   ["/hr", "hr"],

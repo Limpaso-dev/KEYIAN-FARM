@@ -29,6 +29,9 @@ export const normalizePatientRegistration = (payload = {}) => {
 
   return {
     patientNumber,
+    farmer: Object.prototype.hasOwnProperty.call(payload, "farmer")
+      ? (payload.farmer || null)
+      : undefined,
     firstName,
     lastName,
     dateOfBirth: dateOfBirth || undefined,

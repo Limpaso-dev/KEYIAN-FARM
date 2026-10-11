@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Edit,
   Eye,
@@ -50,6 +51,8 @@ const initialForm = {
 };
 
 const MedicalVisitsPage = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isNurse = user?.role === "nurse";
   const isDoctor = user?.role === "doctor";
@@ -123,6 +126,23 @@ const MedicalVisitsPage = () => {
     loadVisits();
     loadPatients();
   }, []);
+
+  useEffect(() => {
+    const patientId = location.state?.createVisitForPatient;
+    if (!patientId || patients.length === 0) return;
+
+    setError("");
+    setSuccess("");
+    setEditingId(null);
+    setForm({
+      ...initialForm,
+      patient: patientId,
+      visitDate: getCurrentDateTimeLocal(),
+      status: user?.role === "receptionist" ? "waiting_for_triage" : "registered",
+    });
+    setShowForm(true);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate, patients, user?.role]);
 
   useEffect(() => {
     if (isNurse) setStatusFilter("triage_queue");
