@@ -18,7 +18,7 @@ const DashboardLayout = () => {
       <Topbar onMenuClick={() => setMobileMenuOpen(true)} />
 
       <main className="ml-0 flex flex-1 flex-col bg-[#f2f6ef] pt-20 lg:ml-64">
-        <div className="flex-1 p-4 sm:p-6">
+        <div className="app-content flex-1 p-4 sm:p-6">
           <PageNavigation />
           <Outlet />
         </div>

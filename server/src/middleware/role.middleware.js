@@ -22,7 +22,7 @@ const readOnlyModuleRoles = {
   procurement: ["stores"],
   inventory: ["stores"],
   livestock: ["farm_officer"],
-  farmers: ["livestock", "dairy", "doctor", "nurse"],
+  farmers: ["livestock", "dairy", "doctor", "nurse", "receptionist"],
   milkCollection: ["laboratory"],
   suppliers: ["livestock", "dairy", "farm_officer", "sales"],
   salesReports: ["finance"],

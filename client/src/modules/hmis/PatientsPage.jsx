@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Edit,
   Eye,
@@ -21,6 +22,7 @@ import {
 
 import { getFarmers } from "../../services/farmer.service";
 import { useAuth } from "../../context/useAuth";
+import { canAccessModule } from "../../utils/permissions";
 
 const initialForm = {
   patientNumber: "",
@@ -51,11 +53,12 @@ const initialForm = {
 };
 
 const PatientsPage = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const canRegisterPatients = ["admin", "super_admin", "receptionist"].includes(user?.role);
   const canEditPatients = ["admin", "super_admin", "receptionist"].includes(user?.role);
   const canVoidPatients = ["admin", "super_admin"].includes(user?.role);
-  const canViewFarmers = !["pharmacist", "pharmacy"].includes(user?.role);
+  const canViewFarmers = canAccessModule(user?.role, "farmers", "GET");
   const [patients, setPatients] = useState([]);
   const [farmers, setFarmers] = useState([]);
 
@@ -69,6 +72,7 @@ const PatientsPage = () => {
   const [sexFilter, setSexFilter] = useState("all");
 
   const [showForm, setShowForm] = useState(false);
+  const [registeredPatient, setRegisteredPatient] = useState(null);
   const [showView, setShowView] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError, setViewError] = useState("");
@@ -257,9 +261,7 @@ const PatientsPage = () => {
         },
       };
 
-      if (form.farmer) {
-        payload.farmer = form.farmer;
-      }
+      payload.farmer = form.farmer || null;
 
       if (editingId) {
         await updatePatient(editingId, payload);
@@ -268,7 +270,8 @@ const PatientsPage = () => {
           "Patient updated successfully."
         );
       } else {
-        await createPatient(payload);
+        const response = await createPatient(payload);
+        setRegisteredPatient(response?.data || payload);
 
         setSuccess(
           "Patient registered successfully."
@@ -755,6 +758,45 @@ const PatientsPage = () => {
           error={viewError}
           onClose={closeView}
         />
+      )}
+
+      {registeredPatient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="presentation">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="registered-patient-title"
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <h2 id="registered-patient-title" className="text-lg font-semibold text-slate-900">
+              Patient registered
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Create a visit for {registeredPatient.firstName} {registeredPatient.lastName}
+              {registeredPatient.patientNumber ? ` (${registeredPatient.patientNumber})` : ""} now?
+            </p>
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setRegisteredPatient(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const patientId = registeredPatient._id;
+                  setRegisteredPatient(null);
+                  navigate("/hmis/visits", { state: { createVisitForPatient: patientId } });
+                }}
+                className="rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700"
+              >
+                Create visit
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );

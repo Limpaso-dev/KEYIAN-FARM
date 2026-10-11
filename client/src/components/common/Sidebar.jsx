@@ -145,7 +145,9 @@ const Sidebar = ({ mobileOpen = false, onClose = () => {} }) => {
     return () => { active = false; window.clearInterval(timer); };
   }, [user?._id]);
   const visibleNavigation = navigation.filter(
-    (item) => item.module === "dashboard" || item.module === "workflows" || canAccessModule(user?.role, item.module)
+    (item) =>
+      (item.module === "dashboard" || item.module === "workflows" || canAccessModule(user?.role, item.module)) &&
+      !(item.module === "farmers" && ["receptionist", "doctor", "nurse"].includes(user?.role))
   );
 
   return (

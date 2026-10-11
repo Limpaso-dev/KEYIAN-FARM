@@ -254,7 +254,7 @@ const InventoryPage = () => {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2"><Link to="/inventory/receiving" className="inline-flex items-center justify-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm font-semibold text-primary-700 hover:bg-primary-100">Goods Receiving</Link>{canManageInventory && <button type="button" onClick={openCreateForm} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700"><Plus size={18} />Add Inventory Item</button>}</div>
+        <div className="flex flex-wrap gap-2">{canAccessModule(user?.role, "receiving", "POST") && <Link to="/inventory/receiving" className="inline-flex items-center justify-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-4 py-2.5 text-sm font-semibold text-primary-700 hover:bg-primary-100">Goods Receiving</Link>}{canManageInventory && <button type="button" onClick={openCreateForm} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-primary-700"><Plus size={18} />Add Inventory Item</button>}</div>
       </div>
 
       {/* Summary */}
