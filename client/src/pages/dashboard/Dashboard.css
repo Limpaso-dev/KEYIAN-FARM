@@ -527,6 +527,32 @@
   .section-caption { max-width: 130px; text-align: right; }
 }
 
+@media (min-width: 1600px) {
+  .keiyian-dashboard { max-width: 1800px; padding-bottom: 28px; }
+  .dashboard-heading { padding-block: 18px 24px; }
+  .dashboard-heading h1 { font-size: clamp(28px, 1.7vw, 38px); }
+  .dashboard-greeting { font-size: 15px; }
+  .eyebrow { font-size: 12px; }
+  .dashboard-period { font-size: 15px; }
+  .metric-grid { gap: 18px; padding-top: 22px; }
+  .metric-item { padding: 22px; }
+  .metric-label { font-size: 14px; }
+  .metric-value-row strong { font-size: clamp(26px, 1.8vw, 38px); }
+  .metric-note, .section-caption { font-size: 12px; }
+  .dashboard-content-grid { gap: 20px; }
+  .production-panel, .activity-panel { padding: 22px; }
+  .section-heading h2 { font-size: 20px; }
+  .workflow-grid { gap: 16px; margin-top: 16px; }
+  .workflow-link { min-height: 190px; padding: 18px; }
+  .workflow-link > strong { font-size: 16px; }
+  .workflow-detail, .workflow-go { font-size: 12px; }
+  .department-link { font-size: 13px; padding: 16px 14px; }
+}
+
+@media (min-width: 2200px) {
+  .keiyian-dashboard { max-width: 2000px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .workflow-link,
   .bar { transition: none; }
