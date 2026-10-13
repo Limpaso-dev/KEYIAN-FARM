@@ -5,3 +5,4 @@ export const getMedicalPaymentAccounts = async () => (await api.get("/medical/pa
 export const getBillableMedicalVisits = async () => (await api.get("/medical/billable-visits")).data;
 export const createMedicalBill = async (payload) => (await api.post("/medical/bills", payload)).data;
 export const recordMedicalBillPayment = async (id, payload) => (await api.post(`/medical/bills/${id}/payments`, payload)).data;
+export const recordMedicalVisitPayment = async (visitId, payload) => (await api.post(`/medical/bills/visits/${visitId}/payments`, payload)).data;

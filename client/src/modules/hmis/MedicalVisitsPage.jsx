@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Edit,
@@ -27,6 +27,7 @@ const initialForm = {
   patient: "",
   visitDate: "",
   visitType: "outpatient",
+  consultationFee: "1500",
   chiefComplaint: "",
   clinicalNotes: "",
   temperature: "",
@@ -42,7 +43,6 @@ const initialForm = {
   assessment: "",
   diagnosis: "",
   differentialDiagnosis: "",
-  labOrders: "",
   treatmentPlan: "",
   disposition: "observe",
   followUpDate: "",
@@ -56,7 +56,6 @@ const MedicalVisitsPage = () => {
   const { user } = useAuth();
   const isNurse = user?.role === "nurse";
   const isDoctor = user?.role === "doctor";
-  const canOrderLabTests = user?.role === "doctor";
   const canCreateVisits = ["admin", "super_admin", "receptionist"].includes(user?.role);
   const canVoidVisits = ["admin", "super_admin"].includes(user?.role);
   const [visits, setVisits] = useState([]);
@@ -80,28 +79,34 @@ const MedicalVisitsPage = () => {
     useState(null);
 
   const [form, setForm] = useState(initialForm);
+  const [labReadyNotice, setLabReadyNotice] = useState("");
+  const seenLabResultIds = useRef(null);
 
   // =====================================================
   // LOAD DATA
   // =====================================================
 
-  const loadVisits = async () => {
+  const loadVisits = async (quiet = false) => {
     try {
-      setLoading(true);
-      setError("");
+      if (!quiet) { setLoading(true); setError(""); }
 
       const response = await getMedicalVisits();
-
-      setVisits(response?.data || []);
+      const rows = response?.data || [];
+      if (isDoctor) {
+        const readyResults = rows.flatMap((visit) => (visit.labResults || []).filter((result) => result.status === "completed").map((result) => ({ ...result, patient: visit.patient })));
+        if (seenLabResultIds.current) {
+          const newlyReady = readyResults.find((result) => !seenLabResultIds.current.has(result._id));
+          if (newlyReady) setLabReadyNotice(`Laboratory results for ${getPatientName(newlyReady.patient)} are ready. Review them in the visit record.`);
+        }
+        seenLabResultIds.current = new Set(readyResults.map((result) => result._id));
+      }
+      setVisits(rows);
     } catch (err) {
       console.error(err);
 
-      setError(
-        err.response?.data?.message ||
-          "Failed to load medical visits."
-      );
+      if (!quiet) setError(err.response?.data?.message || "Failed to load medical visits.");
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   };
 
@@ -126,6 +131,12 @@ const MedicalVisitsPage = () => {
     loadVisits();
     loadPatients();
   }, []);
+
+  useEffect(() => {
+    if (!isDoctor) return undefined;
+    const timer = window.setInterval(() => loadVisits(true), 30000);
+    return () => window.clearInterval(timer);
+  }, [isDoctor]);
 
   useEffect(() => {
     const patientId = location.state?.createVisitForPatient;
@@ -210,7 +221,6 @@ const MedicalVisitsPage = () => {
       assessment: visit.assessment || "",
       diagnosis: visit.diagnosis || "",
       differentialDiagnosis: visit.differentialDiagnosis || "",
-      labOrders: (visit.labOrders || []).join("\n"),
       treatmentPlan:
         visit.treatmentPlan || "",
       disposition: visit.disposition || "observe",
@@ -294,6 +304,7 @@ const MedicalVisitsPage = () => {
           ? new Date(form.visitDate).toISOString()
           : undefined,
         visitType: form.visitType,
+        ...(user?.role === "receptionist" ? { consultationFee: Number(form.consultationFee || 0) } : {}),
         chiefComplaint:
           form.chiefComplaint.trim(),
         clinicalNotes:
@@ -320,13 +331,6 @@ const MedicalVisitsPage = () => {
         referredTo: form.referredTo.trim(),
         ...(user?.role === "receptionist" ? {} : { status: isNurse ? "waiting_for_doctor" : form.status }),
       };
-
-      if (canOrderLabTests) {
-        payload.labOrders = form.labOrders
-          .split(/\r?\n/)
-          .map((order) => order.trim())
-          .filter(Boolean);
-      }
 
       if (editingId) {
         await updateMedicalVisit(
@@ -559,6 +563,8 @@ const MedicalVisitsPage = () => {
         />
       )}
 
+      {isDoctor && labReadyNotice && <div role="status" aria-live="polite" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900">{labReadyNotice}<button type="button" className="ml-3 underline" onClick={() => setLabReadyNotice("")}>Dismiss</button></div>}
+
       {/* Summary */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {isNurse ? (
@@ -619,6 +625,7 @@ const MedicalVisitsPage = () => {
             <option value="follow_up">
               Follow Up
             </option>
+                    <option value="inpatient">Inpatient</option>
             <option value="emergency">
               Emergency
             </option>
@@ -856,7 +863,6 @@ const MedicalVisitsPage = () => {
           patients={patients}
           editingId={editingId}
           saving={saving}
-          canOrderLabTests={canOrderLabTests}
           userRole={user?.role}
           onClose={closeForm}
           onSubmit={handleSubmit}
@@ -884,7 +890,6 @@ const VisitFormModal = ({
   patients,
   editingId,
   saving,
-  canOrderLabTests,
   userRole,
   onClose,
   onSubmit,
@@ -1018,11 +1023,14 @@ const VisitFormModal = ({
                     <option value="follow_up">
                       Follow Up
                     </option>
+                    <option value="inpatient">Inpatient</option>
                     <option value="emergency">
                       Emergency
                     </option>
                   </select>
                 </FormField>
+
+                {userRole === "receptionist" && <FormField label="Consultation Fee (KES)"><input name="consultationFee" type="number" min="0" step="0.01" className="form-input" value={form.consultationFee} onChange={onChange} required /></FormField>}
 
                 {userRole !== "nurse" && userRole !== "receptionist" && <FormField label="Status">
                   <select
@@ -1218,18 +1226,6 @@ const VisitFormModal = ({
                     placeholder="Enter diagnosis..."
                   />
                 </FormField>
-
-                {canOrderLabTests && (
-                  <FormField label="Laboratory Tests Requested">
-                    <textarea
-                      name="labOrders"
-                      value={form.labOrders}
-                      onChange={onChange}
-                      className="form-input min-h-[90px] resize-y"
-                      placeholder="Enter one requested investigation per line..."
-                    />
-                  </FormField>
-                )}
 
                 <FormField label="Differential Diagnosis">
                   <textarea

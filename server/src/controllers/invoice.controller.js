@@ -130,7 +130,7 @@ export const recordMedicalBillPayment = async (req, res, next) => {
     bill.status = normalizeBillStatus({ totalAmount: bill.totalAmount, amountPaid: bill.amountPaid, currentStatus: bill.status });
     const beforeState = bill.toObject();
     await bill.save();
-    if (bill.status === "paid" && bill.visit) {
+    if (bill.status === "paid" && bill.visit && !(await MedicalBill.exists({ visit: bill.visit, status: { $in: ["approved", "partially_paid"] }, $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] }))) {
       const visit = await MedicalVisit.findOne({ _id: bill.visit, status: "awaiting_billing" });
       if (visit) {
         const beforeVisit = visit.toObject();
@@ -153,5 +153,60 @@ export const recordMedicalBillPayment = async (req, res, next) => {
       },
     });
     res.status(201).json({ success: true, message: "Patient payment recorded in Finance", data: bill });
+  } catch (error) { res.status(error.code === 11000 ? 409 : 400).json({ success: false, message: error.code === 11000 ? "That payment reference already exists" : error.message }); }
+};
+
+export const recordMedicalVisitPayment = async (req, res, next) => {
+  try {
+    if (!new Set(["finance", "cashier", "admin", "super_admin"]).has(req.user.role)) return res.status(403).json({ success: false, message: "Only Finance or Cashier can record patient payments" });
+    const bills = await MedicalBill.find({ visit: req.params.visitId, status: { $in: ["approved", "partially_paid"] }, $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] }).sort({ createdAt: 1 });
+    if (!bills.length) return res.status(409).json({ success: false, message: "This patient visit has no outstanding bills" });
+    const amount = Number(req.body.amount);
+    const totalBalance = bills.reduce((sum, bill) => sum + calculateBillBalance({ totalAmount: bill.totalAmount, amountPaid: bill.amountPaid }), 0);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > totalBalance + 0.0001) return res.status(400).json({ success: false, message: `Enter an amount up to the combined visit balance KES ${totalBalance.toFixed(2)}` });
+    const reference = String(req.body.reference || "").trim();
+    const paymentMethod = String(req.body.paymentMethod || "cash");
+    if (!reference) return res.status(400).json({ success: false, message: "Payment reference is required" });
+    let account;
+    if (paymentMethod === "cash") {
+      const cashAccounts = await Account.find({ status: "active", accountType: "asset", accountName: { $regex: /cash/i } }).select("accountCode accountName").lean();
+      const rank = (name) => ({ "cash on hand": 0, "cash drawer": 1, "cash in hand": 2, cash: 3 }[name.trim().toLowerCase()] ?? 4);
+      account = cashAccounts.sort((a, b) => rank(a.accountName) - rank(b.accountName) || a.accountCode.localeCompare(b.accountCode))[0];
+      if (!account) return res.status(400).json({ success: false, message: "Set up an active Cash on Hand (or Cash Drawer) account before recording cash receipts" });
+    } else {
+      if (!req.body.account) return res.status(400).json({ success: false, message: "Select the bank or mobile money account that received the payment" });
+      account = await Account.findOne({ _id: req.body.account, status: "active", accountType: "asset" });
+      if (!account) return res.status(400).json({ success: false, message: "Select an active cash or bank account" });
+    }
+
+    let unallocated = amount;
+    const paidBills = [];
+    for (const bill of bills) {
+      if (unallocated <= 0.0001) break;
+      const balance = calculateBillBalance({ totalAmount: bill.totalAmount, amountPaid: bill.amountPaid });
+      const allocation = Math.min(balance, unallocated);
+      if (allocation <= 0) continue;
+      const transaction = await Transaction.create({ reference: `HMIS-${reference}-${bill._id}-${randomInt(1000, 1000000)}`, type: "receipt", account: account._id, amount: allocation, description: `Combined patient visit payment · ${bill.department} bill ${bill.billNumber}`, status: "posted", createdBy: req.user._id });
+      const before = bill.toObject();
+      bill.payments.push({ amount: allocation, method: paymentMethod, reference, account: account._id, receivedBy: req.user._id, transaction: transaction._id });
+      bill.amountPaid += allocation;
+      bill.status = normalizeBillStatus({ totalAmount: bill.totalAmount, amountPaid: bill.amountPaid, currentStatus: bill.status });
+      await bill.save();
+      await logAudit({ actor: req.user, action: "payment_recorded", entity: "MedicalBill", entityId: bill._id, before, after: bill.toObject(), metadata: { reference, amount: allocation, groupedVisitPayment: req.params.visitId, ip: req.ip } });
+      paidBills.push(bill);
+      unallocated -= allocation;
+    }
+    if (unallocated > 0.0001) return res.status(409).json({ success: false, message: "The outstanding visit balance changed while recording payment. Refresh and try again." });
+    const stillOwing = await MedicalBill.exists({ visit: req.params.visitId, status: { $in: ["approved", "partially_paid"] }, $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] });
+    if (!stillOwing) {
+      const visit = await MedicalVisit.findOne({ _id: req.params.visitId, status: "awaiting_billing" });
+      if (visit) {
+        const before = visit.toObject();
+        visit.status = "cleared";
+        await visit.save();
+        await logAudit({ actor: req.user, action: "payment_cleared_visit", entity: "MedicalVisit", entityId: visit._id, before, after: visit.toObject(), metadata: { ip: req.ip } });
+      }
+    }
+    res.status(201).json({ success: true, message: "Combined visit payment recorded and allocated across department bills", data: { visit: req.params.visitId, amount, bills: paidBills } });
   } catch (error) { res.status(error.code === 11000 ? 409 : 400).json({ success: false, message: error.code === 11000 ? "That payment reference already exists" : error.message }); }
 };

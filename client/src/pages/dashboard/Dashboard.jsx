@@ -10,7 +10,6 @@ import {
   Milk,
   Package,
   ShoppingCart,
-  Tractor,
   Users,
   UserCog,
   Wallet,
@@ -151,7 +150,6 @@ const Dashboard = () => {
 
   const departments = [
     { label: "Farmers", icon: Users, path: "/farmers" },
-    { label: "Livestock", icon: Tractor, path: "/livestock" },
     { label: "Dairy", icon: Milk, path: "/dairy" },
     { label: "Agriculture", icon: Wheat, path: "/agriculture" },
     { label: "Medical centre", icon: HeartPulse, path: "/hmis" },
@@ -247,7 +245,7 @@ const Dashboard = () => {
       <section className="department-section">
         <div className="section-heading"><div><p className="eyebrow">ONE SHARED PLATFORM</p><h2>Across every department</h2></div><span className="section-caption">Connected data. Clear decisions.</span></div>
         <div className="department-list">
-          {departments.map(({ label, icon: Icon, path }) => <Link to={path} className="department-link" key={label}><Icon size={17} /><span>{label}</span><ArrowDownRight size={14} /></Link>)}
+          {departments.filter((department) => department.path !== "/farmers" || canReadFarmers).filter((department) => department.path !== "/livestock" || canAccessModule(user?.role, "livestock")).map(({ label, icon: Icon, path }) => <Link to={path} className="department-link" key={label}><Icon size={17} /><span>{label}</span><ArrowDownRight size={14} /></Link>)}
         </div>
       </section>
 

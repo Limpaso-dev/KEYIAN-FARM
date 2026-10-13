@@ -42,12 +42,6 @@ export const receivePurchaseOrder = async (req, res, next) => {
       if (![receivedQuantity, acceptedQuantity, damagedQuantity].every(Number.isFinite) || receivedQuantity < 0 || acceptedQuantity < 0 || damagedQuantity < 0 || Math.abs(receivedQuantity - acceptedQuantity - damagedQuantity) > 0.0001 || receivedQuantity > remaining) {
         return res.status(400).json({ success: false, message: `Invalid or over-received quantity for ${order.items[index].description}. Remaining to receive: ${remaining}` });
       }
-      let inventoryItem = null;
-      if (acceptedQuantity > 0) {
-        if (!submitted.inventoryItem) return res.status(400).json({ success: false, message: `Select an inventory item for accepted ${order.items[index].description}` });
-        inventoryItem = await Inventory.findById(submitted.inventoryItem);
-        if (!inventoryItem) return res.status(404).json({ success: false, message: "Selected inventory item was not found" });
-      }
       items.push({
         poItemIndex: index,
         description: order.items[index].description,
@@ -67,16 +61,36 @@ export const receivePurchaseOrder = async (req, res, next) => {
       notes: String(req.body.notes || "").trim(),
       items,
     });
-    for (const line of items) {
-      if (line.inventoryItem && line.acceptedQuantity > 0) {
-        await Inventory.updateOne({ _id: line.inventoryItem }, { $inc: { quantity: line.acceptedQuantity }, $set: { unitCost: order.items[line.poItemIndex].unitPrice } });
-      }
-    }
     const acceptedTotals = order.items.map((_, index) => previousReceipts.reduce((sum, oldReceipt) => sum + Number(oldReceipt.items.find((line) => line.poItemIndex === index)?.acceptedQuantity || 0), 0) + items[index].acceptedQuantity);
     order.receivedQuantities = acceptedTotals.map((quantity, index) => ({ description: order.items[index].description, acceptedQuantity: quantity }));
     order.status = acceptedTotals.every((quantity, index) => quantity >= order.items[index].quantity) ? "received" : "partially_received";
     await order.save();
     await receipt.populate([{ path: "purchaseOrder", select: "poNumber department" }, { path: "supplier", select: "name supplierCode" }, { path: "items.inventoryItem", select: "name itemCode unit" }, { path: "receivedBy", select: "name" }]);
-    res.status(201).json({ success: true, message: "Goods receipt recorded and accepted quantities added to inventory", data: receipt });
+    res.status(201).json({ success: true, message: "Delivery checked against the purchase order and sent to stores for stock entry", data: receipt });
+  } catch (error) { next(error); }
+};
+
+export const releaseReceiptToStores = async (req, res, next) => {
+  try {
+    const receipt = await GoodsReceipt.findById(req.params.id);
+    if (!receipt) return res.status(404).json({ success: false, message: "Goods receipt not found" });
+    if (receipt.status !== "pending_store") return res.status(409).json({ success: false, message: "This receipt has already been released to stores" });
+    const order = await PurchaseOrder.findById(receipt.purchaseOrder);
+    if (!Array.isArray(req.body.items) || req.body.items.length !== receipt.items.length) return res.status(400).json({ success: false, message: "Select a stock item for each accepted receipt line" });
+    const selectedInventory = [];
+    for (let index = 0; index < receipt.items.length; index += 1) {
+      const line = receipt.items[index];
+      if (!line.acceptedQuantity) continue;
+      const inventoryItem = await Inventory.findById(req.body.items[index]?.inventoryItem);
+      if (!inventoryItem) return res.status(400).json({ success: false, message: `Select a valid inventory item for ${line.description}` });
+      line.inventoryItem = inventoryItem._id;
+      selectedInventory.push({ inventoryItem, line });
+    }
+    for (const { inventoryItem, line } of selectedInventory) await Inventory.updateOne({ _id: inventoryItem._id }, { $inc: { quantity: line.acceptedQuantity }, $set: { unitCost: order.items[line.poItemIndex].unitPrice } });
+    receipt.status = "released_to_stores";
+    receipt.releasedBy = req.user._id;
+    receipt.releasedAt = new Date();
+    await receipt.save();
+    res.json({ success: true, message: "Accepted goods released and inventory updated by stores", data: receipt });
   } catch (error) { next(error); }
 };

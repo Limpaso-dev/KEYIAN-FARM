@@ -16,7 +16,7 @@ const purchaseRequestSchema = new mongoose.Schema(
     totalAmount: { type: Number, required: true, min: 0 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     status: { type: String, enum: ["pending_approval", "returned", "approved", "rejected", "converted"], default: "pending_approval" },
-    policy: { type: mongoose.Schema.Types.ObjectId, ref: "WorkflowPolicy", required: true },
+    policy: { type: mongoose.Schema.Types.ObjectId, ref: "WorkflowPolicy" },
     approvalSteps: [{
       label: { type: String, required: true },
       approverRole: { type: String, required: true },

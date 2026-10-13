@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
 import { getLifecycleTasks, getPurchaseRequests } from "../../services/workflow.service";
+import { getMedicalLabWorklist } from "../../services/medicalLab.service";
 
 const currency = (amount) => new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 2 }).format(Number(amount) || 0);
 
@@ -20,7 +21,11 @@ const Topbar = ({ onMenuClick = () => {} }) => {
     setNotificationsLoading(true);
     setNotificationError(false);
     try {
-      const [requestResult, taskResult] = await Promise.all([getPurchaseRequests(), getLifecycleTasks()]);
+      const [requestResult, taskResult, labResult] = await Promise.all([
+        getPurchaseRequests(),
+        getLifecycleTasks(),
+        user.role === "laboratory" ? getMedicalLabWorklist() : Promise.resolve({ data: [] }),
+      ]);
       const requests = (requestResult.data || [])
         .filter((request) => request.canDecide || (request.status === "returned" && String(request.createdBy?._id) === String(user._id)))
         .map((request) => ({
@@ -41,14 +46,23 @@ const Topbar = ({ onMenuClick = () => {} }) => {
           updatedAt: task.updatedAt,
           returned: task.status === "returned",
         }));
-      setNotifications([...requests, ...tasks].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
+      const labRequests = user.role === "laboratory"
+        ? (labResult.data || []).flatMap((visit) => (visit.labOrders || []).map((testName, index) => ({
+          id: `lab-${visit._id}-${index}-${testName}`,
+          title: "Laboratory test request pending",
+          detail: `${visit.patient?.name || visit.patient?.patientNumber || "Patient"} · ${testName}`,
+          updatedAt: visit.updatedAt,
+          href: "/hmis/laboratory",
+        })))
+        : [];
+      setNotifications([...requests, ...tasks, ...labRequests].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
     } catch {
       setNotifications([]);
       setNotificationError(true);
     } finally {
       setNotificationsLoading(false);
     }
-  }, [user?._id]);
+  }, [user?._id, user?.role]);
 
   useEffect(() => {
     refreshNotifications();
@@ -73,6 +87,11 @@ const Topbar = ({ onMenuClick = () => {} }) => {
   const openWorkflows = () => {
     setOpen(false);
     navigate("/workflows");
+  };
+
+  const openNotification = (item) => {
+    setOpen(false);
+    navigate(item.href || "/workflows");
   };
 
   return (
@@ -102,7 +121,7 @@ const Topbar = ({ onMenuClick = () => {} }) => {
           </button>
           {open && <section className="absolute right-0 top-12 z-50 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl" aria-label="Pending notifications">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><div><h2 className="text-sm font-semibold text-slate-900">Notifications</h2><p className="text-xs text-slate-500">{notifications.length} pending item{notifications.length === 1 ? "" : "s"}</p></div><button type="button" aria-label="Close notifications" onClick={() => setOpen(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X size={17}/></button></div>
-            {notifications.length ? <ul className="max-h-96 overflow-y-auto divide-y divide-slate-100">{notifications.slice(0, 10).map((item) => <li key={item.id}><button type="button" onClick={openWorkflows} className="w-full px-4 py-3 text-left hover:bg-slate-50"><span className="flex items-start gap-3"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${item.returned ? "bg-orange-500" : "bg-primary-600"}`}/><span className="min-w-0 flex-1"><span className="block text-sm font-medium text-slate-800">{item.title}</span><span className="mt-0.5 block truncate text-xs text-slate-500">{item.detail}</span><span className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-400"><span>{item.amount != null ? currency(item.amount) : "Open workflow inbox"}</span><span>{item.updatedAt ? new Date(item.updatedAt).toLocaleString("en-KE", { dateStyle: "short", timeStyle: "short" }) : ""}</span></span></span></span></button></li>)}</ul> : <div className="px-4 py-8 text-center">{notificationError ? <><Bell size={24} className="mx-auto text-amber-500"/><p className="mt-2 text-sm font-medium text-slate-700">Could not load notifications</p><p className="mt-1 text-xs text-slate-500">Check that the server is running, then reopen this panel.</p></> : notificationsLoading ? <p className="text-sm text-slate-500">Loading notifications…</p> : <><CheckCheck size={24} className="mx-auto text-emerald-500"/><p className="mt-2 text-sm font-medium text-slate-700">You’re all caught up</p><p className="mt-1 text-xs text-slate-500">No pending approvals or returned items.</p></>}</div>}
+            {notifications.length ? <ul className="max-h-96 overflow-y-auto divide-y divide-slate-100">{notifications.slice(0, 10).map((item) => <li key={item.id}><button type="button" onClick={() => openNotification(item)} className="w-full px-4 py-3 text-left hover:bg-slate-50"><span className="flex items-start gap-3"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${item.returned ? "bg-orange-500" : "bg-primary-600"}`}/><span className="min-w-0 flex-1"><span className="block text-sm font-medium text-slate-800">{item.title}</span><span className="mt-0.5 block truncate text-xs text-slate-500">{item.detail}</span><span className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-400"><span>{item.amount != null ? currency(item.amount) : item.href ? "Open laboratory requests" : "Open workflow inbox"}</span><span>{item.updatedAt ? new Date(item.updatedAt).toLocaleString("en-KE", { dateStyle: "short", timeStyle: "short" }) : ""}</span></span></span></span></button></li>)}</ul> : <div className="px-4 py-8 text-center">{notificationError ? <><Bell size={24} className="mx-auto text-amber-500"/><p className="mt-2 text-sm font-medium text-slate-700">Could not load notifications</p><p className="mt-1 text-xs text-slate-500">Check that the server is running, then reopen this panel.</p></> : notificationsLoading ? <p className="text-sm text-slate-500">Loading notifications…</p> : <><CheckCheck size={24} className="mx-auto text-emerald-500"/><p className="mt-2 text-sm font-medium text-slate-700">You’re all caught up</p><p className="mt-1 text-xs text-slate-500">No pending approvals or returned items.</p></>}</div>}
             <button type="button" onClick={openWorkflows} className="w-full border-t border-slate-100 px-4 py-3 text-sm font-semibold text-primary-700 hover:bg-primary-50">Open workflow inbox</button>
           </section>}
           </div>

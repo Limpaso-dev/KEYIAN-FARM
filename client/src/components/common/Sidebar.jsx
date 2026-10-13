@@ -1,5 +1,4 @@
 import { NavLink } from "react-router-dom";
-import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   X,
@@ -22,7 +21,6 @@ import {
 
 import { useAuth } from "../../context/useAuth";
 import { canAccessModule } from "../../utils/permissions";
-import { getLifecycleTasks, getPurchaseRequests } from "../../services/workflow.service";
 
 const navigation = [
   {
@@ -125,25 +123,6 @@ const navigation = [
 
 const Sidebar = ({ mobileOpen = false, onClose = () => {} }) => {
   const { logout, user } = useAuth();
-  const [pendingTaskCount, setPendingTaskCount] = useState(0);
-
-  useEffect(() => {
-    if (!user?._id) return undefined;
-    let active = true;
-    const refreshTaskCount = async () => {
-      try {
-        const [requestData, taskData] = await Promise.all([getPurchaseRequests(), getLifecycleTasks()]);
-        if (active) {
-          const requestCount = (requestData.data || []).filter((item) => item.canDecide).length;
-          const lifecycleCount = (taskData.data || []).filter((item) => item.canDecide).length;
-          setPendingTaskCount(requestCount + lifecycleCount);
-        }
-      } catch { if (active) setPendingTaskCount(0); }
-    };
-    refreshTaskCount();
-    const timer = window.setInterval(refreshTaskCount, 30000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [user?._id]);
   const visibleNavigation = navigation.filter(
     (item) =>
       (item.module === "dashboard" || item.module === "workflows" || canAccessModule(user?.role, item.module)) &&
@@ -190,7 +169,6 @@ const Sidebar = ({ mobileOpen = false, onClose = () => {} }) => {
                 <Icon size={19} />
 
                 <span className="flex-1">{item.label}</span>
-                {item.module === "workflows" && pendingTaskCount > 0 && <span className="rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white">{pendingTaskCount > 99 ? "99+" : pendingTaskCount}</span>}
               </NavLink>
             );
           })}
