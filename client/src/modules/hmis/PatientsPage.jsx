@@ -240,15 +240,15 @@ const PatientsPage = () => {
         address: form.address.trim(),
         payer: form.payer || "cash",
         payerDetails: {
-          scheme: form.payerDetails.scheme.trim(),
-          memberNumber: form.payerDetails.memberNumber.trim(),
+          scheme: form.payer === "cash" ? "" : form.payerDetails.scheme.trim(),
+          memberNumber: !form.farmer || form.payer === "cash" ? "" : form.payerDetails.memberNumber.trim(),
           principalMember:
-            form.payerDetails.principalMember.trim(),
+            !form.farmer || form.payer === "cash" ? "" : form.payerDetails.principalMember.trim(),
           validityStart:
-            form.payerDetails.validityStart || undefined,
+            form.payer === "cash" ? undefined : form.payerDetails.validityStart || undefined,
           validityEnd:
-            form.payerDetails.validityEnd || undefined,
-          limit: form.payerDetails.limit
+            form.payer === "cash" ? undefined : form.payerDetails.validityEnd || undefined,
+          limit: form.payer !== "cash" && form.payerDetails.limit
             ? Number(form.payerDetails.limit)
             : undefined,
         },
@@ -1042,7 +1042,7 @@ const PatientFormModal = ({
                   </select>
                 </FormField>
 
-                <FormField label="Scheme/Provider">
+                {form.payer !== "cash" && <FormField label="Scheme/Provider">
                   <input
                     name="scheme"
                     value={form.payerDetails.scheme}
@@ -1058,9 +1058,9 @@ const PatientFormModal = ({
                     className="form-input"
                     placeholder="e.g. NHIF / Insurance"
                   />
-                </FormField>
+                </FormField>}
 
-                <FormField label="Member Number">
+                {Boolean(form.farmer) && form.payer !== "cash" && <FormField label="Member Number">
                   <input
                     name="memberNumber"
                     value={form.payerDetails.memberNumber}
@@ -1076,9 +1076,9 @@ const PatientFormModal = ({
                     className="form-input"
                     placeholder="Member number"
                   />
-                </FormField>
+                </FormField>}
 
-                <FormField label="Principal Member">
+                {Boolean(form.farmer) && form.payer !== "cash" && <FormField label="Principal Member">
                   <input
                     name="principalMember"
                     value={form.payerDetails.principalMember}
@@ -1094,9 +1094,9 @@ const PatientFormModal = ({
                     className="form-input"
                     placeholder="Principal member name"
                   />
-                </FormField>
+                </FormField>}
 
-                <FormField label="Validity Start">
+                {form.payer !== "cash" && <FormField label="Validity Start">
                   <input
                     type="date"
                     name="validityStart"
@@ -1112,9 +1112,9 @@ const PatientFormModal = ({
                     }
                     className="form-input"
                   />
-                </FormField>
+                </FormField>}
 
-                <FormField label="Validity End">
+                {form.payer !== "cash" && <FormField label="Validity End">
                   <input
                     type="date"
                     name="validityEnd"
@@ -1130,9 +1130,9 @@ const PatientFormModal = ({
                     }
                     className="form-input"
                   />
-                </FormField>
+                </FormField>}
 
-                <FormField label="Coverage Limit">
+                {form.payer !== "cash" && <FormField label="Coverage Limit">
                   <input
                     type="number"
                     min="0"
@@ -1150,7 +1150,7 @@ const PatientFormModal = ({
                     className="form-input"
                     placeholder="Optional limit"
                   />
-                </FormField>
+                </FormField>}
               </div>
             </section>
 

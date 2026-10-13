@@ -1,7 +1,9 @@
 import Patient from "../models/Patient.js";
 import MedicalVisit from "../models/MedicalVisit.js";
+import MedicalBill from "../models/MedicalBill.js";
 import MedicalLabResult from "../models/MedicalLabResult.js";
 import Prescription from "../models/Prescription.js";
+import { randomInt } from "node:crypto";
 import { logAudit, softDeleteRecord } from "../utils/globalRules.js";
 import {
   findPossibleDuplicates,
@@ -448,6 +450,26 @@ const areVisitLabOrdersComplete = async (visit) => {
   return orders.every((order) => completedNames.has(order.toLowerCase()));
 };
 
+const countOutstandingLabTests = async () => {
+  const visits = await MedicalVisit.find({
+    labOrders: { $exists: true, $ne: [] },
+    status: { $nin: ["cancelled", "voided", "deceased"] },
+    $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+  }).select("_id labOrders").lean();
+  if (!visits.length) return 0;
+  const completed = await MedicalLabResult.find({
+    visit: { $in: visits.map((visit) => visit._id) },
+    status: "completed",
+    $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+  }).select("visit testName").lean();
+  const completedByVisit = new Map();
+  completed.forEach((result) => {
+    const key = String(result.visit);
+    completedByVisit.set(key, [...(completedByVisit.get(key) || []), result.testName]);
+  });
+  return visits.reduce((total, visit) => total + getOutstandingLabOrders(visit.labOrders, completedByVisit.get(String(visit._id)) || []).length, 0);
+};
+
 const returnVisitToDoctorWhenLabsComplete = async (visitId, actor) => {
   const visit = await MedicalVisit.findById(visitId);
   if (!visit || visit.status !== "awaiting_results" || !(await areVisitLabOrdersComplete(visit))) return;
@@ -499,6 +521,8 @@ export const createMedicalVisit = async (
     if (labOrders.length && !String(req.body?.diagnosis || "").trim()) {
       return res.status(400).json({ success: false, message: "A diagnosis is required before ordering laboratory tests" });
     }
+    const consultationFee = Number(req.body?.consultationFee ?? 1500);
+    if (role === "receptionist" && (!Number.isFinite(consultationFee) || consultationFee < 0)) return res.status(400).json({ success: false, message: "Consultation fee must be a valid amount" });
 
     const payload = {
       ...visitInput,
@@ -514,6 +538,18 @@ export const createMedicalVisit = async (
     }
 
     const visit = await MedicalVisit.create(payload);
+
+    if (role === "receptionist") {
+      if (consultationFee > 0) {
+        await MedicalBill.create({
+          billNumber: `HB-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}-${randomInt(100, 1000)}`,
+          patient: visit.patient, visit: visit._id, department: "reception", createdBy: req.user._id,
+          items: [{ description: "Consultation fee", quantity: 1, unitPrice: consultationFee, total: consultationFee }],
+          totalAmount: consultationFee, status: "approved",
+          history: [{ action: "sent_to_cashier", by: req.user._id, comment: "Reception consultation fee sent to cashier" }],
+        });
+      }
+    }
 
     await logAudit({
       actor: req.user,
@@ -713,6 +749,7 @@ export const updateMedicalVisit = async (
     const payload = role === "doctor"
       ? {
           ...visitInput,
+          clinician: req.user._id,
           ...(labOrders === undefined ? {} : { labOrders }),
           status: nextStatus,
           ...normalizeConsultationSummary(visitInput),
@@ -1096,9 +1133,14 @@ export const getMedicalLabResults = async (
   next
 ) => {
   try {
-    const labResults = await populateMedicalLabResult(MedicalLabResult.find({
+    const filter = {
       $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    })).sort({ createdAt: -1 });
+    };
+    if (req.user.role === "doctor") {
+      const doctorVisits = await MedicalVisit.find({ clinician: req.user._id }).distinct("_id");
+      filter.visit = { $in: doctorVisits };
+    }
+    const labResults = await populateMedicalLabResult(MedicalLabResult.find(filter)).sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -1622,7 +1664,7 @@ export const getMedicalSummary = async (req, res, next) => {
           })
         : null,
       canReadLab
-        ? MedicalLabResult.countDocuments({ status: "pending" })
+        ? countOutstandingLabTests()
         : null,
       canReadPrescriptions ? Prescription.countDocuments() : null,
       canReadVisits

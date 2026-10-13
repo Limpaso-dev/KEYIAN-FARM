@@ -1,7 +1,7 @@
 import Supplier from "../models/Supplier.js";
 import PurchaseOrder from "../models/PurchaseOrder.js";
 import PurchaseRequest from "../models/PurchaseRequest.js";
-import { getApprovalSteps, isWorkflowAdmin } from "../services/approvalWorkflow.service.js";
+import { isWorkflowAdmin } from "../services/approvalWorkflow.service.js";
 import { randomInt } from "node:crypto";
 
 // ===============================
@@ -132,14 +132,13 @@ export const createPurchaseOrder = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "Supplier unit prices must be valid non-negative amounts" });
     }
     const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-    const { policyId, steps } = await getApprovalSteps({ workflowType: "purchase_order", department: request.department, amount: subtotal });
     const order = await PurchaseOrder.create({
       poNumber: `PO-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}-${randomInt(100, 1000)}`,
       purchaseRequest: request._id, department: request.department, supplier: supplier._id,
       quotationUrl: String(quotationUrl).trim(),
-      items, subtotal, tax: 0, totalAmount: subtotal, status: "pending_approval",
-      requestedBy: req.user._id, policy: policyId, approvalSteps: steps,
-      history: [{ action: "submitted", by: req.user._id }],
+      items, subtotal, tax: 0, totalAmount: subtotal, status: "approved",
+      requestedBy: req.user._id, approvedBy: req.user._id,
+      history: [{ action: "approved", by: req.user._id, comment: "Created by procurement from an approved purchase request" }],
     });
     request.status = "converted";
     request.history.push({ action: "converted_to_po", by: req.user._id, comment: order.poNumber });
@@ -147,7 +146,7 @@ export const createPurchaseOrder = async (req, res, next) => {
 
     res.status(201).json({
       success: true,
-      message: "Purchase order sent for approval",
+      message: "Purchase order created for the selected supplier",
       data: order,
     });
   } catch (error) {

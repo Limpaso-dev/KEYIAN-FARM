@@ -116,6 +116,7 @@ const HMISPage = () => {
       key: "prescriptions",
       permission: "hmisPrescriptions",
       icon: Pill,
+      path: "/hmis/prescriptions",
     },
   ].filter((stat) => canAccessModule(user?.role, stat.permission));
 
@@ -155,6 +156,7 @@ const HMISPage = () => {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {quickStats.map((stat) => {
           const Icon = stat.icon;
+          const StatCard = stat.path ? Link : "div";
           const value = loading
             ? "..."
             : summary?.[stat.key] == null
@@ -162,9 +164,10 @@ const HMISPage = () => {
               : Number(summary[stat.key]).toLocaleString("en-KE");
 
           return (
-            <div
+            <StatCard
               key={stat.label}
-              className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+              {...(stat.path ? { to: stat.path } : {})}
+              className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm ${stat.path ? "transition hover:border-primary-200 hover:shadow-md" : ""}`}
             >
               <div className="flex items-center justify-between">
                 <div>
@@ -181,7 +184,7 @@ const HMISPage = () => {
                   <Icon size={21} />
                 </div>
               </div>
-            </div>
+            </StatCard>
           );
         })}
       </div>

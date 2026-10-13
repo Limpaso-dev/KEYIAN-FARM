@@ -1,5 +1,5 @@
 const moduleRoles = {
-  workflows: ["super_admin", "admin", "manager", "finance", "hr", "procurement", "stores", "livestock", "dairy", "laboratory", "doctor", "nurse", "pharmacist", "sales", "farm_officer", "staff"],
+  workflows: ["super_admin", "admin", "manager", "finance", "hr", "procurement", "stores", "livestock", "dairy", "laboratory", "doctor", "nurse", "pharmacist", "sales", "farm_officer", "staff", "receptionist"],
   farmers: ["farm_officer"],
   livestock: ["livestock"],
   animalFeeds: ["livestock"],
@@ -9,7 +9,7 @@ const moduleRoles = {
   milkValueAddition: ["dairy"],
   agriculture: ["farm_officer"],
   hmis: ["doctor", "nurse", "laboratory", "pharmacist", "receptionist", "cashier", "finance", "pharmacy"],
-  hmisBilling: ["doctor", "nurse", "pharmacist", "pharmacy", "finance", "cashier"],
+  hmisBilling: ["doctor", "pharmacist", "pharmacy", "finance", "cashier"],
   hmisPatients: ["doctor", "nurse", "receptionist"],
   hmisVisits: ["doctor", "nurse", "receptionist"],
   hmisLab: ["doctor", "nurse", "laboratory"],
@@ -29,10 +29,9 @@ const moduleRoles = {
 };
 
 const readOnlyModuleRoles = {
-  farmers: ["livestock", "dairy", "doctor", "nurse", "receptionist"],
+  farmers: ["livestock", "dairy", "nurse", "receptionist"],
   hmisPatients: ["pharmacist", "pharmacy"],
   inventory: ["stores"],
-  livestock: ["farm_officer"],
   salesReports: ["finance"],
   milkCollection: ["laboratory"],
   suppliers: ["livestock", "dairy", "farm_officer", "sales"],

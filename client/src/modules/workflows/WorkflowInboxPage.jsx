@@ -78,7 +78,7 @@ const WorkflowInboxPage = () => {
   const saveRequest = async (event) => {
     event.preventDefault();
     setSaving(true);
-    const payload = { title: form.title, reason: form.reason, priority: form.priority, items: [{ description: form.description, quantity: Number(form.quantity), unitPrice: Number(form.unitPrice) }] };
+    const payload = { title: form.title, reason: form.reason, department: requestDepartment, priority: form.priority, items: [{ description: form.description, quantity: Number(form.quantity), unitPrice: Number(form.unitPrice) }] };
     try {
       if (resubmitId) await resubmitPurchaseRequest(resubmitId, payload);
       else await submitPurchaseRequest(payload);
@@ -176,7 +176,7 @@ const WorkflowInboxPage = () => {
   };
 
   const statusClass = { pending_approval: "bg-amber-100 text-amber-800", returned: "bg-orange-100 text-orange-800", approved: "bg-emerald-100 text-emerald-800", rejected: "bg-rose-100 text-rose-800" };
-  const requestDepartment = user?.department || user?.role || "your department";
+  const [requestDepartment, setRequestDepartment] = useState(user?.department || "");
 
   return <div className="space-y-6">
     <header>
@@ -186,7 +186,7 @@ const WorkflowInboxPage = () => {
     <section id="request-form" className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="mb-4 flex items-center gap-2 font-semibold text-slate-900"><Plus size={18} />{resubmitId ? "Revise returned request" : "New purchase request"}</h2>
       <form onSubmit={saveRequest} className="grid gap-4 md:grid-cols-2">
-        <label className="text-sm text-slate-600">Department<input className="form-input mt-1" value={requestDepartment} disabled /></label>
+        <label className="text-sm text-slate-600">Department<input className="form-input mt-1" value={requestDepartment} onChange={(event) => setRequestDepartment(event.target.value)} disabled={user?.role !== "receptionist"} required /></label>
         <label className="text-sm text-slate-600">Priority<select className="form-input mt-1" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
         <label className="text-sm text-slate-600 md:col-span-2">Request title<input className="form-input mt-1" required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="e.g. Monthly animal feeds" /></label>
         <label className="text-sm text-slate-600 md:col-span-2">Business reason<textarea className="form-input mt-1 min-h-20" required value={form.reason} onChange={(event) => setForm({ ...form, reason: event.target.value })} /></label>

@@ -20,6 +20,7 @@ const adminsOnly = (req, res, next) => {
 };
 
 router.use(protect);
+router.use((req, res, next) => ["admin", "super_admin", "manager", "finance", "hr", "procurement", "stores", "livestock", "dairy", "laboratory", "doctor", "nurse", "pharmacist", "sales", "farm_officer", "staff", "receptionist"].includes(req.user?.role) ? next() : res.status(403).json({ success: false, message: "You are not authorized to access workflows" }));
 router.get("/purchase-requests", listPurchaseRequests);
 router.post("/purchase-requests", submitPurchaseRequest);
 router.post("/purchase-requests/:id/resubmit", resubmitPurchaseRequest);

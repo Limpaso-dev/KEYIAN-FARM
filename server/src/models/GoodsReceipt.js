@@ -6,6 +6,9 @@ const goodsReceiptSchema = new mongoose.Schema({
   supplier: { type: mongoose.Schema.Types.ObjectId, ref: "Supplier", required: true },
   receivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   receivedAt: { type: Date, default: Date.now },
+  status: { type: String, enum: ["pending_store", "released_to_stores"], default: "pending_store" },
+  releasedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  releasedAt: Date,
   notes: String,
   items: [{
     description: { type: String, required: true },

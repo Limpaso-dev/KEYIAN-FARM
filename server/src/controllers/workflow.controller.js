@@ -35,28 +35,23 @@ const normalizeItems = (items) => {
 const createOrResubmit = async ({ body, user, existing }) => {
   const items = normalizeItems(body.items);
   const totalAmount = items.reduce((sum, item) => sum + item.total, 0);
-  const department = existing?.department || departmentFor(user);
+  const department = existing?.department || (user.role === "receptionist" ? String(body.department || "").trim() : departmentFor(user));
   if (!department) throw new Error("Your account needs a department before submitting requests");
   const policies = await WorkflowPolicy.find({ workflowType: "purchase_request", department: department.toLowerCase(), isActive: true }).sort({ minAmount: -1 });
   const policy = policies.find((candidate) => totalAmount >= candidate.minAmount && (candidate.maxAmount == null || totalAmount <= candidate.maxAmount));
-  if (!policy) throw Object.assign(new Error(`No active approval policy covers ${department} requests of this amount`), { status: 409 });
 
   const title = String(body.title || "").trim();
   const reason = String(body.reason || "").trim();
   if (!title || !reason) throw new Error("A request title and business reason are required");
 
-  const approvalSteps = policy.steps.map(({ label, approverRole }) => ({
-    label, approverRole,
-    approverDepartment: approverRole === "manager" ? department : undefined,
-    status: "pending",
-  }));
+  const approvalSteps = [{ label: "Procurement approval", approverRole: "procurement", status: "pending" }];
   if (existing) {
     existing.title = title;
     existing.reason = reason;
     existing.priority = body.priority || existing.priority;
     existing.items = items;
     existing.totalAmount = totalAmount;
-    existing.policy = policy._id;
+    existing.policy = policy?._id;
     existing.approvalSteps = approvalSteps;
     existing.currentStep = 0;
     existing.status = "pending_approval";
@@ -68,7 +63,7 @@ const createOrResubmit = async ({ body, user, existing }) => {
   return PurchaseRequest.create({
     requestNumber, department, title, reason,
     priority: body.priority || "normal", items, totalAmount,
-    createdBy: user._id, policy: policy._id, approvalSteps,
+    createdBy: user._id, policy: policy?._id, approvalSteps,
     history: [{ action: "submitted", by: user._id }],
   });
 };

@@ -39,7 +39,7 @@ import {
 import { protect } from "../middleware/auth.middleware.js";
 import { authorizeHMIS } from "../middleware/role.middleware.js";
 import { createMedicalBill, getBillableMedicalVisits, getMedicalPaymentAccounts, getPatientBillSummary, listMedicalBills } from "../controllers/medicalBilling.controller.js";
-import { recordMedicalBillPayment } from "../controllers/invoice.controller.js";
+import { recordMedicalBillPayment, recordMedicalVisitPayment } from "../controllers/invoice.controller.js";
 
 const router = express.Router();
 
@@ -56,6 +56,7 @@ router.get("/payment-accounts", authorizeHMIS("billsPay"), getMedicalPaymentAcco
 router.get("/billable-visits", authorizeHMIS("billsRead"), getBillableMedicalVisits);
 router.get("/visits/:id/billing-summary", authorizeHMIS("billsRead"), getPatientBillSummary);
 router.post("/bills", authorizeHMIS("billsCreate"), createMedicalBill);
+router.post("/bills/visits/:visitId/payments", authorizeHMIS("billsPay"), recordMedicalVisitPayment);
 router.post("/bills/:id/payments", authorizeHMIS("billsPay"), recordMedicalBillPayment);
 
 // =====================================================

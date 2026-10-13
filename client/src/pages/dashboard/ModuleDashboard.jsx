@@ -8,7 +8,6 @@ import { getEmployees } from "../../services/employee.service";
 import { getFarmers } from "../../services/farmer.service";
 import { getInventory } from "../../services/inventory.service";
 import { getLeases } from "../../services/lease.service";
-import { getLivestock } from "../../services/livestock.service";
 import { getMedicalSummary } from "../../services/medicalSummary.service";
 import { getMedicalBills } from "../../services/medicalBilling.service";
 import { getMilkCollections } from "../../services/milkCollection.service";
@@ -41,21 +40,19 @@ const countStatus = (records, statuses) => records.filter((record) =>
   statuses.includes(String(record.status || "").toLowerCase())
 ).length;
 
-const numberMetric = (label, value, note) => ({ label, value, note });
+const numberMetric = (label, value, note, to) => ({ label, value, note, to });
 const fmt = (value) => new Intl.NumberFormat("en-KE", { maximumFractionDigits: 1 }).format(value);
 const sumField = (records, field) => records.reduce((total, record) => total + Number(record[field] || 0), 0);
 const todayKey = new Date().toISOString().slice(0, 10);
 
 const modules = [
   {
-    id: "agriculture", label: "Agriculture", description: "Crop activity and cooperative herd overview.", icon: Wheat, access: "agriculture", links: [{ label: "Crop farms", to: "/agriculture" }, { label: "Livestock records", to: "/livestock" }],
+    id: "agriculture", label: "Agriculture", description: "Crop activity and farm records.", icon: Wheat, access: "agriculture", links: [{ label: "Crop farms", to: "/agriculture" }],
     load: async () => {
-      const [herdResult, teaResult, caneResult] = await Promise.allSettled([getLivestock(), getTeaFarms(), getSugarcaneFarms()]);
-      const herd = herdResult.status === "fulfilled" ? recordsFrom(herdResult.value) : [];
+      const [teaResult, caneResult] = await Promise.allSettled([getTeaFarms(), getSugarcaneFarms()]);
       const tea = teaResult.status === "fulfilled" ? recordsFrom(teaResult.value) : [];
       const cane = caneResult.status === "fulfilled" ? recordsFrom(caneResult.value) : [];
       return [
-        numberMetric("Active cattle", herd.filter((animal) => animal.species === "cattle" && animal.status === "active").length, "registered cooperative herd"),
         numberMetric("Crop farms", tea.length + cane.length, `${tea.length} tea · ${cane.length} sugarcane`),
       ];
     },
@@ -90,7 +87,7 @@ const modules = [
         numberMetric("Patients", summary.patients ?? "—", "registered patient records"),
         numberMetric("Visits today", summary.todaysVisits ?? "—", "active encounters"),
         numberMetric("Pending lab", summary.pendingLab ?? "—", "awaiting results"),
-        numberMetric("Prescriptions", summary.prescriptions ?? "—", "recorded prescriptions"),
+        numberMetric("Prescriptions", summary.prescriptions ?? "—", "recorded prescriptions", "/hmis/prescriptions"),
         numberMetric("Exceptions", summary.exceptions ?? "—", "operational follow-up items"),
       ].filter((metric) => metric.value !== "—");
     },
@@ -213,12 +210,13 @@ const ModuleDashboard = () => {
                 <div role="alert" className="mt-3 border-t border-rose-200 pt-3 text-xs text-rose-800">{error}</div>
               ) : (
                 <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
-                  {metrics.slice(0, 2).map((metric) => (
-                    <div key={metric.label} className="flex items-center justify-between gap-3 py-2.5">
+                  {(id === "hmis" ? metrics.slice(0, 4) : metrics.slice(0, 2)).map((metric) => {
+                    const MetricCard = metric.to ? Link : "div";
+                    return <MetricCard key={metric.label} {...(metric.to ? { to: metric.to } : {})} className={`flex items-center justify-between gap-3 py-2.5 ${metric.to ? "rounded-md px-2 -mx-2 transition hover:bg-emerald-50" : ""}`}>
                       <div className="min-w-0"><p className="text-xs font-medium text-slate-600">{metric.label}</p><p className="mt-0.5 truncate text-[11px] text-slate-400">{metric.note}</p></div>
                       <p className="shrink-0 text-right text-lg font-semibold text-slate-950">{metric.value}</p>
-                    </div>
-                  ))}
+                    </MetricCard>;
+                  })}
                 </div>
               )}
             </section>

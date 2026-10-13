@@ -63,8 +63,8 @@ router.delete(
   deletePurchaseOrder
 );
 
-router.get("/goods-receipts", authorizeModule("inventory"), listGoodsReceipts);
-router.post("/purchase-orders/:orderId/receive", authorizeModule("inventory"), receivePurchaseOrder);
+router.get("/goods-receipts", authorizeModule("receiving"), listGoodsReceipts);
+router.post("/purchase-orders/:orderId/receive", (req, res, next) => req.user?.role === "procurement" || ["admin", "super_admin"].includes(req.user?.role) ? next() : res.status(403).json({ success: false, message: "Only procurement can verify supplier deliveries" }), receivePurchaseOrder);
 router.get("/supplier-invoices", authorizeModule("procurement"), listSupplierInvoices);
 router.post("/supplier-invoices", authorizeModule("procurement"), submitSupplierInvoice);
 

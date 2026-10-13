@@ -14,6 +14,8 @@ import {
   getFarmers,
   updateFarmer,
 } from "../../services/farmer.service";
+import { useAuth } from "../../context/useAuth";
+import { canAccessModule } from "../../utils/permissions";
 
 const initialForm = {
   membershipNumber: "",
@@ -29,6 +31,8 @@ const initialForm = {
 };
 
 const FarmersPage = () => {
+  const { user } = useAuth();
+  const canManageFarmers = canAccessModule(user?.role, "farmers", "POST");
   const [farmers, setFarmers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -127,6 +131,7 @@ const FarmersPage = () => {
   };
 
   const openCreateForm = () => {
+    if (!canManageFarmers) return;
     setEditingFarmer(null);
     setForm(initialForm);
     setError("");
@@ -134,6 +139,7 @@ const FarmersPage = () => {
   };
 
   const openEditForm = (farmer) => {
+    if (!canManageFarmers) return;
     setEditingFarmer(farmer);
 
     setForm({
@@ -165,6 +171,7 @@ const FarmersPage = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (!canManageFarmers) return;
 
     try {
       setSaving(true);
@@ -191,6 +198,7 @@ const FarmersPage = () => {
   };
 
   const handleDelete = async (farmer) => {
+    if (!canManageFarmers) return;
     const confirmed = window.confirm(
       `Delete ${farmer.firstName} ${farmer.lastName}?`
     );
@@ -243,13 +251,13 @@ const FarmersPage = () => {
           </p>
         </div>
 
-        <button
+        {canManageFarmers && <button
           onClick={openCreateForm}
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
         >
           <Plus size={18} />
           Add Farmer
-        </button>
+        </button>}
       </div>
 
       {/* Error */}
@@ -372,9 +380,9 @@ const FarmersPage = () => {
                   Status
                 </th>
 
-                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
+                {canManageFarmers && <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
                   Actions
-                </th>
+                </th>}
               </tr>
             </thead>
 
@@ -453,7 +461,7 @@ const FarmersPage = () => {
                       </span>
                     </td>
 
-                    <td className="whitespace-nowrap px-5 py-4 text-right">
+                    {canManageFarmers && <td className="whitespace-nowrap px-5 py-4 text-right">
                       <div className="flex justify-end gap-1">
                         <button
                           title="View"
@@ -482,7 +490,7 @@ const FarmersPage = () => {
                           <Trash2 size={17} />
                         </button>
                       </div>
-                    </td>
+                    </td>}
                   </tr>
                 ))
               )}

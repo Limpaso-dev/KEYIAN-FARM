@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Edit,
   Eye,
@@ -8,6 +8,7 @@ import {
   Search,
   Trash2,
   X,
+  BellRing,
 } from "lucide-react";
 
 import {
@@ -21,7 +22,7 @@ import {
 
 import { getPatients } from "../../services/medicalPatient.service";
 
-import { getMedicalVisits } from "../../services/medicalVisit.service";
+import { getMedicalVisits, updateMedicalVisit } from "../../services/medicalVisit.service";
 import PatientProfilePanel from "../../components/hmis/PatientProfilePanel";
 import { useAuth } from "../../context/useAuth";
 
@@ -62,6 +63,12 @@ const MedicalLabPage = () => {
     useState(null);
 
   const [form, setForm] = useState(initialForm);
+  const [requestVisit, setRequestVisit] = useState("");
+  const [requestDiagnosis, setRequestDiagnosis] = useState("");
+  const [requestedTests, setRequestedTests] = useState("");
+  const [requestSaving, setRequestSaving] = useState(false);
+  const [labNotification, setLabNotification] = useState("");
+  const previousCompletedIds = useRef(null);
 
   // =====================================================
   // LOAD DATA
@@ -76,6 +83,7 @@ const MedicalLabPage = () => {
         await getMedicalLabResults();
 
       setLabResults(response?.data || []);
+      if (previousCompletedIds.current === null) previousCompletedIds.current = new Set((response?.data || []).filter((item) => item.status === "completed").map((item) => item._id));
     } catch (err) {
       console.error(err);
 
@@ -141,6 +149,47 @@ const MedicalLabPage = () => {
       loadVisits();
     }
   }, [isLabTechnician]);
+
+  useEffect(() => {
+    const refresh = async () => {
+      const jobs = [getMedicalLabResults()];
+      if (isLabTechnician) jobs.push(getMedicalLabWorklist());
+      if (user?.role === "doctor") jobs.push(getMedicalVisits());
+      try {
+        const results = await Promise.all(jobs);
+        const freshResults = results[0]?.data || [];
+        const completed = freshResults.filter((item) => item.status === "completed");
+        const ids = new Set(completed.map((item) => item._id));
+        if (previousCompletedIds.current) {
+          const newlyReady = completed.find((item) => !previousCompletedIds.current.has(item._id));
+          if (newlyReady) setLabNotification(`Results for ${getPatientName(newlyReady.patient)} are ready for your review.`);
+        }
+        previousCompletedIds.current = ids;
+        setLabResults(freshResults);
+        if (isLabTechnician) {
+          const worklist = results[1]?.data || [];
+          setVisits(worklist);
+        }
+        else if (user?.role === "doctor") setVisits(results[1]?.data || []);
+      } catch { /* Keep the last successful view visible during a transient refresh failure. */ }
+    };
+    const timer = window.setInterval(refresh, 30000);
+    return () => window.clearInterval(timer);
+  }, [isLabTechnician, user?.role]);
+
+  const submitDoctorLabRequest = async (event) => {
+    event.preventDefault();
+    const visit = visits.find((item) => item._id === requestVisit);
+    const orders = [...new Set(requestedTests.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))];
+    if (!visit || !orders.length || !requestDiagnosis.trim()) return;
+    setRequestSaving(true); setError(""); setSuccess("");
+    try {
+      await updateMedicalVisit(visit._id, { diagnosis: requestDiagnosis.trim(), labOrders: [...new Set([...(visit.labOrders || []), ...orders])], status: "awaiting_results" });
+      setRequestedTests(""); setRequestVisit(""); setRequestDiagnosis(""); setSuccess("Laboratory request sent. The lab team will see it in their doctor requests worklist.");
+      await loadVisits();
+    } catch (err) { setError(err.response?.data?.message || "Could not send the laboratory request."); }
+    finally { setRequestSaving(false); }
+  };
 
   // =====================================================
   // FORM
@@ -390,10 +439,12 @@ const MedicalLabPage = () => {
   // SUMMARY
   // =====================================================
 
-  const totalResults = labResults.length;
+  const totalRequestedTests = isLabTechnician
+    ? visits.reduce((count, visit) => count + (visit.labOrders?.length || 0), 0)
+    : labResults.filter((item) => ["ordered", "collected", "received", "pending"].includes(item.status)).length;
 
   const pendingResults = labResults.filter(
-    (item) => item.status === "pending"
+    (item) => ["ordered", "collected", "received", "pending"].includes(item.status)
   ).length;
 
   const completedResults = labResults.filter(
@@ -457,17 +508,19 @@ const MedicalLabPage = () => {
         />
       )}
 
+      {isLabTechnician && totalRequestedTests > 0 && <div role="status" aria-live="polite" className="flex items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"><BellRing size={19} className="shrink-0"/><p><strong>Pending test requests:</strong> {totalRequestedTests} test{totalRequestedTests === 1 ? "" : "s"} across {visits.length} patient visit{visits.length === 1 ? "" : "s"} await laboratory processing.</p></div>}
+
       {/* Summary */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
-          label="Total Results"
-          value={totalResults}
+          label={isLabTechnician ? "Tests Awaiting Results" : "Tests In Progress"}
+          value={isLabTechnician ? totalRequestedTests : pendingResults}
           icon={FlaskConical}
         />
 
         <SummaryCard
-          label="Pending"
-          value={pendingResults}
+          label={isLabTechnician ? "Patients with Requests" : "Lab Requests"}
+          value={isLabTechnician ? visits.length : visits.reduce((count, visit) => count + (visit.labOrders?.length || 0), 0)}
           icon={FlaskConical}
         />
 
@@ -483,6 +536,10 @@ const MedicalLabPage = () => {
           icon={FlaskConical}
         />
       </div>
+
+      {labNotification && user?.role === "doctor" && <div role="status" aria-live="polite" className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"><BellRing size={18} className="mt-0.5 shrink-0"/><div className="flex-1">{labNotification}</div><button type="button" aria-label="Dismiss notification" onClick={() => setLabNotification("")}><X size={16}/></button></div>}
+
+      {user?.role === "doctor" && <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-4"><h2 className="font-semibold text-slate-900">Request a laboratory test</h2><p className="mt-1 text-sm text-slate-500">Choose a patient currently in consultation, record the diagnosis, and send the request directly to the laboratory worklist.</p></div><form onSubmit={submitDoctorLabRequest} className="grid gap-4 md:grid-cols-2"><label className="text-sm font-medium text-slate-700">Patient visit<select className="form-input mt-1" value={requestVisit} onChange={(event) => { const visit = visits.find((item) => item._id === event.target.value); setRequestVisit(event.target.value); setRequestDiagnosis(visit?.diagnosis || ""); }} required><option value="">Select visit</option>{visits.filter((visit) => visit.status === "in_consultation").map((visit) => <option key={visit._id} value={visit._id}>{getPatientName(visit.patient)} · {visit.patient?.patientNumber || "No number"} · {visit.visitNumber}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Diagnosis<textarea className="form-input mt-1 min-h-24" value={requestDiagnosis} onChange={(event) => setRequestDiagnosis(event.target.value)} placeholder="Enter the patient's diagnosis" required/></label><label className="text-sm font-medium text-slate-700">Tests requested<textarea className="form-input mt-1 min-h-24" value={requestedTests} onChange={(event) => setRequestedTests(event.target.value)} placeholder="Enter one test per line" required/></label><div className="flex justify-end md:col-span-2"><button disabled={requestSaving || !requestVisit || !requestDiagnosis.trim() || !requestedTests.trim()} className="rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{requestSaving ? "Sending request…" : "Send request to laboratory"}</button></div></form>{visits.filter((visit) => visit.status === "waiting_for_doctor" && visit.labResults?.some((item) => item.status === "completed")).length > 0 && <div className="mt-5 rounded-lg border border-emerald-200 bg-emerald-50 p-4"><h3 className="font-semibold text-emerald-900">Completed results ready for review</h3><div className="mt-2 space-y-2">{visits.filter((visit) => visit.status === "waiting_for_doctor" && visit.labResults?.some((item) => item.status === "completed")).map((visit) => <p key={visit._id} className="text-sm text-emerald-800">{getPatientName(visit.patient)} · {visit.labResults.filter((item) => item.status === "completed").map((item) => item.testName).join(", ")}</p>)}</div></div>}</section>}
 
       {isLabTechnician && (
         <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">

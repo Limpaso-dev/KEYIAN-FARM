@@ -21,8 +21,7 @@ const moduleRoles = {
 const readOnlyModuleRoles = {
   procurement: ["stores"],
   inventory: ["stores"],
-  livestock: ["farm_officer"],
-  farmers: ["livestock", "dairy", "doctor", "nurse", "receptionist"],
+  farmers: ["livestock", "dairy", "nurse", "receptionist"],
   milkCollection: ["laboratory"],
   suppliers: ["livestock", "dairy", "farm_officer", "sales"],
   salesReports: ["finance"],
@@ -42,8 +41,8 @@ const hmisActionRoles = {
   prescriptionsRead: ["doctor", "nurse", "pharmacist", "pharmacy"],
   prescriptionsCreate: ["doctor"],
   prescriptionsUpdate: ["doctor", "pharmacist", "pharmacy"],
-  billsRead: ["doctor", "nurse", "pharmacist", "pharmacy", "finance", "cashier"],
-  billsCreate: ["doctor", "pharmacist", "pharmacy"],
+  billsRead: ["doctor", "pharmacist", "pharmacy", "finance", "cashier"],
+  billsCreate: ["doctor", "pharmacist", "pharmacy", "receptionist"],
   billsPay: ["finance", "cashier"],
 };
 
