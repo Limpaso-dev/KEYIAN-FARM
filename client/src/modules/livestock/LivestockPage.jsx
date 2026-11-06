@@ -1,790 +1,231 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  Edit,
-  Eye,
-  Plus,
-  Search,
-  Trash2,
-  Tractor,
-} from "lucide-react";
+import { Baby, Droplets } from "lucide-react";
+import { milkTransfers as transfers } from "./milkTransfers";
+import { ActionButton } from "../../components/resource/ActionButton";
+import { ModulePage } from "../../components/resource/ModulePage";
+import { ResourcePage } from "../../components/resource/ResourcePage";
+import { Card, StatCard } from "../../components/ui/ui";
+import { get } from "../../lib/api";
+import { daysAgo, inputDate, number, today } from "../../lib/format";
+import { refs } from "../../lib/refs";
+import { useFetch } from "../../lib/useFetch";
 
-import {
-  createLivestock,
-  deleteLivestock,
-  getLivestock,
-  updateLivestock,
-} from "../../services/livestock.service";
+const tag = (a) => (a ? `${a.tagNumber}${a.name ? ` - ${a.name}` : ""}` : "");
 
-import { getFarmers } from "../../services/farmer.service";
+const animalFields = [
+  { name: "tagNumber", label: "Tag number", required: true },
+  { name: "name", label: "Name" },
+  { name: "sex", label: "Sex", type: "select", options: "animalSex", required: true },
+  { name: "breed", label: "Breed" },
+  { name: "dateOfBirth", label: "Date of birth", type: "date" },
+  { name: "source", label: "Source", type: "select", options: "animalSource" },
+  { name: "damId", label: "Mother (dam)", type: "select", ref: refs.cows, placeholder: "Not recorded" },
+  { name: "sireId", label: "Father (sire)", type: "select", ref: refs.bulls, placeholder: "Not on farm / not recorded" },
+  { name: "sireDetails", label: "Sire details", help: "AI bull code or outside bull, if the sire is not on the farm", span: 2 },
+  { name: "status", label: "Status", type: "select", options: "animalStatus" },
+  { name: "notes", label: "Notes", type: "textarea" },
+];
 
-const initialForm = {
-  animalTag: "",
-  farmer: "",
-  species: "cattle",
-  breed: "",
-  sex: "female",
-  dateOfBirth: "",
-  healthStatus: "healthy",
-  status: "active",
+const animals = {
+  resource: "animals",
+  endpoint: "/livestock/animals",
+  title: "Herd register",
+  singular: "Animal",
+  createLabel: "Add animal",
+  filters: [{ type: "search", placeholder: "Tag, name, breed" }, { name: "sex", label: "Sex", options: "animalSex" }, { name: "status", label: "Status", options: "animalStatus" }],
+  defaultQuery: { status: "active" },
+  columns: [
+    { key: "tagNumber", label: "Tag" },
+    { key: "name", label: "Name" },
+    { key: "sex", label: "Sex", type: "option:animalSex" },
+    { key: "breed", label: "Breed" },
+    { key: "dateOfBirth", label: "Born", type: "date" },
+    { key: "dam", label: "Mother", render: (r) => tag(r.dam) },
+    { key: "sire", label: "Father", render: (r) => tag(r.sire) || r.sireDetails || "" },
+    { key: "lactationCount", label: "Lactations", type: "number" },
+    { key: "status", label: "Status", type: "status:animalStatus" },
+  ],
+  createFields: animalFields,
+  createInitial: () => ({ source: "born_on_farm", status: "active" }),
+  toForm: (row) => ({ ...row, dateOfBirth: inputDate(row.dateOfBirth) }),
 };
 
-const LivestockPage = () => {
-  const [livestock, setLivestock] = useState([]);
-  const [farmers, setFarmers] = useState([]);
+const lactations = {
+  resource: "lactations",
+  endpoint: "/livestock/lactations",
+  title: "Calvings and lactations",
+  description: "Recording a calving registers the calf with its mother and father and starts the mother's next lactation.",
+  singular: "Lactation",
+  filters: [{ name: "status", label: "Status", options: "lactationStatus" }, { type: "dateRange" }],
+  columns: [
+    { key: "animal", label: "Cow", render: (r) => tag(r.animal) },
+    { key: "lactationNumber", label: "Lactation no.", type: "number" },
+    { key: "calvingDate", label: "Calved", type: "date" },
+    { key: "dryOffDate", label: "Dried off", type: "date" },
+    { key: "status", label: "Status", type: "status:lactationStatus" },
+    { key: "notes", label: "Notes" },
+  ],
+  editFields: [{ name: "notes", label: "Notes", type: "textarea" }],
+  deletable: false,
+  actions: [{
+    key: "dry", label: "Dry off", allowed: (c) => c.can("lactations", "write"), when: (r) => r.status === "milking",
+    path: (r) => `/livestock/lactations/${r.id}/dry-off`, title: (r) => `Dry off ${tag(r.animal)}`,
+    fields: [{ name: "dryOffDate", label: "Dry-off date", type: "date", required: true }], initial: () => ({ dryOffDate: today() }),
+  }],
+  toolbar: (ctx) => ctx.can("lactations", "write") && (
+    <ActionButton label="Record calving" icon={Baby} variant="primary" path="/livestock/calvings" onDone={(r) => ctx.notify(r?.message)} modalSize="md"
+      fields={[
+        { name: "damId", label: "Mother (dam)", type: "select", ref: refs.cows, required: true },
+        { name: "calvingDate", label: "Calving date", type: "date", required: true },
+        { name: "sireId", label: "Father (sire) on farm", type: "select", ref: refs.bulls, placeholder: "Not on farm" },
+        { name: "sireDetails", label: "Or sire details", placeholder: "AI bull code / outside bull" },
+        { name: "calfTagNumber", label: "Calf tag number", required: true },
+        { name: "calfSex", label: "Calf sex", type: "select", options: "animalSex", required: true },
+        { name: "calfName", label: "Calf name" },
+        { name: "calfBreed", label: "Calf breed", help: "Defaults to the mother's breed" },
+        { name: "notes", label: "Notes", type: "textarea" },
+      ]}
+      initial={{ calvingDate: today() }} />
+  ),
+};
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+const vaccinations = {
+  resource: "vaccinations",
+  endpoint: "/livestock/vaccinations",
+  title: "Vaccinations",
+  singular: "Vaccination",
+  createLabel: "Record vaccination",
+  filters: [{ type: "search", placeholder: "Vaccine" }, { type: "dateRange" }],
+  columns: [
+    { key: "date", label: "Date", type: "date" },
+    { key: "animal", label: "Animal", render: (r) => tag(r.animal) },
+    { key: "vaccine", label: "Vaccine" },
+    { key: "dose", label: "Dose" },
+    { key: "administeredBy", label: "Given by" },
+    { key: "nextDueDate", label: "Next due", type: "date" },
+  ],
+  createFields: [
+    { name: "animalId", label: "Animal", type: "select", ref: refs.animals, required: true, span: 2 },
+    { name: "vaccine", label: "Vaccine", required: true },
+    { name: "date", label: "Date", type: "date", required: true },
+    { name: "dose", label: "Dose" },
+    { name: "administeredBy", label: "Given by" },
+    { name: "nextDueDate", label: "Next due", type: "date" },
+    { name: "notes", label: "Notes", type: "textarea" },
+  ],
+  createInitial: () => ({ date: today() }),
+  toForm: (row) => ({ ...row, date: inputDate(row.date), nextDueDate: inputDate(row.nextDueDate) }),
+};
 
-  const [search, setSearch] = useState("");
-  const [speciesFilter, setSpeciesFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
+const health = {
+  resource: "healthRecords",
+  endpoint: "/livestock/health-records",
+  title: "Disease management and herd health",
+  description: "Leave the animal empty for herd-wide events such as dipping or a herd check.",
+  singular: "Health record",
+  createLabel: "Add record",
+  filters: [{ name: "recordType", label: "Type", options: "healthRecordTypes" }, { name: "outcome", label: "Outcome", options: "healthOutcomes" }, { type: "dateRange" }],
+  columns: [
+    { key: "date", label: "Date", type: "date" },
+    { key: "animal", label: "Animal", render: (r) => tag(r.animal) || "Whole herd" },
+    { key: "recordType", label: "Type", type: "option:healthRecordTypes" },
+    { key: "condition", label: "Condition / disease" },
+    { key: "treatment", label: "Treatment" },
+    { key: "vet", label: "Vet" },
+    { key: "cost", label: "Cost", type: "money" },
+    { key: "outcome", label: "Outcome", type: "status:healthOutcomes" },
+  ],
+  createFields: [
+    { name: "recordType", label: "Type", type: "select", options: "healthRecordTypes", required: true },
+    { name: "date", label: "Date", type: "date", required: true },
+    { name: "animalId", label: "Animal", type: "select", ref: refs.animals, placeholder: "Whole herd", span: 2 },
+    { name: "condition", label: "Condition / disease / check", required: true, span: 2 },
+    { name: "treatment", label: "Treatment given", type: "textarea" },
+    { name: "vet", label: "Vet / officer" },
+    { name: "cost", label: "Cost (KES)", type: "number" },
+    { name: "outcome", label: "Outcome", type: "select", options: "healthOutcomes" },
+    { name: "notes", label: "Notes", type: "textarea" },
+  ],
+  createInitial: () => ({ date: today(), recordType: "disease", outcome: "under_treatment" }),
+  toForm: (row) => ({ ...row, date: inputDate(row.date) }),
+};
 
-  const [showForm, setShowForm] = useState(false);
-  const [editingAnimal, setEditingAnimal] = useState(null);
+// Bulk milk entry: one line per milking cow for a session.
+const milkEntryFields = [
+  { name: "date", label: "Date", type: "date", required: true },
+  { name: "session", label: "Session", type: "select", options: "milkSessions", required: true },
+  {
+    name: "records", label: "Litres per cow", type: "items", fixedRows: true,
+    columns: [
+      { name: "cow", label: "Cow", type: "display" },
+      { name: "lactation", label: "Lactations", type: "display", width: 90 },
+      { name: "litres", label: "Litres", type: "number", width: 140 },
+    ],
+    total: (row) => row.litres,
+    formatTotal: (t) => `${number(t)} L`,
+  },
+];
 
-  const [form, setForm] = useState(initialForm);
-  const [error, setError] = useState("");
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      setError("");
-
-      const [livestockResponse, farmersResponse] =
-        await Promise.all([
-          getLivestock(),
-          getFarmers(),
-        ]);
-
-      setLivestock(livestockResponse.livestock || []);
-      setFarmers(farmersResponse.data || farmersResponse.farmers || []);
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        err.response?.data?.message ||
-          "Failed to load livestock data."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const filteredLivestock = useMemo(() => {
-    return livestock.filter((animal) => {
-      const searchValue = search.toLowerCase().trim();
-
-      const farmerName = animal.farmer
-        ? `${animal.farmer.firstName || ""} ${
-            animal.farmer.lastName || ""
-          }`.toLowerCase()
-        : "";
-
-      const matchesSearch =
-        !searchValue ||
-        animal.animalTag
-          ?.toLowerCase()
-          .includes(searchValue) ||
-        animal.breed
-          ?.toLowerCase()
-          .includes(searchValue) ||
-        farmerName.includes(searchValue);
-
-      const matchesSpecies =
-        speciesFilter === "all" ||
-        animal.species === speciesFilter;
-
-      const matchesStatus =
-        statusFilter === "all" ||
-        animal.status === statusFilter;
-
-      return (
-        matchesSearch &&
-        matchesSpecies &&
-        matchesStatus
-      );
-    });
-  }, [
-    livestock,
-    search,
-    speciesFilter,
-    statusFilter,
-  ]);
-
-  const handleChange = (event) => {
-    const { name, value } = event.target;
-
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  };
-
-  const openCreateForm = () => {
-    setEditingAnimal(null);
-    setForm(initialForm);
-    setError("");
-    setShowForm(true);
-  };
-
-  const openEditForm = (animal) => {
-    setEditingAnimal(animal);
-
-    setForm({
-      animalTag: animal.animalTag || "",
-      farmer: animal.farmer?._id || animal.farmer || "",
-      species: animal.species || "cattle",
-      breed: animal.breed || "",
-      sex: animal.sex || "female",
-      dateOfBirth: animal.dateOfBirth
-        ? new Date(animal.dateOfBirth)
-            .toISOString()
-            .split("T")[0]
-        : "",
-      healthStatus:
-        animal.healthStatus || "healthy",
-      status: animal.status || "active",
-    });
-
-    setError("");
-    setShowForm(true);
-  };
-
-  const closeForm = () => {
-    if (saving) return;
-
-    setShowForm(false);
-    setEditingAnimal(null);
-    setForm(initialForm);
-    setError("");
-  };
-
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-
-    try {
-      setSaving(true);
-      setError("");
-
-      const payload = {
-        ...form,
-        dateOfBirth: form.dateOfBirth
-          ? form.dateOfBirth
-          : undefined,
-      };
-
-      if (editingAnimal) {
-        await updateLivestock(
-          editingAnimal._id,
-          payload
-        );
-      } else {
-        await createLivestock(payload);
-      }
-
-      await loadData();
-      closeForm();
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        err.response?.data?.message ||
-          "Failed to save livestock."
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (animal) => {
-    const confirmed = window.confirm(
-      `Delete livestock record ${animal.animalTag}?`
-    );
-
-    if (!confirmed) return;
-
-    try {
-      setError("");
-
-      await deleteLivestock(animal._id);
-
-      await loadData();
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        err.response?.data?.message ||
-          "Failed to delete livestock."
-      );
-    }
-  };
-
-  const getStatusClasses = (status) => {
-    if (status === "active") {
-      return "bg-emerald-50 text-emerald-700";
-    }
-
-    if (status === "sold") {
-      return "bg-blue-50 text-blue-700";
-    }
-
-    if (status === "transferred") {
-      return "bg-amber-50 text-amber-700";
-    }
-
-    return "bg-slate-100 text-slate-600";
-  };
-
-  const getHealthClasses = (health) => {
-    if (health?.toLowerCase() === "healthy") {
-      return "bg-emerald-50 text-emerald-700";
-    }
-
-    return "bg-amber-50 text-amber-700";
-  };
-
-  const totalActive = livestock.filter(
-    (animal) => animal.status === "active"
-  ).length;
-
-  const totalCattle = livestock.filter(
-    (animal) =>
-      animal.species === "cattle" &&
-      animal.status === "active"
-  ).length;
-
-  const totalHealthy = livestock.filter(
-    (animal) =>
-      animal.healthStatus?.toLowerCase() ===
-        "healthy" &&
-      animal.status === "active"
-  ).length;
-
+const MilkTotals = () => {
+  const { data } = useFetch("/livestock/milk-records/daily", { from: daysAgo(6), to: today() });
+  const rows = data || [];
+  const todayRows = rows.filter((r) => String(r.date).slice(0, 10) === today());
+  const litres = todayRows.reduce((s, r) => s + r.litres, 0);
+  const sent = todayRows.reduce((s, r) => s + r.sentToMva, 0);
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div>
-          <p className="text-sm font-medium text-primary-600">
-            Livestock Management
-          </p>
-
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">
-            Livestock
-          </h1>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Manage animals owned by cooperative farmers.
-          </p>
-        </div>
-
-        <button
-          onClick={openCreateForm}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700"
-        >
-          <Plus size={18} />
-          Register Livestock
-        </button>
+    <Card className="p-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Milk today" value={`${number(litres)} L`} />
+        <StatCard label="Sent to MVA today" value={`${number(sent)} L`} />
+        <StatCard label="Not yet sent" value={`${number(litres - sent)} L`} tone={litres - sent > 0 ? "warn" : "default"} />
+        <StatCard label="Last 7 days" value={`${number(rows.reduce((s, r) => s + r.litres, 0))} L`} />
       </div>
-
-      {/* Error */}
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
-      {/* Summary */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-sm text-slate-500">
-            Total Active Livestock
-          </p>
-
-          <p className="mt-1 text-2xl font-bold text-slate-900">
-            {totalActive}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-sm text-slate-500">
-            Active Cattle
-          </p>
-
-          <p className="mt-1 text-2xl font-bold text-primary-600">
-            {totalCattle}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-sm text-slate-500">
-            Healthy Animals
-          </p>
-
-          <p className="mt-1 text-2xl font-bold text-emerald-600">
-            {totalHealthy}
-          </p>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        {/* Filters */}
-        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative w-full lg:max-w-md">
-            <Search
-              size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-            />
-
-            <input
-              type="text"
-              value={search}
-              onChange={(event) =>
-                setSearch(event.target.value)
-              }
-              placeholder="Search tag, breed or farmer..."
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none focus:border-primary-400 focus:bg-white"
-            />
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <select
-              value={speciesFilter}
-              onChange={(event) =>
-                setSpeciesFilter(event.target.value)
-              }
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-primary-400"
-            >
-              <option value="all">All Species</option>
-              <option value="cattle">Cattle</option>
-              <option value="goat">Goats</option>
-              <option value="sheep">Sheep</option>
-              <option value="pig">Pigs</option>
-              <option value="poultry">Poultry</option>
-              <option value="other">Other</option>
-            </select>
-
-            <select
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value)
-              }
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-primary-400"
-            >
-              <option value="all">All Statuses</option>
-              <option value="active">Active</option>
-              <option value="sold">Sold</option>
-              <option value="deceased">Deceased</option>
-              <option value="transferred">
-                Transferred
-              </option>
-            </select>
-          </div>
-        </div>
-
-        {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead className="bg-slate-50">
-              <tr className="border-b border-slate-200">
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Animal Tag
-                </th>
-
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Farmer
-                </th>
-
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Species
-                </th>
-
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Breed
-                </th>
-
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Sex
-                </th>
-
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Health
-                </th>
-
-                <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Status
-                </th>
-
-                <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td
-                    colSpan="8"
-                    className="px-5 py-12 text-center text-sm text-slate-500"
-                  >
-                    Loading livestock...
-                  </td>
-                </tr>
-              ) : filteredLivestock.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan="8"
-                    className="px-5 py-12 text-center"
-                  >
-                    <Tractor
-                      size={32}
-                      className="mx-auto text-slate-300"
-                    />
-
-                    <p className="mt-3 text-sm font-medium text-slate-700">
-                      No livestock found
-                    </p>
-
-                    <p className="mt-1 text-sm text-slate-400">
-                      Register your first animal.
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                filteredLivestock.map((animal) => {
-                  const farmerName = animal.farmer
-                    ? `${animal.farmer.firstName || ""} ${
-                        animal.farmer.lastName || ""
-                      }`
-                    : "Unknown Farmer";
-
-                  return (
-                    <tr
-                      key={animal._id}
-                      className="transition hover:bg-slate-50"
-                    >
-                      <td className="whitespace-nowrap px-5 py-4 text-sm font-semibold text-slate-900">
-                        {animal.animalTag}
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
-                        {farmerName}
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm capitalize text-slate-600">
-                        {animal.species}
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
-                        {animal.breed || "—"}
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-sm capitalize text-slate-600">
-                        {animal.sex || "—"}
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${getHealthClasses(
-                            animal.healthStatus
-                          )}`}
-                        >
-                          {animal.healthStatus ||
-                            "Unknown"}
-                        </span>
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${getStatusClasses(
-                            animal.status
-                          )}`}
-                        >
-                          {animal.status}
-                        </span>
-                      </td>
-
-                      <td className="whitespace-nowrap px-5 py-4 text-right">
-                        <div className="flex justify-end gap-1">
-                          <button
-                            title="View"
-                            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                          >
-                            <Eye size={17} />
-                          </button>
-
-                          <button
-                            title="Edit"
-                            onClick={() =>
-                              openEditForm(animal)
-                            }
-                            className="rounded-lg p-2 text-slate-500 hover:bg-primary-50 hover:text-primary-600"
-                          >
-                            <Edit size={17} />
-                          </button>
-
-                          <button
-                            title="Delete"
-                            onClick={() =>
-                              handleDelete(animal)
-                            }
-                            className="rounded-lg p-2 text-slate-500 hover:bg-red-50 hover:text-red-600"
-                          >
-                            <Trash2 size={17} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {!loading && (
-          <div className="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">
-            Showing {filteredLivestock.length} of{" "}
-            {livestock.length} livestock records
-          </div>
-        )}
-      </div>
-
-      {/* Form Modal */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white shadow-2xl">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">
-                  {editingAnimal
-                    ? "Edit Livestock"
-                    : "Register Livestock"}
-                </h2>
-
-                <p className="mt-0.5 text-sm text-slate-500">
-                  Record animal ownership and details.
-                </p>
-              </div>
-
-              <button
-                onClick={closeForm}
-                disabled={saving}
-                className="rounded-lg px-3 py-2 text-sm text-slate-500 hover:bg-slate-100"
-              >
-                Close
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-6 p-6"
-            >
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                {/* Animal Tag */}
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Animal Tag *
-                  </label>
-
-                  <input
-                    name="animalTag"
-                    value={form.animalTag}
-                    onChange={handleChange}
-                    required
-                    placeholder="e.g. COW-001"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-primary-400"
-                  />
-                </div>
-
-                {/* Farmer */}
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Farmer *
-                  </label>
-
-                  <select
-                    name="farmer"
-                    value={form.farmer}
-                    onChange={handleChange}
-                    required
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-primary-400"
-                  >
-                    <option value="">
-                      Select farmer
-                    </option>
-
-                    {farmers.map((farmer) => (
-                      <option
-                        key={farmer._id}
-                        value={farmer._id}
-                      >
-                        {farmer.membershipNumber} -{" "}
-                        {farmer.firstName}{" "}
-                        {farmer.lastName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Species */}
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Species *
-                  </label>
-
-                  <select
-                    name="species"
-                    value={form.species}
-                    onChange={handleChange}
-                    required
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-primary-400"
-                  >
-                    <option value="cattle">
-                      Cattle
-                    </option>
-                    <option value="goat">Goat</option>
-                    <option value="sheep">
-                      Sheep
-                    </option>
-                    <option value="pig">Pig</option>
-                    <option value="poultry">
-                      Poultry
-                    </option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-
-                {/* Breed */}
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Breed
-                  </label>
-
-                  <input
-                    name="breed"
-                    value={form.breed}
-                    onChange={handleChange}
-                    placeholder="e.g. Friesian"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-primary-400"
-                  />
-                </div>
-
-                {/* Sex */}
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Sex
-                  </label>
-
-                  <select
-                    name="sex"
-                    value={form.sex}
-                    onChange={handleChange}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-primary-400"
-                  >
-                    <option value="female">
-                      Female
-                    </option>
-                    <option value="male">Male</option>
-                  </select>
-                </div>
-
-                {/* Date of Birth */}
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Date of Birth
-                  </label>
-
-                  <input
-                    type="date"
-                    name="dateOfBirth"
-                    value={form.dateOfBirth}
-                    onChange={handleChange}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-primary-400"
-                  />
-                </div>
-
-                {/* Health Status */}
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Health Status
-                  </label>
-
-                  <input
-                    name="healthStatus"
-                    value={form.healthStatus}
-                    onChange={handleChange}
-                    placeholder="e.g. Healthy"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-primary-400"
-                  />
-                </div>
-
-                {/* Status */}
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    Status
-                  </label>
-
-                  <select
-                    name="status"
-                    value={form.status}
-                    onChange={handleChange}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-primary-400"
-                  >
-                    <option value="active">
-                      Active
-                    </option>
-                    <option value="sold">Sold</option>
-                    <option value="deceased">
-                      Deceased
-                    </option>
-                    <option value="transferred">
-                      Transferred
-                    </option>
-                  </select>
-                </div>
-              </div>
-
-              {error && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-3 border-t border-slate-200 pt-5">
-                <button
-                  type="button"
-                  onClick={closeForm}
-                  disabled={saving}
-                  className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {saving
-                    ? "Saving..."
-                    : editingAnimal
-                    ? "Update Livestock"
-                    : "Register Livestock"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+    </Card>
   );
 };
+
+const milkRecords = {
+  resource: "milkRecords",
+  endpoint: "/livestock/milk-records",
+  title: "Milk records",
+  singular: "Milk record",
+  defaultQuery: { from: today(), to: today() },
+  filters: [{ name: "session", label: "Session", options: "milkSessions" }, { type: "dateRange" }],
+  columns: [
+    { key: "date", label: "Date", type: "date" },
+    { key: "session", label: "Session", type: "option:milkSessions" },
+    { key: "animal", label: "Cow", render: (r) => tag(r.animal) },
+    { key: "litres", label: "Litres", type: "number" },
+  ],
+  editFields: [{ name: "litres", label: "Litres", type: "number", required: true }],
+  footer: (rows) => rows.length > 0 && <div className="border-t border-slate-100 px-4 py-3 text-right text-sm">Total: <strong>{number(rows.reduce((s, r) => s + r.litres, 0))} L</strong></div>,
+  toolbar: (ctx) => ctx.can("milkRecords", "write") && (
+    <ActionButton label="Record milking" icon={Droplets} variant="primary" path="/livestock/milk-records" modalSize="lg" onDone={(r) => ctx.notify(r?.message)}
+      fields={milkEntryFields}
+      initial={async () => {
+        const cows = await get("/livestock/animals", { status: "active", sex: "female" });
+        return {
+          date: today(),
+          session: new Date().getHours() < 11 ? "morning" : new Date().getHours() < 15 ? "midday" : "evening",
+          records: cows.map((c) => ({ animalId: c.id, cow: tag(c), lactation: c.lactationCount, litres: "" })),
+        };
+      }}
+      toPayload={(v) => ({ date: v.date, session: v.session, records: v.records.filter((r) => r.litres !== "" && Number(r.litres) > 0).map((r) => ({ animalId: r.animalId, litres: r.litres })) })} />
+  ),
+};
+
+const LivestockPage = () => (
+  <ModulePage
+    title="Livestock"
+    description="Herd register, calvings and lactations, vaccinations, disease and herd health, milk records and milk sent to MVA."
+    tabs={[
+      { key: "herd", label: "Herd", show: (c) => c.can("animals"), render: () => <ResourcePage config={animals} /> },
+      { key: "lactations", label: "Calvings & lactations", show: (c) => c.can("lactations"), render: () => <ResourcePage config={lactations} /> },
+      { key: "vaccinations", label: "Vaccinations", show: (c) => c.can("vaccinations"), render: () => <ResourcePage config={vaccinations} /> },
+      { key: "health", label: "Health", show: (c) => c.can("healthRecords"), render: () => <ResourcePage config={health} /> },
+      { key: "milk", label: "Milk records", show: (c) => c.can("milkRecords"), render: () => <ResourcePage config={milkRecords} header={() => <MilkTotals />} /> },
+      { key: "transfers", label: "To MVA", show: (c) => c.can("milkTransfers"), render: () => <ResourcePage config={transfers} /> },
+    ]}
+  />
+);
 
 export default LivestockPage;

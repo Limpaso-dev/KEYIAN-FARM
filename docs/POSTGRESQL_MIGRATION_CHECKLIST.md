@@ -1,5 +1,8 @@
 # PostgreSQL and Prisma Migration Checklist
 
+> **Update 2026-11-06 - schema restructured.** The ERP was rebuilt around the seven cooperative departments (see `ERP_GUIDE.md`). HMIS was removed, roles are now Head/Officer per department plus General Manager and administrators, and the initial migration was regenerated as `20261106000000_initial`. Any MongoDB import must now map the old collections onto the new models (for example, old milk-collection farmers become MVA milk suppliers; old tea and sugarcane farms become crop farms; old users need new roles). HMIS collections are not imported. Sections below that mention HMIS, patients, visits or the old schema are historical.
+
+
 ## Baseline audit findings
 
 The following findings describe the repository before the PostgreSQL conversion and are retained as migration history:

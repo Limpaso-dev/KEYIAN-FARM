@@ -1,5 +1,8 @@
 # PostgreSQL Cutover and Offline-Sync Runbook
 
+> **Update 2026-11-06 - schema restructured.** The ERP was rebuilt around the seven cooperative departments (see `ERP_GUIDE.md`). HMIS was removed, roles are now Head/Officer per department plus General Manager and administrators, and the initial migration was regenerated as `20261106000000_initial`. Any MongoDB import must now map the old collections onto the new models (for example, old milk-collection farmers become MVA milk suppliers; old tea and sugarcane farms become crop farms; old users need new roles). HMIS collections are not imported. Sections below that mention HMIS, patients, visits or the old schema are historical.
+
+
 ## Current state and safety boundary
 
 Backend runtime database access now uses Prisma/PostgreSQL, and Mongoose runtime dependencies have been removed. This is a code cutover only: no PostgreSQL migration has been applied and no MongoDB data has been imported or changed. Do not direct production traffic to PostgreSQL until the schema is applied, the data importer is completed and reconciled, and API integration tests pass.

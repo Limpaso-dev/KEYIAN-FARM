@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../context/useAuth";
 import landingImage from "../../assets/keiyian-landing.jpg";
 
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login, isAuthenticated, user } = useAuth();
-  const homePath = ["nurse", "doctor"].includes(user?.role) ? "/hmis/visits" : "/dashboard";
+  const from = location.state?.from?.pathname;
+  const homePath = user?.mustChangePassword ? "/change-password" : from && from !== "/login" ? from : "/dashboard";
 
   const [formData, setFormData] = useState({
     email: "",
@@ -42,7 +44,7 @@ const Login = () => {
     try {
       const session = await login(formData);
 
-      navigate(["nurse", "doctor"].includes(session.user?.role) ? "/hmis/visits" : "/dashboard", {
+      navigate(session.user?.mustChangePassword ? "/change-password" : from && from !== "/login" ? from : "/dashboard", {
         replace: true,
       });
     } catch (error) {
@@ -86,7 +88,7 @@ const Login = () => {
         </div>
 
         <div className="mt-10 hidden border-t border-white/25 pt-5 text-xs text-white/70 lg:block">
-          Keiyian ERP &amp; HMIS
+          Keiyian ERP
         </div>
       </section>
 
@@ -173,7 +175,7 @@ const Login = () => {
         </div>
 
         <footer className="mx-auto mt-6 w-full max-w-[390px] border-t border-slate-200 pt-4 text-center">
-          <p className="text-[11px] text-slate-500">Keiyian ERP &amp; HMIS</p>
+          <p className="text-[11px] text-slate-500">Keiyian ERP</p>
           <p className="mt-1.5 text-xs text-slate-500">
             Developed &amp; Managed by{" "}
             <a
