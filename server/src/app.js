@@ -2,119 +2,51 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 
-import authRoutes from "./routes/auth.routes.js";
-import farmerRoutes from "./routes/farmer.routes.js";
+import { protect, requirePasswordChanged } from "./middleware/auth.js";
+import { errorHandler } from "./middleware/error.js";
+import { HttpError } from "./lib/http.js";
 
-import livestockRoutes from "./routes/livestock.routes.js";
-import milkValueAdditionRoutes from "./routes/milkValueAddition.routes.js";
-import teaRoutes from "./routes/tea.routes.js";
-import sugarcaneRoutes from "./routes/sugarcane.routes.js";
-
-import medicalRoutes from "./routes/medical.routes.js";
-
-import rentalRoutes from "./routes/rental.routes.js";
-import hrRoutes from "./routes/hr.routes.js";
-import financeRoutes from "./routes/finance.routes.js";
-import animalFeedsRoutes from "./routes/animalFeeds.routes.js";
-import milkCollectionRoutes from "./routes/milkCollection.routes.js";
-import milkLaboratoryRoutes from "./routes/milkLaboratory.routes.js";
-import salesRoutes from "./routes/sales.routes.js";
-import procurementRoutes from "./routes/procurement.routes.js";
-import inventoryRoutes from "./routes/inventory.routes.js";
-import reportsRoutes from "./routes/reports.routes.js";
-import workflowRoutes from "./routes/workflow.routes.js";
-
-import { errorHandler } from "./middleware/error.middleware.js";
+import authRoutes from "./modules/auth/auth.routes.js";
+import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
+import hrRoutes from "./modules/hr/hr.routes.js";
+import livestockRoutes from "./modules/livestock/livestock.routes.js";
+import mvaRoutes from "./modules/mva/mva.routes.js";
+import salesRoutes from "./modules/sales/sales.routes.js";
+import stockRoutes from "./modules/stock/stock.routes.js";
+import storesRoutes from "./modules/stores/stores.routes.js";
+import cropsRoutes from "./modules/crops/crops.routes.js";
+import accountsRoutes from "./modules/accounts/accounts.routes.js";
+import requisitionRoutes from "./modules/requisitions/requisitions.routes.js";
+import reportRoutes from "./modules/reports/reports.routes.js";
 
 const app = express();
 
+app.set("trust proxy", 1);
 app.use(helmet());
+app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173", credentials: true }));
+app.use(express.json({ limit: "1mb" }));
 
-app.use(
-  cors({
-    origin:
-      process.env.CLIENT_URL ||
-      "http://localhost:5173",
-    credentials: true,
-  })
-);
+app.get("/api/health", (req, res) => res.json({ success: true, message: "Keiyian ERP API is running" }));
 
-app.use(express.json());
-app.use(
-  express.urlencoded({
-    extended: true,
-  })
-);
-
-/*
- * HEALTH CHECK
- */
-
-app.get("/api/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "Keiyian ERP API is running",
-  });
-});
-
-/*
- * API MODULES
- */
-
-// Authentication
+// Public sign-in, then everything below needs a session.
 app.use("/api/auth", authRoutes);
 
-// Farmers
-app.use("/api/farmers", farmerRoutes);
+const secured = express.Router();
+secured.use(protect, requirePasswordChanged);
+secured.use("/", dashboardRoutes);
+secured.use("/hr", hrRoutes);
+secured.use("/livestock", livestockRoutes);
+secured.use("/mva", mvaRoutes);
+secured.use("/sales", salesRoutes);
+secured.use("/stock", stockRoutes);
+secured.use("/stores", storesRoutes);
+secured.use("/crops", cropsRoutes);
+secured.use("/accounts", accountsRoutes);
+secured.use("/requisitions", requisitionRoutes);
+secured.use("/reports", reportRoutes);
+app.use("/api", secured);
 
-// Livestock & Agriculture
-app.use("/api/livestock", livestockRoutes);
-app.use(
-  "/api/milk-value-addition",
-  milkValueAdditionRoutes
-);
-app.use("/api/tea", teaRoutes);
-app.use("/api/sugarcane", sugarcaneRoutes);
-
-// Medical / HMIS
-app.use("/api/medical", medicalRoutes);
-
-// Administration & Operations
-app.use("/api/rentals", rentalRoutes);
-app.use("/api/hr", hrRoutes);
-app.use("/api/finance", financeRoutes);
-app.use(
-  "/api/animal-feeds",
-  animalFeedsRoutes
-);
-app.use(
-  "/api/milk-collection",
-  milkCollectionRoutes
-);
-app.use(
-  "/api/milk-laboratory",
-  milkLaboratoryRoutes
-);
-
-// Sales & Procurement
-app.use("/api/sales", salesRoutes);
-app.use(
-  "/api/procurement",
-  procurementRoutes
-);
-
-// Inventory
-app.use(
-  "/api/inventory",
-  inventoryRoutes
-);
-app.use("/api/reports", reportsRoutes);
-app.use("/api/workflows", workflowRoutes);
-
-/*
- * ERROR HANDLER
- */
-
+app.use("/api", (req, res, next) => next(new HttpError(404, `No API route for ${req.method} ${req.originalUrl}`)));
 app.use(errorHandler);
 
 export default app;

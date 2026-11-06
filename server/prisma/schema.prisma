@@ -7,501 +7,56 @@ datasource db {
   provider = "postgresql"
 }
 
+// =====================================================================
+// ORGANISATION, ACCESS AND AUDIT
+// =====================================================================
+
+enum Department {
+  hr
+  livestock
+  mva
+  sales
+  stores
+  crops
+  accounts
+}
+
+/// super_admin/admin manage the system, general_manager oversees every
+/// department, head/officer belong to exactly one department.
+enum Role {
+  super_admin
+  admin
+  general_manager
+  head
+  officer
+}
+
 model User {
-  id                          String               @id @default(uuid())
+  id                          String      @id @default(uuid())
   name                        String
-  email                       String               @unique
+  email                       String      @unique
   phone                       String?
   password                    String
-  role                        String
-  department                  String?
-  isActive                    Boolean              @default(true)
-  emailVerified               Boolean              @default(true)
+  role                        Role
+  department                  Department?
+  employeeId                  String?     @unique
+  isActive                    Boolean     @default(true)
+  mustChangePassword          Boolean     @default(true)
+  lastLoginAt                 DateTime?
+  emailVerified               Boolean     @default(true)
   emailVerificationCodeHash   String?
   emailVerificationExpiresAt  DateTime?
-  emailVerificationAttempts   Int                  @default(0)
+  emailVerificationAttempts   Int         @default(0)
   emailVerificationLastSentAt DateTime?
-  createdAt                   DateTime             @default(now())
-  updatedAt                   DateTime             @updatedAt
+  createdAt                   DateTime    @default(now())
+  updatedAt                   DateTime    @updatedAt
+  employee                    Employee?   @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   auditLogs                   AuditLog[]
-  milkTests                   MilkTest[]
-  visits                      MedicalVisit[]       @relation("VisitClinician")
-  patientsDeleted             Patient[]            @relation("PatientDeletedBy")
-  patientsVoided              Patient[]            @relation("PatientVoidedBy")
-  visitsDeleted               MedicalVisit[]       @relation("VisitDeletedBy")
-  visitsVoided                MedicalVisit[]       @relation("VisitVoidedBy")
-  labResultsPerformed         MedicalLabResult[]   @relation("LabPerformedBy")
-  labResultsDeleted           MedicalLabResult[]   @relation("LabDeletedBy")
-  labResultsVoided            MedicalLabResult[]   @relation("LabVoidedBy")
-  prescriptions               Prescription[]       @relation("PrescriptionAuthor")
-  prescriptionsDeleted        Prescription[]       @relation("PrescriptionDeletedBy")
-  prescriptionsVoided         Prescription[]       @relation("PrescriptionVoidedBy")
-  billsCreated                MedicalBill[]        @relation("BillCreatedBy")
-  billsDeleted                MedicalBill[]        @relation("BillDeletedBy")
-  billsVoided                 MedicalBill[]        @relation("BillVoidedBy")
-  medicalBillPaymentsReceived MedicalBillPayment[] @relation("MedicalBillPaymentReceivedBy")
-  purchaseRequestsCreated     PurchaseRequest[]    @relation("PurchaseRequestCreatedBy")
-  purchaseOrdersRequested     PurchaseOrder[]      @relation("PurchaseOrderRequestedBy")
-  purchaseOrdersApproved      PurchaseOrder[]      @relation("PurchaseOrderApprovedBy")
-  goodsReceiptsReceived       GoodsReceipt[]       @relation("GoodsReceiptReceivedBy")
-  goodsReceiptsReleased       GoodsReceipt[]       @relation("GoodsReceiptReleasedBy")
-  supplierInvoicesSubmitted   SupplierInvoice[]    @relation("SupplierInvoiceSubmittedBy")
-  supplierPaymentsRequested   SupplierPayment[]    @relation("SupplierPaymentRequestedBy")
-  transactionsCreated         Transaction[]        @relation("TransactionCreatedBy")
-  workflowPoliciesCreated     WorkflowPolicy[]     @relation("WorkflowPolicyCreatedBy")
-  rentPaymentsRecorded        RentPayment[]        @relation("RentPaymentRecordedBy")
-  salePaymentsRecorded        SalePayment[]        @relation("SalePaymentRecordedBy")
-  salesCreated                Sale[]               @relation("SaleCreatedBy")
+  requisitions                Requisition[] @relation("RequisitionRequestedBy")
+  requisitionsDecided         Requisition[] @relation("RequisitionDecidedBy")
+  transactions                Transaction[]
 
-  @@index([role, isActive])
-}
-
-model Farmer {
-  id               String           @id @default(uuid())
-  membershipNumber String           @unique
-  firstName        String
-  lastName         String
-  nationalId       String?          @unique
-  phone            String
-  email            String?
-  address          String?
-  farmLocation     String?
-  membershipStatus String           @default("active")
-  shares           Decimal          @default(0) @db.Decimal(18, 2)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  milkCollections  MilkCollection[]
-  livestock        Livestock[]
-  teaFarms         TeaFarm[]
-  sugarcaneFarms   SugarcaneFarm[]
-  patient          Patient?
-
-  @@index([lastName, firstName])
-  @@index([membershipStatus])
-}
-
-model MilkCollection {
-  id               String     @id @default(uuid())
-  farmerId         String
-  collectionCentre String
-  collectionDate   DateTime
-  quantityLitres   Decimal    @db.Decimal(18, 3)
-  pricePerLitre    Decimal    @db.Decimal(18, 4)
-  totalAmount      Decimal    @db.Decimal(18, 2)
-  status           String     @default("accepted")
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
-  farmer           Farmer     @relation(fields: [farmerId], references: [id], onDelete: Restrict)
-  tests            MilkTest[]
-
-  @@index([farmerId, collectionDate])
-  @@index([collectionDate, status])
-}
-
-model MilkTest {
-  id                String         @id @default(uuid())
-  milkCollectionId  String
-  sampleNumber      String         @unique
-  fatPercentage     Float?
-  proteinPercentage Float?
-  snfPercentage     Float?
-  acidity           Float?
-  temperature       Float?
-  result            String         @default("pending")
-  testedById        String?
-  testedAt          DateTime?
-  remarks           String?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  milkCollection    MilkCollection @relation(fields: [milkCollectionId], references: [id], onDelete: Restrict)
-  testedBy          User?          @relation(fields: [testedById], references: [id], onDelete: SetNull)
-
-  @@index([milkCollectionId])
-}
-
-model Livestock {
-  id           String    @id @default(uuid())
-  animalTag    String    @unique
-  farmerId     String
-  species      String
-  breed        String?
-  sex          String?
-  dateOfBirth  DateTime?
-  healthStatus String    @default("healthy")
-  status       String    @default("active")
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  farmer       Farmer    @relation(fields: [farmerId], references: [id], onDelete: Restrict)
-
-  @@index([farmerId, status])
-}
-
-model MilkValueAddition {
-  id              String    @id @default(uuid())
-  productName     String
-  batchNumber     String    @unique
-  inputMilkLitres Decimal   @db.Decimal(18, 3)
-  outputQuantity  Decimal   @db.Decimal(18, 3)
-  unit            String
-  productionDate  DateTime
-  expiryDate      DateTime?
-  status          String    @default("processing")
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-
-  @@index([productionDate, status])
-}
-
-model AnimalFeed {
-  id           String    @id @default(uuid())
-  name         String
-  feedType     String?
-  unit         String
-  quantity     Decimal   @default(0) @db.Decimal(18, 3)
-  reorderLevel Decimal   @default(0) @db.Decimal(18, 3)
-  unitCost     Decimal   @default(0) @db.Decimal(18, 2)
-  supplierId   String?
-  status       String    @default("active")
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  supplier     Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-
-  @@index([name])
-  @@index([supplierId])
-}
-
-model TeaFarm {
-  id                String                @id @default(uuid())
-  farmerId          String
-  farmName          String?
-  location          String?
-  acreage           Decimal               @db.Decimal(18, 3)
-  variety           String?
-  plantingDate      DateTime?
-  status            String                @default("active")
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  farmer            Farmer                @relation(fields: [farmerId], references: [id], onDelete: Restrict)
-  productionRecords TeaProductionRecord[]
-
-  @@index([farmerId, status])
-}
-
-model TeaProductionRecord {
-  id         String    @id @default(uuid())
-  farmId     String
-  date       DateTime?
-  quantityKg Decimal?  @db.Decimal(18, 3)
-  grade      String?
-  createdAt  DateTime  @default(now())
-  farm       TeaFarm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
-
-  @@index([farmId, date])
-}
-
-model SugarcaneFarm {
-  id                  String                   @id @default(uuid())
-  farmerId            String
-  farmName            String?
-  location            String?
-  acreage             Decimal                  @db.Decimal(18, 3)
-  variety             String?
-  plantingDate        DateTime?
-  expectedHarvestDate DateTime?
-  status              String                   @default("active")
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
-  farmer              Farmer                   @relation(fields: [farmerId], references: [id], onDelete: Restrict)
-  harvestRecords      SugarcaneHarvestRecord[]
-
-  @@index([farmerId, status])
-}
-
-model SugarcaneHarvestRecord {
-  id             String        @id @default(uuid())
-  farmId         String
-  harvestDate    DateTime?
-  quantityTonnes Decimal?      @db.Decimal(18, 3)
-  createdAt      DateTime      @default(now())
-  farm           SugarcaneFarm @relation(fields: [farmId], references: [id], onDelete: Cascade)
-
-  @@index([farmId, harvestDate])
-}
-
-model Patient {
-  id                  String             @id @default(uuid())
-  patientNumber       String             @unique
-  farmerId            String?            @unique
-  firstName           String
-  lastName            String
-  dateOfBirth         DateTime?
-  estimatedAge        Int?
-  sex                 String?
-  phone               String?
-  address             String?
-  nationalId          String?            @unique
-  payer               String             @default("cash")
-  payerDetails        Json?
-  isTemporary         Boolean            @default(false)
-  temporaryId         String?
-  status              String             @default("registered")
-  consentAcknowledged Boolean            @default(false)
-  consentDate         DateTime?
-  nextOfKin           Json?
-  deletedAt           DateTime?
-  deletedById         String?
-  voidReason          String?
-  voidedById          String?
-  voidedAt            DateTime?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  farmer              Farmer?            @relation(fields: [farmerId], references: [id], onDelete: SetNull)
-  deletedBy           User?              @relation("PatientDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
-  voidedBy            User?              @relation("PatientVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
-  visits              MedicalVisit[]
-  labResults          MedicalLabResult[]
-  prescriptions       Prescription[]
-  bills               MedicalBill[]
-
-  @@index([lastName, firstName])
-  @@index([phone])
-  @@index([deletedAt, status])
-}
-
-model MedicalVisit {
-  id                    String             @id @default(uuid())
-  patientId             String
-  clinicianId           String
-  visitNumber           String?            @unique
-  visitDate             DateTime           @default(now())
-  visitType             String             @default("outpatient")
-  chiefComplaint        String?
-  clinicalNotes         String?
-  triagePriority        String             @default("routine")
-  temperature           Float?
-  pulseRate             Float?
-  respiratoryRate       Float?
-  bloodPressure         String?
-  oxygenSaturation      Float?
-  weightKg              Float?
-  heightCm              Float?
-  painScore             Int?
-  triageNotes           String?
-  triageCompletedAt     DateTime?
-  assessment            String?
-  diagnosis             String?
-  differentialDiagnosis String?
-  labOrders             Json?
-  treatmentPlan         String?
-  disposition           String             @default("observe")
-  ward                  String?
-  bedNumber             String?
-  admissionReason       String?
-  admittedAt            DateTime?
-  dischargeSummary      String?
-  dischargePlan         String?
-  dischargedAt          DateTime?
-  transferTo            String?
-  followUpDate          DateTime?
-  referredTo            String?
-  status                String             @default("registered")
-  deletedAt             DateTime?
-  deletedById           String?
-  voidReason            String?
-  voidedById            String?
-  voidedAt              DateTime?
-  createdAt             DateTime           @default(now())
-  updatedAt             DateTime           @updatedAt
-  patient               Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  clinician             User               @relation("VisitClinician", fields: [clinicianId], references: [id], onDelete: Restrict)
-  deletedBy             User?              @relation("VisitDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
-  voidedBy              User?              @relation("VisitVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
-  labResults            MedicalLabResult[]
-  prescriptions         Prescription[]
-  bills                 MedicalBill[]
-
-  @@index([patientId, visitDate])
-  @@index([clinicianId, visitDate])
-  @@index([deletedAt, status])
-}
-
-model MedicalLabResult {
-  id             String        @id @default(uuid())
-  patientId      String
-  visitId        String?
-  testName       String
-  unitPrice      Decimal       @default(2000) @db.Decimal(18, 2)
-  result         String?
-  referenceRange String?
-  status         String        @default("ordered")
-  performedById  String?
-  performedAt    DateTime?
-  deletedAt      DateTime?
-  deletedById    String?
-  voidReason     String?
-  voidedById     String?
-  voidedAt       DateTime?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  patient        Patient       @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  visit          MedicalVisit? @relation(fields: [visitId], references: [id], onDelete: SetNull)
-  performedBy    User?         @relation("LabPerformedBy", fields: [performedById], references: [id], onDelete: SetNull)
-  deletedBy      User?         @relation("LabDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
-  voidedBy       User?         @relation("LabVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
-
-  @@index([patientId, visitId])
-  @@index([deletedAt, status])
-}
-
-model Prescription {
-  id             String                   @id @default(uuid())
-  patientId      String
-  visitId        String?
-  prescribedById String?
-  status         String                   @default("prescribed")
-  deletedAt      DateTime?
-  deletedById    String?
-  voidReason     String?
-  voidedById     String?
-  voidedAt       DateTime?
-  createdAt      DateTime                 @default(now())
-  updatedAt      DateTime                 @updatedAt
-  patient        Patient                  @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  visit          MedicalVisit?            @relation(fields: [visitId], references: [id], onDelete: SetNull)
-  prescribedBy   User?                    @relation("PrescriptionAuthor", fields: [prescribedById], references: [id], onDelete: SetNull)
-  deletedBy      User?                    @relation("PrescriptionDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
-  voidedBy       User?                    @relation("PrescriptionVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
-  medications    PrescriptionMedication[]
-
-  @@index([patientId, visitId])
-  @@index([deletedAt, status])
-}
-
-model PrescriptionMedication {
-  id             String       @id @default(uuid())
-  prescriptionId String
-  name           String?
-  dosage         String?
-  frequency      String?
-  duration       String?
-  quantity       Decimal?     @db.Decimal(18, 3)
-  unitPrice      Decimal      @default(250) @db.Decimal(18, 2)
-  instructions   String?
-  createdAt      DateTime     @default(now())
-  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
-
-  @@index([prescriptionId])
-}
-
-model MedicalBill {
-  id            String               @id @default(uuid())
-  billNumber    String               @unique
-  patientId     String
-  visitId       String
-  department    String               @default("hmis")
-  createdById   String
-  totalAmount   Decimal              @db.Decimal(18, 2)
-  amountPaid    Decimal              @default(0) @db.Decimal(18, 2)
-  status        String               @default("pending_approval")
-  policyId      String?
-  approvalSteps Json?
-  currentStep   Int                  @default(0)
-  history       Json?
-  deletedAt     DateTime?
-  deletedById   String?
-  voidReason    String?
-  voidedById    String?
-  voidedAt      DateTime?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  patient       Patient              @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  visit         MedicalVisit         @relation(fields: [visitId], references: [id], onDelete: Restrict)
-  createdBy     User                 @relation("BillCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  policy        WorkflowPolicy?      @relation(fields: [policyId], references: [id], onDelete: SetNull)
-  deletedBy     User?                @relation("BillDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
-  voidedBy      User?                @relation("BillVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
-  payments      MedicalBillPayment[]
-  items         MedicalBillItem[]
-
-  @@index([patientId, visitId])
-  @@index([deletedAt, status])
-}
-
-model MedicalBillItem {
-  id          String      @id @default(uuid())
-  billId      String
-  description String
-  quantity    Decimal     @db.Decimal(18, 3)
-  unitPrice   Decimal     @db.Decimal(18, 2)
-  total       Decimal     @db.Decimal(18, 2)
-  createdAt   DateTime    @default(now())
-  bill        MedicalBill @relation(fields: [billId], references: [id], onDelete: Cascade)
-
-  @@index([billId])
-}
-
-model MedicalBillPayment {
-  id            String       @id @default(uuid())
-  billId        String
-  amount        Decimal?     @db.Decimal(18, 2)
-  method        String?
-  reference     String?
-  accountId     String?
-  receivedById  String?
-  receivedAt    DateTime     @default(now())
-  transactionId String?      @unique
-  createdAt     DateTime     @default(now())
-  bill          MedicalBill  @relation(fields: [billId], references: [id], onDelete: Restrict)
-  account       Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  receivedBy    User?        @relation("MedicalBillPaymentReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
-  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
-
-  @@index([billId, receivedAt])
-}
-
-model Account {
-  id                  String               @id @default(uuid())
-  accountCode         String               @unique
-  accountName         String
-  accountType         String
-  openingBalance      Decimal              @default(0) @db.Decimal(18, 2)
-  status              String               @default("active")
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  transactions        Transaction[]
-  supplierPayments    SupplierPayment[]
-  medicalBillPayments MedicalBillPayment[]
-
-  @@index([accountName, accountType])
-}
-
-model Transaction {
-  id                 String              @id @default(uuid())
-  reference          String              @unique
-  transactionDate    DateTime            @default(now())
-  type               String
-  accountId          String
-  amount             Decimal             @db.Decimal(18, 2)
-  description        String?
-  status             String              @default("pending")
-  department         String              @default("finance")
-  policyId           String?
-  approvalSteps      Json?
-  currentStep        Int                 @default(0)
-  history            Json?
-  createdById        String?
-  sourceType         String?
-  sourceId           String?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  account            Account             @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  policy             WorkflowPolicy?     @relation(fields: [policyId], references: [id], onDelete: SetNull)
-  createdBy          User?               @relation("TransactionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  supplierPayment    SupplierPayment?
-  medicalBillPayment MedicalBillPayment?
-
-  @@index([transactionDate, status])
-  @@index([sourceType, sourceId])
+  @@index([role, department, isActive])
 }
 
 model AuditLog {
@@ -515,509 +70,825 @@ model AuditLog {
   after     Json?
   metadata  Json?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
   actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([entity, entityId, createdAt])
   @@index([actorId, createdAt])
-  @@index([action, createdAt])
 }
 
-model Employee {
-  id             String    @id @default(uuid())
-  employeeNumber String    @unique
-  firstName      String
-  lastName       String
-  phone          String?
-  email          String?
-  department     String?
-  position       String?
-  employmentType String?
-  dateJoined     DateTime?
-  salary         Decimal?  @db.Decimal(18, 2)
-  status         String    @default("active")
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  payroll        Payroll[]
+/// Running counters for human-readable document numbers (REQ-2026-0001 ...).
+model Sequence {
+  key   String @id
+  value Int    @default(0)
+}
 
-  @@index([lastName, firstName])
+// =====================================================================
+// HR: STAFF, CONTRACTS, PAYROLL, DISCIPLINE, TERMINATION, MEMBERS
+// =====================================================================
+
+model Employee {
+  id               String             @id @default(uuid())
+  staffNumber      String             @unique
+  firstName        String
+  lastName         String
+  nationalId       String?            @unique
+  gender           String?
+  dateOfBirth      DateTime?
+  phone            String?
+  email            String?
+  address          String?
+  department       Department
+  jobTitle         String
+  employmentType   String             @default("permanent")
+  dateHired        DateTime
+  basicSalary      Decimal            @default(0) @db.Decimal(18, 2)
+  bankName         String?
+  bankAccount      String?
+  kraPin           String?
+  status           String             @default("active")
+  notes            String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User?
+  contracts        Contract[]
+  salaryReviews    SalaryReview[]
+  payrolls         Payroll[]
+  disciplinaryCases DisciplinaryCase[]
+  termination      Termination?
+
   @@index([department, status])
 }
 
-model Payroll {
-  id          String   @id @default(uuid())
-  employeeId  String
-  period      String
-  basicSalary Decimal  @default(0) @db.Decimal(18, 2)
-  allowances  Decimal  @default(0) @db.Decimal(18, 2)
-  grossSalary Decimal  @default(0) @db.Decimal(18, 2)
-  deductions  Decimal  @default(0) @db.Decimal(18, 2)
-  netSalary   Decimal  @db.Decimal(18, 2)
-  status      String   @default("draft")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+model Contract {
+  id             String    @id @default(uuid())
+  contractNumber String    @unique
+  employeeId     String
+  contractType   String
+  startDate      DateTime
+  endDate        DateTime?
+  salary         Decimal   @db.Decimal(18, 2)
+  terms          String?
+  status         String    @default("active")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
 
+  @@index([employeeId, status])
+}
+
+model SalaryReview {
+  id               String   @id @default(uuid())
+  employeeId       String
+  reviewType       String
+  effectiveDate    DateTime
+  previousSalary   Decimal  @db.Decimal(18, 2)
+  newSalary        Decimal  @db.Decimal(18, 2)
+  previousJobTitle String?
+  newJobTitle      String?
+  reason           String
+  createdAt        DateTime @default(now())
+  employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([employeeId, effectiveDate])
+}
+
+model Payroll {
+  id            String    @id @default(uuid())
+  employeeId    String
+  period        String
+  basicSalary   Decimal   @db.Decimal(18, 2)
+  allowances    Decimal   @default(0) @db.Decimal(18, 2)
+  deductions    Decimal   @default(0) @db.Decimal(18, 2)
+  netPay        Decimal   @db.Decimal(18, 2)
+  status        String    @default("draft")
+  paidAt        DateTime?
+  transactionId String?   @unique
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([employeeId, period])
   @@index([period, status])
 }
 
-model Inventory {
-  id           String             @id @default(uuid())
-  itemCode     String             @unique
-  name         String
-  category     String?
-  unit         String?
-  quantity     Decimal            @default(0) @db.Decimal(18, 3)
-  reorderLevel Decimal            @default(0) @db.Decimal(18, 3)
-  unitCost     Decimal            @default(0) @db.Decimal(18, 2)
-  location     String?
-  status       String             @default("active")
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  receiptItems GoodsReceiptItem[]
+model DisciplinaryCase {
+  id           String    @id @default(uuid())
+  caseNumber   String    @unique
+  employeeId   String
+  incidentDate DateTime
+  offence      String
+  actionTaken  String
+  letterServed Boolean   @default(false)
+  letterDate   DateTime?
+  description  String?
+  outcome      String?
+  status       String    @default("open")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Restrict)
 
-  @@index([name, category])
-  @@index([status])
+  @@index([employeeId, incidentDate])
 }
 
-model Supplier {
-  id             String            @id @default(uuid())
-  supplierCode   String            @unique
-  name           String
-  contactPerson  String?
+model Termination {
+  id              String   @id @default(uuid())
+  employeeId      String   @unique
+  terminationType String
+  terminationDate DateTime
+  reason          String
+  finalDues       Decimal  @default(0) @db.Decimal(18, 2)
+  clearanceStatus String   @default("pending")
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+}
+
+/// Pioneer founder members and their hereditary successors. A successor
+/// is another Member row that points at the member it succeeded.
+model Member {
+  id             String          @id @default(uuid())
+  memberNumber   String          @unique
+  firstName      String
+  lastName       String
+  nationalId     String?         @unique
   phone          String?
-  email          String?
   address        String?
-  taxNumber      String?
-  status         String            @default("active")
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  animalFeeds    AnimalFeed[]
-  purchaseOrders PurchaseOrder[]
-  goodsReceipts  GoodsReceipt[]
-  invoices       SupplierInvoice[]
-  payments       SupplierPayment[]
+  joinDate       DateTime
+  shares         Int             @default(0)
+  isPioneer      Boolean         @default(true)
+  status         String          @default("active")
+  predecessorId  String?
+  relationship   String?
+  successionDate DateTime?
+  notes          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  predecessor    Member?         @relation("MemberSuccession", fields: [predecessorId], references: [id], onDelete: Restrict)
+  successors     Member[]        @relation("MemberSuccession")
+  payments       MemberPayment[]
 
-  @@index([name])
   @@index([status])
 }
 
-model PurchaseRequest {
-  id            String                @id @default(uuid())
-  requestNumber String                @unique
-  department    String
-  title         String
-  reason        String
-  priority      String                @default("normal")
-  totalAmount   Decimal               @db.Decimal(18, 2)
-  createdById   String
-  status        String                @default("pending_approval")
-  policyId      String?
-  approvalSteps Json?
-  currentStep   Int                   @default(0)
-  history       Json?
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  createdBy     User                  @relation("PurchaseRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  policy        WorkflowPolicy?       @relation(fields: [policyId], references: [id], onDelete: SetNull)
-  purchaseOrder PurchaseOrder?
-  items         PurchaseRequestItem[]
+// =====================================================================
+// LIVESTOCK
+// =====================================================================
 
-  @@index([department, status, createdAt])
+model Animal {
+  id             String         @id @default(uuid())
+  tagNumber      String         @unique
+  name           String?
+  breed          String?
+  sex            String
+  dateOfBirth    DateTime?
+  source         String         @default("born_on_farm")
+  damId          String?
+  sireId         String?
+  sireDetails    String?
+  lactationCount Int            @default(0)
+  status         String         @default("active")
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  dam            Animal?        @relation("Dam", fields: [damId], references: [id], onDelete: SetNull)
+  sire           Animal?        @relation("Sire", fields: [sireId], references: [id], onDelete: SetNull)
+  calvesAsDam    Animal[]       @relation("Dam")
+  calvesAsSire   Animal[]       @relation("Sire")
+  lactations     Lactation[]
+  vaccinations   Vaccination[]
+  healthRecords  HealthRecord[]
+  milkRecords    MilkRecord[]
+
+  @@index([status, sex])
 }
 
-model PurchaseRequestItem {
-  id                String          @id @default(uuid())
-  purchaseRequestId String
-  description       String
-  quantity          Decimal         @db.Decimal(18, 3)
-  unitPrice         Decimal         @db.Decimal(18, 2)
-  total             Decimal         @db.Decimal(18, 2)
-  createdAt         DateTime        @default(now())
-  purchaseRequest   PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
-
-  @@index([purchaseRequestId])
-}
-
-model PurchaseOrder {
-  id                 String              @id @default(uuid())
-  poNumber           String              @unique
-  supplierId         String
-  purchaseRequestId  String?             @unique
-  quotationUrl       String?
-  department         String
-  policyId           String?
-  subtotal           Decimal?            @db.Decimal(18, 2)
-  tax                Decimal             @default(0) @db.Decimal(18, 2)
-  totalAmount        Decimal?            @db.Decimal(18, 2)
-  status             String              @default("draft")
-  requestedById      String?
-  approvalSteps      Json?
-  currentStep        Int                 @default(0)
-  history            Json?
-  receivedQuantities Json?
-  approvedById       String?
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  supplier           Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  purchaseRequest    PurchaseRequest?    @relation(fields: [purchaseRequestId], references: [id], onDelete: SetNull)
-  policy             WorkflowPolicy?     @relation(fields: [policyId], references: [id], onDelete: SetNull)
-  requestedBy        User?               @relation("PurchaseOrderRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
-  approvedBy         User?               @relation("PurchaseOrderApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
-  goodsReceipts      GoodsReceipt[]
-  invoices           SupplierInvoice[]
-  items              PurchaseOrderItem[]
-
-  @@index([supplierId, status])
-  @@index([department, status, createdAt])
-}
-
-model PurchaseOrderItem {
-  id              String        @id @default(uuid())
-  purchaseOrderId String
-  description     String?
-  quantity        Decimal?      @db.Decimal(18, 3)
-  unitPrice       Decimal?      @db.Decimal(18, 2)
-  total           Decimal?      @db.Decimal(18, 2)
-  createdAt       DateTime      @default(now())
-  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-
-  @@index([purchaseOrderId])
-}
-
-model GoodsReceipt {
-  id              String             @id @default(uuid())
-  receiptNumber   String             @unique
-  purchaseOrderId String
-  supplierId      String
-  receivedById    String
-  receivedAt      DateTime           @default(now())
-  status          String             @default("pending_store")
-  releasedById    String?
-  releasedAt      DateTime?
+model Lactation {
+  id              String    @id @default(uuid())
+  animalId        String
+  lactationNumber Int
+  calvingDate     DateTime
+  calfId          String?
+  dryOffDate      DateTime?
+  status          String    @default("milking")
   notes           String?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  purchaseOrder   PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
-  supplier        Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  receivedBy      User               @relation("GoodsReceiptReceivedBy", fields: [receivedById], references: [id], onDelete: Restrict)
-  releasedBy      User?              @relation("GoodsReceiptReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
-  items           GoodsReceiptItem[]
-  invoices        SupplierInvoice[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  animal          Animal    @relation(fields: [animalId], references: [id], onDelete: Restrict)
 
-  @@index([purchaseOrderId, status])
-  @@index([supplierId, receivedAt])
+  @@unique([animalId, lactationNumber])
 }
 
-model GoodsReceiptItem {
-  id               String       @id @default(uuid())
-  goodsReceiptId   String
-  poItemIndex      Int?
-  description      String
-  orderedQuantity  Decimal      @db.Decimal(18, 3)
-  receivedQuantity Decimal      @db.Decimal(18, 3)
-  acceptedQuantity Decimal      @db.Decimal(18, 3)
-  damagedQuantity  Decimal      @db.Decimal(18, 3)
-  inventoryItemId  String?
-  createdAt        DateTime     @default(now())
-  goodsReceipt     GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
-  inventoryItem    Inventory?   @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+model Vaccination {
+  id             String    @id @default(uuid())
+  animalId       String
+  vaccine        String
+  date           DateTime
+  dose           String?
+  nextDueDate    DateTime?
+  administeredBy String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  animal         Animal    @relation(fields: [animalId], references: [id], onDelete: Restrict)
 
-  @@index([goodsReceiptId])
+  @@index([date])
 }
 
-model WorkflowPolicy {
-  id               String            @id @default(uuid())
-  name             String
-  workflowType     String            @default("purchase_request")
-  department       String
-  minAmount        Decimal           @default(0) @db.Decimal(18, 2)
-  maxAmount        Decimal?          @db.Decimal(18, 2)
-  steps            Json
-  isActive         Boolean           @default(true)
-  createdById      String
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  createdBy        User              @relation("WorkflowPolicyCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  purchaseRequests PurchaseRequest[]
-  purchaseOrders   PurchaseOrder[]
-  supplierInvoices SupplierInvoice[]
-  supplierPayments SupplierPayment[]
-  medicalBills     MedicalBill[]
-  transactions     Transaction[]
+/// Disease cases, treatments and herd health checks. animalId is empty
+/// for herd-wide events such as dipping or deworming the whole herd.
+model HealthRecord {
+  id         String   @id @default(uuid())
+  animalId   String?
+  recordType String
+  date       DateTime
+  condition  String
+  treatment  String?
+  vet        String?
+  cost       Decimal  @default(0) @db.Decimal(18, 2)
+  outcome    String   @default("under_treatment")
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  animal     Animal?  @relation(fields: [animalId], references: [id], onDelete: Restrict)
 
-  @@unique([workflowType, department, minAmount, maxAmount])
-  @@index([workflowType, department, isActive])
+  @@index([date, recordType])
 }
 
-model SupplierInvoice {
-  id                    String                @id @default(uuid())
-  invoiceNumber         String
-  supplierId            String
-  purchaseOrderId       String
-  goodsReceiptId        String
-  submittedById         String
-  department            String
-  invoiceDate           DateTime              @default(now())
-  supportingDocumentUrl String?
-  totalAmount           Decimal               @db.Decimal(18, 2)
-  matchStatus           String
-  discrepancies         Json?
-  status                String                @default("pending_approval")
-  policyId              String?
-  approvalSteps         Json?
-  currentStep           Int                   @default(0)
-  history               Json?
-  createdAt             DateTime              @default(now())
-  updatedAt             DateTime              @updatedAt
-  supplier              Supplier              @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  purchaseOrder         PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
-  goodsReceipt          GoodsReceipt          @relation(fields: [goodsReceiptId], references: [id], onDelete: Restrict)
-  submittedBy           User                  @relation("SupplierInvoiceSubmittedBy", fields: [submittedById], references: [id], onDelete: Restrict)
-  policy                WorkflowPolicy?       @relation(fields: [policyId], references: [id], onDelete: SetNull)
-  payments              SupplierPayment[]
-  items                 SupplierInvoiceItem[]
+model MilkRecord {
+  id        String   @id @default(uuid())
+  animalId  String
+  date      DateTime @db.Date
+  session   String
+  litres    Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+  animal    Animal   @relation(fields: [animalId], references: [id], onDelete: Restrict)
 
-  @@unique([supplierId, invoiceNumber])
-  @@index([purchaseOrderId, status])
-  @@index([goodsReceiptId])
+  @@unique([animalId, date, session])
+  @@index([date])
 }
 
-model SupplierInvoiceItem {
-  id                String          @id @default(uuid())
-  supplierInvoiceId String
-  description       String?
-  quantity          Decimal?        @db.Decimal(18, 3)
-  unitPrice         Decimal?        @db.Decimal(18, 2)
-  total             Decimal?        @db.Decimal(18, 2)
-  createdAt         DateTime        @default(now())
-  supplierInvoice   SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+/// Milk sent from Livestock to MVA. MVA confirms what it received.
+model MilkTransfer {
+  id             String    @id @default(uuid())
+  transferNumber String    @unique
+  date           DateTime  @db.Date
+  session        String
+  litres         Decimal   @db.Decimal(10, 2)
+  status         String    @default("sent")
+  receivedLitres Decimal?  @db.Decimal(10, 2)
+  receivedAt     DateTime?
+  receivedById   String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  @@index([supplierInvoiceId])
+  @@index([date, status])
 }
 
-model SupplierPayment {
-  id            String          @id @default(uuid())
-  paymentNumber String          @unique
-  invoiceId     String
-  supplierId    String
-  accountId     String
-  amount        Decimal         @db.Decimal(18, 2)
-  paymentMethod String
-  reference     String
-  paymentDate   DateTime        @default(now())
-  requestedById String
-  status        String          @default("pending_approval")
-  policyId      String?
-  approvalSteps Json?
-  currentStep   Int             @default(0)
-  history       Json?
-  transactionId String?         @unique
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  invoice       SupplierInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
-  supplier      Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  account       Account         @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  requestedBy   User            @relation("SupplierPaymentRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
-  policy        WorkflowPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
-  transaction   Transaction?    @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+// =====================================================================
+// MILK VALUE ADDITION (MVA)
+// =====================================================================
 
-  @@index([invoiceId, status])
-  @@index([supplierId, paymentDate])
+/// Local farmers who deliver milk to MVA. supplierNumber is the short
+/// number farmers are known by (130, 131, ...).
+model MilkSupplier {
+  id             String         @id @default(uuid())
+  supplierNumber Int            @unique
+  firstName      String
+  lastName       String
+  nationalId     String?        @unique
+  phone          String?
+  location       String?
+  paymentMethod  String         @default("mpesa")
+  paymentDetails String?
+  status         String         @default("active")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deliveries     MilkDelivery[]
+  paymentLines   MilkPaymentLine[]
 }
 
-model Property {
-  id           String         @id @default(uuid())
-  name         String
-  location     String?
-  propertyType String?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  units        PropertyUnit[]
-  tenants      Tenant[]
-  leases       Lease[]
-  rentPayments RentPayment[]
-
-  @@index([name])
-}
-
-model PropertyUnit {
-  id          String   @id @default(uuid())
-  propertyId  String
-  unitNumber  String?
-  monthlyRent Decimal? @db.Decimal(18, 2)
-  status      String   @default("vacant")
-  createdAt   DateTime @default(now())
-  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-
-  @@index([propertyId, status])
-}
-
-model Tenant {
-  id           String        @id @default(uuid())
-  name         String
-  phone        String?
-  email        String?
-  propertyId   String?
-  unitNumber   String?
-  leaseStart   DateTime?
-  leaseEnd     DateTime?
-  monthlyRent  Decimal?      @db.Decimal(18, 2)
-  status       String        @default("active")
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  property     Property?     @relation(fields: [propertyId], references: [id], onDelete: SetNull)
-  leases       Lease[]
-  rentPayments RentPayment[]
-
-  @@index([propertyId, status])
-}
-
-model Lease {
-  id              String        @id @default(uuid())
-  tenantId        String
-  propertyId      String
-  unitNumber      String
-  leaseStart      DateTime
-  leaseEnd        DateTime
-  monthlyRent     Decimal       @db.Decimal(18, 2)
-  securityDeposit Decimal       @default(0) @db.Decimal(18, 2)
-  paymentDueDay   Int           @default(5)
-  status          String        @default("draft")
-  notes           String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  property        Property      @relation(fields: [propertyId], references: [id], onDelete: Restrict)
-  rentPayments    RentPayment[]
-
-  @@index([tenantId, status])
-  @@index([propertyId, unitNumber, status])
-}
-
-model RentPayment {
+model MilkPrice {
   id            String   @id @default(uuid())
-  tenantId      String
-  leaseId       String
-  propertyId    String
-  unitNumber    String
-  amount        Decimal  @db.Decimal(18, 2)
-  paymentDate   DateTime @default(now())
-  paymentMethod String
-  reference     String   @unique
-  period        String
-  status        String   @default("confirmed")
+  effectiveDate DateTime @unique @db.Date
+  pricePerLitre Decimal  @db.Decimal(10, 2)
   notes         String?
-  recordedById  String?
   createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  lease         Lease    @relation(fields: [leaseId], references: [id], onDelete: Restrict)
-  property      Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
-  recordedBy    User?    @relation("RentPaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
-
-  @@index([tenantId, paymentDate])
-  @@index([leaseId, period])
 }
 
-model Customer {
-  id           String        @id @default(uuid())
-  customerCode String        @unique
-  name         String
-  phone        String?
-  email        String?
-  address      String?
-  taxNumber    String?
-  customerType String        @default("individual")
-  creditLimit  Decimal       @default(0) @db.Decimal(18, 2)
-  status       String        @default("active")
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  sales        Sale[]
-  payments     SalePayment[]
+model MilkDelivery {
+  id            String       @id @default(uuid())
+  supplierId    String
+  date          DateTime     @db.Date
+  session       String
+  litres        Decimal      @db.Decimal(10, 2)
+  pricePerLitre Decimal      @db.Decimal(10, 2)
+  amount        Decimal      @db.Decimal(18, 2)
+  paymentRunId  String?
+  notes         String?
+  createdAt     DateTime     @default(now())
+  supplier      MilkSupplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  paymentRun    MilkPaymentRun? @relation(fields: [paymentRunId], references: [id], onDelete: SetNull)
 
-  @@index([name])
-  @@index([status])
+  @@index([date, supplierId])
 }
+
+/// One processing run: raw milk in, finished products out.
+model ProcessingBatch {
+  id           String             @id @default(uuid())
+  batchNumber  String             @unique
+  date         DateTime           @db.Date
+  rawMilkInput Decimal            @db.Decimal(10, 2)
+  notes        String?
+  createdAt    DateTime           @default(now())
+  outputs      ProcessingOutput[]
+
+  @@index([date])
+}
+
+model ProcessingOutput {
+  id        String          @id @default(uuid())
+  batchId   String
+  productId String
+  quantity  Decimal         @db.Decimal(10, 2)
+  batch     ProcessingBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+/// Products moved from MVA to Sales. Sales confirms receipt.
+model ProductTransfer {
+  id             String                @id @default(uuid())
+  transferNumber String                @unique
+  date           DateTime              @db.Date
+  status         String                @default("sent")
+  receivedAt     DateTime?
+  receivedById   String?
+  notes          String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  items          ProductTransferItem[]
+
+  @@index([date, status])
+}
+
+model ProductTransferItem {
+  id         String          @id @default(uuid())
+  transferId String
+  productId  String
+  quantity   Decimal         @db.Decimal(10, 2)
+  transfer   ProductTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+// =====================================================================
+// PRODUCTS AND STOCK LEDGER (shared by MVA and Sales)
+// =====================================================================
 
 model Product {
-  id            String     @id @default(uuid())
-  name          String
-  category      String?
-  sku           String?    @unique
-  unit          String?
-  sellingPrice  Decimal?   @db.Decimal(18, 2)
-  stockQuantity Decimal    @default(0) @db.Decimal(18, 3)
-  status        String     @default("active")
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-  saleItems     SaleItem[]
+  id                String                @id @default(uuid())
+  code              String                @unique
+  name              String
+  unit              String
+  unitPrice         Decimal               @db.Decimal(10, 2)
+  isActive          Boolean               @default(true)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  movements         StockMovement[]
+  processingOutputs ProcessingOutput[]
+  transferItems     ProductTransferItem[]
+  saleItems         SaleItem[]
+  dispatchItems     DispatchItem[]
+  damages           DamageReplacement[]
+}
 
-  @@index([name, category])
+/// Every stock change at MVA or Sales is one signed row. Stock on hand
+/// for a product at a location is the sum of its quantities.
+model StockMovement {
+  id            String   @id @default(uuid())
+  productId     String
+  location      String
+  quantity      Decimal  @db.Decimal(12, 2)
+  movementType  String
+  referenceType String?
+  referenceId   String?
+  date          DateTime @db.Date
+  notes         String?
+  createdAt     DateTime @default(now())
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([productId, location])
+  @@index([date, location])
+  @@index([referenceType, referenceId])
+}
+
+// =====================================================================
+// SALES
+// =====================================================================
+
+model Customer {
+  id           String              @id @default(uuid())
+  name         String
+  phone        String?
+  customerType String              @default("individual")
+  location     String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  sales        Sale[]
+  damages      DamageReplacement[]
 }
 
 model Sale {
   id            String        @id @default(uuid())
-  invoiceNumber String        @unique
-  customerId    String
-  saleDate      DateTime      @default(now())
-  subtotal      Decimal       @default(0) @db.Decimal(18, 2)
-  discount      Decimal       @default(0) @db.Decimal(18, 2)
-  tax           Decimal       @default(0) @db.Decimal(18, 2)
+  saleNumber    String        @unique
+  date          DateTime      @db.Date
+  customerId    String?
+  customerName  String?
+  paymentMethod String        @default("cash")
   totalAmount   Decimal       @db.Decimal(18, 2)
   amountPaid    Decimal       @default(0) @db.Decimal(18, 2)
-  balanceDue    Decimal       @default(0) @db.Decimal(18, 2)
-  paymentStatus String        @default("unpaid")
-  paymentMethod String        @default("cash")
-  status        String        @default("draft")
+  status        String        @default("paid")
   notes         String?
-  createdById   String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
-  customer      Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  createdBy     User?         @relation("SaleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  customer      Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items         SaleItem[]
   payments      SalePayment[]
 
-  @@index([customerId, saleDate])
-  @@index([saleDate, status])
+  @@index([date])
 }
 
 model SaleItem {
-  id          String   @id @default(uuid())
-  saleId      String
-  productId   String
-  description String?
-  quantity    Decimal  @db.Decimal(18, 3)
-  unitPrice   Decimal  @db.Decimal(18, 2)
-  discount    Decimal  @default(0) @db.Decimal(18, 2)
-  tax         Decimal  @default(0) @db.Decimal(18, 2)
-  total       Decimal  @db.Decimal(18, 2)
-  createdAt   DateTime @default(now())
-  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
-
-  @@index([saleId])
-  @@index([productId])
+  id        String  @id @default(uuid())
+  saleId    String
+  productId String
+  quantity  Decimal @db.Decimal(10, 2)
+  unitPrice Decimal @db.Decimal(10, 2)
+  total     Decimal @db.Decimal(18, 2)
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
 }
 
 model SalePayment {
   id            String   @id @default(uuid())
   saleId        String
-  customerId    String
+  date          DateTime @db.Date
   amount        Decimal  @db.Decimal(18, 2)
-  paymentDate   DateTime @default(now())
   paymentMethod String
+  reference     String?
+  createdAt     DateTime @default(now())
+  sale          Sale     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+}
+
+/// Vehicles that take milk to town. The crew is the driver and the
+/// sales person who report back in the evening.
+model Vehicle {
+  id                 String            @id @default(uuid())
+  registrationNumber String            @unique
+  description        String?
+  driverName         String
+  driverPhone        String?
+  salesPersonName    String
+  salesPersonPhone   String?
+  status             String            @default("active")
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  dispatches         VehicleDispatch[]
+}
+
+/// Morning: products issued to a vehicle. Evening: the crew reports what
+/// came back, what was damaged and the money handed in.
+model VehicleDispatch {
+  id              String         @id @default(uuid())
+  dispatchNumber  String         @unique
+  date            DateTime       @db.Date
+  vehicleId       String
+  driverName      String
+  salesPersonName String
+  status          String         @default("dispatched")
+  expectedAmount  Decimal        @default(0) @db.Decimal(18, 2)
+  cashReturned    Decimal        @default(0) @db.Decimal(18, 2)
+  mpesaReturned   Decimal        @default(0) @db.Decimal(18, 2)
+  variance        Decimal        @default(0) @db.Decimal(18, 2)
+  reconciledAt    DateTime?
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  vehicle         Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  items           DispatchItem[]
+
+  @@index([date, status])
+}
+
+model DispatchItem {
+  id                 String          @id @default(uuid())
+  dispatchId         String
+  productId          String
+  quantityDispatched Decimal         @db.Decimal(10, 2)
+  quantityReturned   Decimal         @default(0) @db.Decimal(10, 2)
+  quantityDamaged    Decimal         @default(0) @db.Decimal(10, 2)
+  quantitySold       Decimal         @default(0) @db.Decimal(10, 2)
+  unitPrice          Decimal         @db.Decimal(10, 2)
+  dispatch           VehicleDispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  product            Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+/// Stock written off as damaged, or given to a customer to replace a
+/// spoilt product. Both reduce Sales stock.
+model DamageReplacement {
+  id           String    @id @default(uuid())
+  recordNumber String    @unique
+  date         DateTime  @db.Date
+  recordType   String
+  productId    String
+  quantity     Decimal   @db.Decimal(10, 2)
+  value        Decimal   @db.Decimal(18, 2)
+  customerId   String?
+  customerName String?
+  reason       String
+  createdAt    DateTime  @default(now())
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([date, recordType])
+}
+
+// =====================================================================
+// STORES
+// =====================================================================
+
+model StoreItem {
+  id             String         @id @default(uuid())
+  code           String         @unique
+  name           String
+  category       String
+  unit           String
+  quantityOnHand Decimal        @default(0) @db.Decimal(12, 2)
+  reorderLevel   Decimal        @default(0) @db.Decimal(12, 2)
+  unitCost       Decimal        @default(0) @db.Decimal(12, 2)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  receipts       StoreReceipt[]
+  issues         StoreIssue[]
+  orderItems     PurchaseOrderItem[]
+
+  @@index([category])
+}
+
+model StoreReceipt {
+  id              String         @id @default(uuid())
+  receiptNumber   String         @unique
+  date            DateTime       @db.Date
+  itemId          String
+  quantity        Decimal        @db.Decimal(12, 2)
+  unitCost        Decimal        @default(0) @db.Decimal(12, 2)
+  source          String         @default("purchase")
+  supplierId      String?
+  purchaseOrderId String?
+  deliveryNote    String?
+  notes           String?
+  createdAt       DateTime       @default(now())
+  item            StoreItem      @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  supplier        Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  @@index([date])
+}
+
+model StoreIssue {
+  id            String       @id @default(uuid())
+  issueNumber   String       @unique
+  date          DateTime     @db.Date
+  itemId        String
+  quantity      Decimal      @db.Decimal(12, 2)
+  department    Department
+  issuedTo      String
+  requisitionId String?
+  purpose       String?
+  createdAt     DateTime     @default(now())
+  item          StoreItem    @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  requisition   Requisition? @relation(fields: [requisitionId], references: [id], onDelete: SetNull)
+
+  @@index([date, department])
+}
+
+// =====================================================================
+// CROPS
+// =====================================================================
+
+model CropFarm {
+  id           String          @id @default(uuid())
+  farmNumber   String          @unique
+  cropType     String
+  acreage      Decimal         @db.Decimal(10, 2)
+  location     String
+  plantingDate DateTime?
+  ratoonCount  Int             @default(0)
+  status       String          @default("land_preparation")
+  statusNote   String?
+  notes        String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  harvests     CropHarvest[]
+  statusLogs   CropStatusLog[]
+
+  @@index([cropType, status])
+}
+
+model CropStatusLog {
+  id        String   @id @default(uuid())
+  farmId    String
+  date      DateTime @db.Date
+  status    String
+  note      String?
+  createdAt DateTime @default(now())
+  farm      CropFarm @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  @@index([date])
+}
+
+model CropHarvest {
+  id          String   @id @default(uuid())
+  farmId      String
+  harvestDate DateTime @db.Date
+  quantity    Decimal  @db.Decimal(12, 2)
+  unit        String
+  buyer       String?
+  amount      Decimal  @default(0) @db.Decimal(18, 2)
+  notes       String?
+  createdAt   DateTime @default(now())
+  farm        CropFarm @relation(fields: [farmId], references: [id], onDelete: Restrict)
+
+  @@index([harvestDate])
+}
+
+// =====================================================================
+// ACCOUNTS: MONEY ACCOUNTS, INCOME/EXPENSES, PAYMENTS, PROCUREMENT
+// =====================================================================
+
+model Account {
+  id             String        @id @default(uuid())
+  name           String        @unique
+  accountType    String
+  accountNumber  String?
+  openingBalance Decimal       @default(0) @db.Decimal(18, 2)
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  transactions   Transaction[]
+}
+
+/// One income or expense entry. category is one of the fixed income or
+/// expense heads configured in src/config/accounts.js.
+model Transaction {
+  id            String   @id @default(uuid())
   reference     String   @unique
-  status        String   @default("confirmed")
-  notes         String?
-  recordedById  String?
+  date          DateTime @db.Date
+  type          String
+  category      String
+  accountId     String
+  amount        Decimal  @db.Decimal(18, 2)
+  description   String
+  party         String?
+  department    Department?
+  sourceType    String?
+  sourceId      String?
+  status        String   @default("posted")
+  voidReason    String?
+  createdById   String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  sale          Sale     @relation(fields: [saleId], references: [id], onDelete: Restrict)
-  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  recordedBy    User?    @relation("SalePaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  account       Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  createdBy     User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
-  @@index([saleId, paymentDate])
-  @@index([customerId, paymentDate])
+  @@index([date, type, category])
+  @@index([sourceType, sourceId])
+}
+
+/// Payment to farmers for milk delivered over a period.
+model MilkPaymentRun {
+  id            String            @id @default(uuid())
+  runNumber     String            @unique
+  periodStart   DateTime          @db.Date
+  periodEnd     DateTime          @db.Date
+  totalLitres   Decimal           @db.Decimal(12, 2)
+  totalAmount   Decimal           @db.Decimal(18, 2)
+  status        String            @default("draft")
+  paidAt        DateTime?
+  transactionId String?           @unique
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  lines         MilkPaymentLine[]
+  deliveries    MilkDelivery[]
+}
+
+model MilkPaymentLine {
+  id         String         @id @default(uuid())
+  runId      String
+  supplierId String
+  litres     Decimal        @db.Decimal(12, 2)
+  amount     Decimal        @db.Decimal(18, 2)
+  deductions Decimal        @default(0) @db.Decimal(18, 2)
+  netAmount  Decimal        @db.Decimal(18, 2)
+  run        MilkPaymentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  supplier   MilkSupplier   @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+}
+
+/// Dividends and other payments to pioneer members or their successors.
+model MemberPayment {
+  id            String   @id @default(uuid())
+  memberId      String
+  date          DateTime @db.Date
+  paymentType   String   @default("dividend")
+  amount        Decimal  @db.Decimal(18, 2)
+  description   String?
+  transactionId String?  @unique
+  createdAt     DateTime @default(now())
+  member        Member   @relation(fields: [memberId], references: [id], onDelete: Restrict)
+}
+
+/// A department asks for something; Accounts or the General Manager decides.
+model Requisition {
+  id                String            @id @default(uuid())
+  requisitionNumber String            @unique
+  department        Department
+  title             String
+  purpose           String
+  priority          String            @default("normal")
+  totalAmount       Decimal           @db.Decimal(18, 2)
+  status            String            @default("pending")
+  requestedById     String
+  decidedById       String?
+  decidedAt         DateTime?
+  decisionComment   String?
+  fulfilledAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  requestedBy       User              @relation("RequisitionRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy         User?             @relation("RequisitionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  items             RequisitionItem[]
+  storeIssues       StoreIssue[]
+  purchaseOrders    PurchaseOrder[]
+
+  @@index([department, status, createdAt])
+}
+
+model RequisitionItem {
+  id            String      @id @default(uuid())
+  requisitionId String
+  description   String
+  quantity      Decimal     @db.Decimal(12, 2)
+  unit          String?
+  unitCost      Decimal     @default(0) @db.Decimal(12, 2)
+  total         Decimal     @db.Decimal(18, 2)
+  requisition   Requisition @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+}
+
+model Supplier {
+  id             String          @id @default(uuid())
+  name           String          @unique
+  contactPerson  String?
+  phone          String?
+  email          String?
+  address        String?
+  kraPin         String?
+  status         String          @default("active")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  purchaseOrders PurchaseOrder[]
+  receipts       StoreReceipt[]
+}
+
+model PurchaseOrder {
+  id            String              @id @default(uuid())
+  poNumber      String              @unique
+  date          DateTime            @db.Date
+  supplierId    String
+  requisitionId String?
+  totalAmount   Decimal             @db.Decimal(18, 2)
+  amountPaid    Decimal             @default(0) @db.Decimal(18, 2)
+  status        String              @default("ordered")
+  notes         String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  supplier      Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  requisition   Requisition?        @relation(fields: [requisitionId], references: [id], onDelete: SetNull)
+  items         PurchaseOrderItem[]
+  receipts      StoreReceipt[]
+
+  @@index([date, status])
+}
+
+model PurchaseOrderItem {
+  id               String        @id @default(uuid())
+  purchaseOrderId  String
+  storeItemId      String?
+  description      String
+  quantity         Decimal       @db.Decimal(12, 2)
+  quantityReceived Decimal       @default(0) @db.Decimal(12, 2)
+  unitPrice        Decimal       @db.Decimal(12, 2)
+  total            Decimal       @db.Decimal(18, 2)
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  storeItem        StoreItem?    @relation(fields: [storeItemId], references: [id], onDelete: SetNull)
 }
