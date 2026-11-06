@@ -1,14 +1,20 @@
-import AnimalFeed from "../models/AnimalFeed.js";
+import prisma from "../config/prisma.js";
+import { prismaData, serializePrismaRecord } from "../utils/prismaRecords.js";
+
+const fields = ["name", "feedType", "unit", "quantity", "reorderLevel", "unitCost", "supplierId", "status"];
+const relations = { supplier: "supplierId" };
+const include = { supplier: { select: { id: true, name: true } } };
 
 export const createAnimalFeed = async (req, res, next) => {
   try {
-    const feed = await AnimalFeed.create(req.body);
-    await feed.populate("supplier", "name");
-
+    const feed = await prisma.animalFeed.create({
+      data: prismaData(req.body, fields, relations),
+      include,
+    });
     res.status(201).json({
       success: true,
       message: "Animal feed record created",
-      data: feed,
+      data: serializePrismaRecord(feed),
     });
   } catch (error) {
     next(error);
@@ -17,14 +23,14 @@ export const createAnimalFeed = async (req, res, next) => {
 
 export const getAnimalFeeds = async (req, res, next) => {
   try {
-    const feeds = await AnimalFeed.find()
-      .populate("supplier", "name")
-      .sort({ createdAt: -1 });
-
+    const feeds = await prisma.animalFeed.findMany({
+      include,
+      orderBy: { createdAt: "desc" },
+    });
     res.json({
       success: true,
       count: feeds.length,
-      data: feeds,
+      data: serializePrismaRecord(feeds),
     });
   } catch (error) {
     next(error);
@@ -33,71 +39,55 @@ export const getAnimalFeeds = async (req, res, next) => {
 
 export const getAnimalFeedById = async (req, res, next) => {
   try {
-    const feed = await AnimalFeed.findById(req.params.id)
-      .populate("supplier", "name");
-
-    if (!feed) {
-      return res.status(404).json({
-        success: false,
-        message: "Animal feed record not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: feed,
+    const feed = await prisma.animalFeed.findUnique({
+      where: { id: req.params.id },
+      include,
     });
+    if (!feed) {
+      return res.status(404).json({ success: false, message: "Animal feed record not found" });
+    }
+    return res.json({ success: true, data: serializePrismaRecord(feed) });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const updateAnimalFeed = async (req, res, next) => {
   try {
-    const feed = await AnimalFeed.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      {
-        new: true,
-        runValidators: true,
-      }
-    ).populate("supplier", "name");
-
+    const feed = await prisma.animalFeed.update({
+      where: { id: req.params.id },
+      data: prismaData(req.body, fields, relations),
+      include,
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
+    });
     if (!feed) {
-      return res.status(404).json({
-        success: false,
-        message: "Animal feed record not found",
-      });
+      return res.status(404).json({ success: false, message: "Animal feed record not found" });
     }
-
-    res.json({
+    return res.json({
       success: true,
       message: "Animal feed updated",
-      data: feed,
+      data: serializePrismaRecord(feed),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const deleteAnimalFeed = async (req, res, next) => {
   try {
-    const feed = await AnimalFeed.findByIdAndDelete(
-      req.params.id
-    );
-
-    if (!feed) {
-      return res.status(404).json({
-        success: false,
-        message: "Animal feed record not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Animal feed deleted",
+    const feed = await prisma.animalFeed.delete({
+      where: { id: req.params.id },
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
     });
+    if (!feed) {
+      return res.status(404).json({ success: false, message: "Animal feed record not found" });
+    }
+    return res.json({ success: true, message: "Animal feed deleted" });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };

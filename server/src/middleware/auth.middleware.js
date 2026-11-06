@@ -1,41 +1,55 @@
 import jwt from "jsonwebtoken";
-import User from "../models/User.js";
+import prisma from "../config/prisma.js";
 
 export const protect = async (req, res, next) => {
+  const header = req.headers.authorization;
+
+  if (!header?.startsWith("Bearer ")) {
+    return res.status(401).json({
+      success: false,
+      message: "Authentication required",
+    });
+  }
+
+  const token = header.split(" ")[1];
+  let decoded;
+
   try {
-    const header = req.headers.authorization;
-
-    if (!header?.startsWith("Bearer ")) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
-    }
-
-    const token = header.split(" ")[1];
-
-    const decoded = jwt.verify(
+    decoded = jwt.verify(
       token,
       process.env.JWT_SECRET
     );
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid or expired token",
+    });
+  }
 
-    const user = await User.findById(decoded.id).select("-password");
+  try {
+    const userRecord = typeof decoded.id === "string"
+      ? await prisma.user.findUnique({ where: { id: decoded.id } })
+      : null;
 
-    if (!user || !user.isActive) {
+    if (!userRecord || !userRecord.isActive) {
       return res.status(401).json({
         success: false,
         message: "Invalid user",
       });
     }
 
-    req.user = user;
-
-    next();
+    const {
+      password,
+      emailVerificationCodeHash,
+      emailVerificationExpiresAt,
+      emailVerificationAttempts,
+      emailVerificationLastSentAt,
+      ...user
+    } = userRecord;
+    req.user = { ...user, _id: user.id };
+    return next();
   } catch (error) {
-    res.status(401).json({
-      success: false,
-      message: "Invalid or expired token",
-    });
+    return next(error);
   }
 };
 

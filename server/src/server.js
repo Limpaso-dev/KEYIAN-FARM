@@ -1,19 +1,45 @@
 import "dotenv/config";
 import app from "./app.js";
-import connectDB from "./config/db.js";
+import { connectPrisma, disconnectPrisma } from "./config/prisma.js";
 import { ensureCashAccount } from "./utils/ensureCashAccount.js";
 import { ensurePatientIdentityIndex } from "./utils/ensurePatientIdentityIndex.js";
 
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
-  await connectDB();
-  await ensureCashAccount();
-  await ensurePatientIdentityIndex();
+  await connectPrisma();
+  try {
+    await ensureCashAccount();
+    await ensurePatientIdentityIndex();
+  } catch (error) {
+    await disconnectPrisma();
+    throw error;
+  }
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`Keiyian ERP server running on port ${PORT}`);
   });
+
+  const shutdown = async () => {
+    try {
+      await new Promise((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+    } finally {
+      await disconnectPrisma();
+    }
+  };
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.once(signal, () => {
+      shutdown().catch((error) => {
+        console.error("Server shutdown failed:", error.message);
+        process.exitCode = 1;
+      });
+    });
+  }
 };
 
-startServer();
+startServer().catch((error) => {
+  console.error("Server startup failed:", error.message);
+  process.exitCode = 1;
+});

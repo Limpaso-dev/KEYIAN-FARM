@@ -1,124 +1,101 @@
-import Livestock from "../models/Livestock.js";
+import prisma from "../config/prisma.js";
+import { prismaData, serializePrismaRecord } from "../utils/prismaRecords.js";
 
-// CREATE
+const farmerSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  membershipNumber: true,
+  phone: true,
+};
+const livestockFields = [
+  "animalTag", "farmerId", "species", "breed", "sex", "dateOfBirth", "healthStatus", "status",
+];
+const livestockRelations = { farmer: "farmerId" };
+
 export const createLivestock = async (req, res, next) => {
   try {
-    const livestock = await Livestock.create(req.body);
-
-    const populatedLivestock = await Livestock.findById(
-      livestock._id
-    ).populate(
-      "farmer",
-      "firstName lastName membershipNumber phone"
-    );
-
+    const livestock = await prisma.livestock.create({
+      data: prismaData(req.body, livestockFields, livestockRelations, ["dateOfBirth"]),
+      include: { farmer: { select: farmerSelect } },
+    });
     res.status(201).json({
       success: true,
       message: "Livestock record created successfully",
-      livestock: populatedLivestock,
+      livestock: serializePrismaRecord(livestock),
     });
   } catch (error) {
     next(error);
   }
 };
 
-// GET ALL
 export const getLivestock = async (req, res, next) => {
   try {
-    const livestock = await Livestock.find()
-      .populate(
-        "farmer",
-        "firstName lastName membershipNumber phone"
-      )
-      .sort({ createdAt: -1 });
-
+    const livestock = await prisma.livestock.findMany({
+      include: { farmer: { select: farmerSelect } },
+      orderBy: { createdAt: "desc" },
+    });
     res.status(200).json({
       success: true,
       count: livestock.length,
-      livestock,
+      livestock: serializePrismaRecord(livestock),
     });
   } catch (error) {
     next(error);
   }
 };
 
-// GET ONE
 export const getLivestockById = async (req, res, next) => {
   try {
-    const livestock = await Livestock.findById(
-      req.params.id
-    ).populate(
-      "farmer",
-      "firstName lastName membershipNumber phone"
-    );
-
-    if (!livestock) {
-      return res.status(404).json({
-        success: false,
-        message: "Livestock record not found",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      livestock,
+    const livestock = await prisma.livestock.findUnique({
+      where: { id: req.params.id },
+      include: { farmer: { select: farmerSelect } },
     });
+    if (!livestock) {
+      return res.status(404).json({ success: false, message: "Livestock record not found" });
+    }
+    return res.status(200).json({ success: true, livestock: serializePrismaRecord(livestock) });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// UPDATE
 export const updateLivestock = async (req, res, next) => {
   try {
-    const livestock = await Livestock.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      {
-        new: true,
-        runValidators: true,
-      }
-    ).populate(
-      "farmer",
-      "firstName lastName membershipNumber phone"
-    );
-
+    const livestock = await prisma.livestock.update({
+      where: { id: req.params.id },
+      data: prismaData(req.body, livestockFields, livestockRelations, ["dateOfBirth"]),
+      include: { farmer: { select: farmerSelect } },
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
+    });
     if (!livestock) {
-      return res.status(404).json({
-        success: false,
-        message: "Livestock record not found",
-      });
+      return res.status(404).json({ success: false, message: "Livestock record not found" });
     }
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Livestock updated successfully",
-      livestock,
+      livestock: serializePrismaRecord(livestock),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// DELETE
 export const deleteLivestock = async (req, res, next) => {
   try {
-    const livestock = await Livestock.findByIdAndDelete(
-      req.params.id
-    );
-
-    if (!livestock) {
-      return res.status(404).json({
-        success: false,
-        message: "Livestock record not found",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Livestock deleted successfully",
+    const livestock = await prisma.livestock.delete({
+      where: { id: req.params.id },
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
     });
+    if (!livestock) {
+      return res.status(404).json({ success: false, message: "Livestock record not found" });
+    }
+    return res.status(200).json({ success: true, message: "Livestock deleted successfully" });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };

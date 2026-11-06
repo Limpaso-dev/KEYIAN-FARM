@@ -1,164 +1,118 @@
-import MilkCollection from "../models/MilkCollection.js";
+import prisma from "../config/prisma.js";
+import { prismaData, serializePrismaRecord } from "../utils/prismaRecords.js";
 
-// CREATE
+const farmerSelect = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  membershipNumber: true,
+  phone: true,
+};
+const collectionFields = [
+  "farmerId",
+  "collectionCentre",
+  "collectionDate",
+  "quantityLitres",
+  "pricePerLitre",
+  "totalAmount",
+  "status",
+];
+const collectionRelations = { farmer: "farmerId" };
+
 export const createMilkCollection = async (req, res, next) => {
   try {
-    const {
-      quantityLitres,
-      pricePerLitre,
-    } = req.body;
-
-    const payload = {
-      ...req.body,
-    };
-
-    if (
-      quantityLitres !== undefined &&
-      pricePerLitre !== undefined
-    ) {
-      payload.totalAmount =
-        Number(quantityLitres) * Number(pricePerLitre);
+    const data = prismaData(req.body, collectionFields, collectionRelations, ["collectionDate"]);
+    if (req.body.quantityLitres !== undefined && req.body.pricePerLitre !== undefined) {
+      data.totalAmount = Number(req.body.quantityLitres) * Number(req.body.pricePerLitre);
     }
-
-    const collection = await MilkCollection.create(payload);
-
-    const populatedCollection =
-      await MilkCollection.findById(collection._id).populate(
-        "farmer",
-        "firstName lastName membershipNumber phone"
-      );
-
+    const collection = await prisma.milkCollection.create({
+      data,
+      include: { farmer: { select: farmerSelect } },
+    });
     res.status(201).json({
       success: true,
       message: "Milk collection recorded successfully",
-      milkCollection: populatedCollection,
+      milkCollection: serializePrismaRecord(collection),
     });
   } catch (error) {
     next(error);
   }
 };
 
-// GET ALL
 export const getMilkCollections = async (req, res, next) => {
   try {
-    const collections = await MilkCollection.find()
-      .populate(
-        "farmer",
-        "firstName lastName membershipNumber phone"
-      )
-      .sort({ collectionDate: -1 });
-
+    const collections = await prisma.milkCollection.findMany({
+      include: { farmer: { select: farmerSelect } },
+      orderBy: { collectionDate: "desc" },
+    });
     res.status(200).json({
       success: true,
       count: collections.length,
-      milkCollections: collections,
+      milkCollections: serializePrismaRecord(collections),
     });
   } catch (error) {
     next(error);
   }
 };
 
-// GET ONE
-export const getMilkCollectionById = async (
-  req,
-  res,
-  next
-) => {
+export const getMilkCollectionById = async (req, res, next) => {
   try {
-    const collection =
-      await MilkCollection.findById(req.params.id).populate(
-        "farmer",
-        "firstName lastName membershipNumber phone"
-      );
-
+    const collection = await prisma.milkCollection.findUnique({
+      where: { id: req.params.id },
+      include: { farmer: { select: farmerSelect } },
+    });
     if (!collection) {
-      return res.status(404).json({
-        success: false,
-        message: "Milk collection record not found",
-      });
+      return res.status(404).json({ success: false, message: "Milk collection record not found" });
     }
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      milkCollection: collection,
+      milkCollection: serializePrismaRecord(collection),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// UPDATE
-export const updateMilkCollection = async (
-  req,
-  res,
-  next
-) => {
+export const updateMilkCollection = async (req, res, next) => {
   try {
-    const payload = {
-      ...req.body,
-    };
-
-    if (
-      payload.quantityLitres !== undefined &&
-      payload.pricePerLitre !== undefined
-    ) {
-      payload.totalAmount =
-        Number(payload.quantityLitres) *
-        Number(payload.pricePerLitre);
+    const data = prismaData(req.body, collectionFields, collectionRelations, ["collectionDate"]);
+    if (req.body.quantityLitres !== undefined && req.body.pricePerLitre !== undefined) {
+      data.totalAmount = Number(req.body.quantityLitres) * Number(req.body.pricePerLitre);
     }
-
-    const collection =
-      await MilkCollection.findByIdAndUpdate(
-        req.params.id,
-        payload,
-        {
-          new: true,
-          runValidators: true,
-        }
-      ).populate(
-        "farmer",
-        "firstName lastName membershipNumber phone"
-      );
-
+    const collection = await prisma.milkCollection.update({
+      where: { id: req.params.id },
+      data,
+      include: { farmer: { select: farmerSelect } },
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
+    });
     if (!collection) {
-      return res.status(404).json({
-        success: false,
-        message: "Milk collection record not found",
-      });
+      return res.status(404).json({ success: false, message: "Milk collection record not found" });
     }
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Milk collection updated successfully",
-      milkCollection: collection,
+      milkCollection: serializePrismaRecord(collection),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// DELETE
-export const deleteMilkCollection = async (
-  req,
-  res,
-  next
-) => {
+export const deleteMilkCollection = async (req, res, next) => {
   try {
-    const collection =
-      await MilkCollection.findByIdAndDelete(req.params.id);
-
-    if (!collection) {
-      return res.status(404).json({
-        success: false,
-        message: "Milk collection record not found",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      message: "Milk collection deleted successfully",
+    const collection = await prisma.milkCollection.delete({
+      where: { id: req.params.id },
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
     });
+    if (!collection) {
+      return res.status(404).json({ success: false, message: "Milk collection record not found" });
+    }
+    return res.status(200).json({ success: true, message: "Milk collection deleted successfully" });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };

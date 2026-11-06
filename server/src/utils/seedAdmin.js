@@ -1,53 +1,39 @@
-import dotenv from "dotenv";
+import "dotenv/config";
 import bcrypt from "bcryptjs";
-import mongoose from "mongoose";
-
-import User from "../models/User.js";
-import connectDB from "../config/db.js";
-
-dotenv.config();
+import prisma, { disconnectPrisma } from "../config/prisma.js";
 
 const seedAdmin = async () => {
+  const email = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.SEED_ADMIN_PASSWORD;
+
+  if (!email || !password) {
+    throw new Error("SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD must be set");
+  }
+
   try {
-    await connectDB();
-
-    const email = "admin@keiyian.co.ke";
-    const password = "Admin@12345";
-
-    const existingUser = await User.findOne({ email });
-
-    if (existingUser) {
-      console.log("Admin account already exists.");
-      process.exit(0);
-    }
-
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const admin = await User.create({
-      name: "Keiyian System Administrator",
-      email,
-      password: hashedPassword,
-      role: "super_admin",
-      department: "Administration",
-      isActive: true,
+    const admin = await prisma.user.upsert({
+      where: { email },
+      update: {},
+      create: {
+        name: process.env.SEED_ADMIN_NAME?.trim() || "Keiyian System Administrator",
+        email,
+        password: hashedPassword,
+        role: "super_admin",
+        department: "Administration",
+        isActive: true,
+        emailVerified: true,
+      },
     });
 
-    console.log("=================================");
-    console.log("Super Admin created successfully");
-    console.log("=================================");
-    console.log(`Email: ${admin.email}`);
-    console.log(`Password: ${password}`);
-    console.log("Role: super_admin");
-    console.log("=================================");
-
-    await mongoose.connection.close();
-    process.exit(0);
-  } catch (error) {
-    console.error("Failed to create admin:", error.message);
-
-    await mongoose.connection.close();
-    process.exit(1);
+    console.log(`Super administrator ${admin.email} is ready.`);
+  } finally {
+    await disconnectPrisma();
   }
 };
 
-seedAdmin();
+seedAdmin().catch((error) => {
+  console.error("Failed to create administrator:", error.message);
+  process.exitCode = 1;
+});

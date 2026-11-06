@@ -1,24 +1,43 @@
-import Account from "../models/Account.js";
+import prisma from "../config/prisma.js";
 
-const cashAccountNames = [/^cash on hand$/i, /^cash drawer$/i];
+const cashAccountNames = ["Cash on Hand", "Cash Drawer"];
 
-export const ensureCashAccount = async () => {
-  const existing = await Account.findOne({ accountName: { $in: cashAccountNames }, accountType: "asset" }).sort({ status: 1 });
+export const ensureCashAccount = async () => prisma.$transaction(async (transaction) => {
+  const existing = await transaction.account.findFirst({
+    where: {
+      accountName: { in: cashAccountNames, mode: "insensitive" },
+      accountType: "asset",
+    },
+    orderBy: { status: "asc" },
+  });
+
   if (existing) {
-    if (existing.accountType !== "asset") {
-      throw new Error(`Account ${existing.accountName} must be an asset account to receive cash payments`);
-    }
     if (existing.status !== "active") {
-      existing.status = "active";
-      await existing.save();
+      return transaction.account.update({
+        where: { id: existing.id },
+        data: { status: "active" },
+      });
     }
     return existing;
   }
-  if (await Account.exists({ accountName: { $in: cashAccountNames } })) {
-    throw new Error("Cash on Hand or Cash Drawer already exists as a non-asset account; correct its account type before continuing");
+
+  const anyCashAccount = await transaction.account.findFirst({
+    where: { accountName: { in: cashAccountNames, mode: "insensitive" } },
+  });
+  if (anyCashAccount) {
+    throw new Error(
+      "Cash on Hand or Cash Drawer already exists as a non-asset account; correct its account type before continuing",
+    );
   }
 
-  const usedCodes = new Set(await Account.distinct("accountCode", { accountCode: { $regex: /^1\d{3}$/ } }));
+  const usedCodes = new Set(
+    (await transaction.account.findMany({
+      where: { accountCode: { startsWith: "1" } },
+      select: { accountCode: true },
+    }))
+      .map(({ accountCode }) => accountCode)
+      .filter((accountCode) => /^1\d{3}$/.test(accountCode)),
+  );
   let accountCode;
   for (let code = 1000; code <= 1999; code += 1) {
     if (!usedCodes.has(String(code))) {
@@ -26,13 +45,17 @@ export const ensureCashAccount = async () => {
       break;
     }
   }
-  if (!accountCode) throw new Error("No unused asset account code is available in the 1000-1999 range");
+  if (!accountCode) {
+    throw new Error("No unused asset account code is available in the 1000-1999 range");
+  }
 
-  return Account.create({
-    accountCode,
-    accountName: "Cash on Hand",
-    accountType: "asset",
-    openingBalance: 0,
-    status: "active",
+  return transaction.account.create({
+    data: {
+      accountCode,
+      accountName: "Cash on Hand",
+      accountType: "asset",
+      openingBalance: 0,
+      status: "active",
+    },
   });
-};
+}, { isolationLevel: "Serializable" });

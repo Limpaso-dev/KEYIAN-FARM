@@ -1,18 +1,20 @@
-import WorkflowPolicy from "../models/WorkflowPolicy.js";
+import prisma from "../config/prisma.js";
 
 export const isWorkflowAdmin = (role) => ["admin", "super_admin"].includes(role);
 export const userDepartment = (user) => (user.department || user.role || "").trim();
 
 export const getApprovalSteps = async ({ workflowType, department, amount }) => {
-  const policies = await WorkflowPolicy.find({
-    workflowType,
-    department: department.toLowerCase(),
-    isActive: true,
-  }).sort({ minAmount: -1 });
-  const policy = policies.find((candidate) =>
-    amount >= candidate.minAmount &&
-    (candidate.maxAmount == null || amount <= candidate.maxAmount)
-  );
+  const policies = await prisma.workflowPolicy.findMany({
+    where: {
+      workflowType,
+      department: department.toLowerCase(),
+      isActive: true,
+      minAmount: { lte: amount },
+      OR: [{ maxAmount: null }, { maxAmount: { gte: amount } }],
+    },
+    orderBy: { minAmount: "desc" },
+  });
+  const policy = policies[0];
   if (!policy) {
     const error = new Error(`No active ${workflowType.replaceAll("_", " ")} approval policy covers ${department} requests of this amount`);
     error.status = 409;
@@ -20,7 +22,7 @@ export const getApprovalSteps = async ({ workflowType, department, amount }) => 
     throw error;
   }
   return {
-    policyId: policy._id,
+    policyId: policy.id,
     steps: policy.steps.map(({ label, approverRole }) => ({
       label,
       approverRole,
@@ -43,7 +45,7 @@ export const applyWorkflowDecision = (record, user, decision, comment = "") => {
     error.status = 403;
     throw error;
   }
-  if (String(record.requestedBy || record.submittedBy || record.createdBy) === String(user._id)) {
+  if (String(record.requestedById || record.submittedById || record.createdById || record.requestedBy || record.submittedBy || record.createdBy) === String(user.id || user._id)) {
     const error = new Error("You cannot approve your own submission");
     error.status = 403;
     throw error;

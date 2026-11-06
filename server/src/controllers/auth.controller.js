@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import jwt from "jsonwebtoken";
-import User from "../models/User.js";
+import prisma from "../config/prisma.js";
 import {
   isEmailConfigured,
   sendVerificationEmail,
@@ -19,6 +19,11 @@ const HMIS_ROLE_DEPARTMENTS = {
   cashier: "finance",
   radiology: "radiology",
 };
+const USER_ROLES = [
+  "super_admin", "admin", "manager", "receptionist", "cashier", "radiology",
+  "pharmacy", "finance", "hr", "procurement", "stores", "livestock", "dairy",
+  "laboratory", "doctor", "nurse", "pharmacist", "sales", "farm_officer", "staff",
+];
 
 const normalizeEmail = (email) => email.trim().toLowerCase();
 
@@ -36,7 +41,7 @@ const hashVerificationCode = (userId, code) =>
 
 const setVerificationCode = (user) => {
   const code = makeVerificationCode();
-  user.emailVerificationCodeHash = hashVerificationCode(user._id, code);
+  user.emailVerificationCodeHash = hashVerificationCode(user.id, code);
   user.emailVerificationExpiresAt = new Date(Date.now() + VERIFICATION_EXPIRY_MS);
   user.emailVerificationAttempts = 0;
   user.emailVerificationLastSentAt = new Date();
@@ -45,7 +50,7 @@ const setVerificationCode = (user) => {
 
 const codeMatches = (user, code) => {
   const expectedHash = Buffer.from(user.emailVerificationCodeHash || "", "hex");
-  const providedHash = Buffer.from(hashVerificationCode(user._id, code), "hex");
+  const providedHash = Buffer.from(hashVerificationCode(user.id, code), "hex");
   return expectedHash.length === providedHash.length &&
     timingSafeEqual(expectedHash, providedHash);
 };
@@ -68,7 +73,7 @@ const generateToken = (id) => {
  * user data to the frontend.
  */
 const sanitizeUser = (user) => {
-  const userObject = user.toObject();
+  const userObject = { ...user, _id: user.id };
 
   delete userObject.password;
   delete userObject.emailVerificationCodeHash;
@@ -96,9 +101,9 @@ export const login = async (req, res, next) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    const user = await User.findOne({
-      email: normalizedEmail,
-    }).select("+password");
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
 
     if (!user) {
       return res.status(401).json({
@@ -126,7 +131,7 @@ export const login = async (req, res, next) => {
       });
     }
 
-    const token = generateToken(user._id);
+    const token = generateToken(user.id);
 
     return res.status(200).json({
       success: true,
@@ -192,8 +197,7 @@ export const createUser = async (req, res, next) => {
       });
     }
 
-    const validRoles = User.schema.path("role").enumValues;
-    if (role && !validRoles.includes(role)) {
+    if (role && !USER_ROLES.includes(role)) {
       return res.status(400).json({
         success: false,
         message: "Invalid user role",
@@ -221,9 +225,7 @@ export const createUser = async (req, res, next) => {
 
     const normalizedEmail = normalizeEmail(email);
 
-    const existingUser = await User.findOne({
-      email: normalizedEmail,
-    });
+    const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
 
     if (existingUser) {
       return res.status(409).json({
@@ -232,18 +234,18 @@ export const createUser = async (req, res, next) => {
       });
     }
 
-    const user = new User({
-      name: name.trim(),
-      email: normalizedEmail,
-      phone: phone?.trim(),
-      password: await bcrypt.hash(password, 12),
-      role: role || "staff",
-      department: requiredDepartment || department?.trim().toLowerCase(),
-      isActive: true,
-      emailVerified: true,
+    const user = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: normalizedEmail,
+        phone: phone?.trim(),
+        password: await bcrypt.hash(password, 12),
+        role: role || "staff",
+        department: requiredDepartment || department?.trim().toLowerCase(),
+        isActive: true,
+        emailVerified: true,
+      },
     });
-
-    await user.save();
 
     return res.status(201).json({
       success: true,
@@ -271,9 +273,9 @@ export const verifyUserEmail = async (req, res, next) => {
       });
     }
 
-    const user = await User.findOne({ email: normalizeEmail(email) }).select(
-      "+emailVerificationCodeHash +emailVerificationExpiresAt +emailVerificationAttempts"
-    );
+    const user = await prisma.user.findUnique({
+      where: { email: normalizeEmail(email) },
+    });
 
     if (!user || user.emailVerified || !user.emailVerificationCodeHash) {
       return res.status(400).json({
@@ -297,21 +299,27 @@ export const verifyUserEmail = async (req, res, next) => {
     }
 
     if (!codeMatches(user, code)) {
-      user.emailVerificationAttempts += 1;
-      await user.save();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerificationAttempts: user.emailVerificationAttempts + 1 },
+      });
       return res.status(400).json({
         success: false,
         message: "The verification code is invalid or expired",
       });
     }
 
-    user.password = await bcrypt.hash(password, 12);
-    user.emailVerified = true;
-    user.set("emailVerificationCodeHash", undefined);
-    user.set("emailVerificationExpiresAt", undefined);
-    user.set("emailVerificationAttempts", undefined);
-    user.set("emailVerificationLastSentAt", undefined);
-    await user.save();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: await bcrypt.hash(password, 12),
+        emailVerified: true,
+        emailVerificationCodeHash: null,
+        emailVerificationExpiresAt: null,
+        emailVerificationAttempts: 0,
+        emailVerificationLastSentAt: null,
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -339,10 +347,9 @@ export const requestVerificationCode = async (req, res, next) => {
       });
     }
 
-    const user = await User.findOne({
-      email: normalizeEmail(email),
-      emailVerified: false,
-    }).select("+emailVerificationLastSentAt");
+    const user = await prisma.user.findFirst({
+      where: { email: normalizeEmail(email), emailVerified: false },
+    });
 
     if (
       user &&
@@ -350,7 +357,15 @@ export const requestVerificationCode = async (req, res, next) => {
         VERIFICATION_RESEND_DELAY_MS
     ) {
       const code = setVerificationCode(user);
-      await user.save();
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          emailVerificationCodeHash: user.emailVerificationCodeHash,
+          emailVerificationExpiresAt: user.emailVerificationExpiresAt,
+          emailVerificationAttempts: user.emailVerificationAttempts,
+          emailVerificationLastSentAt: user.emailVerificationLastSentAt,
+        },
+      });
       try {
         await sendVerificationEmail({ to: user.email, name: user.name, code });
       } catch (error) {
@@ -369,9 +384,9 @@ export const requestVerificationCode = async (req, res, next) => {
 
 export const resendUserVerification = async (req, res, next) => {
   try {
-    const user = await User.findById(req.params.id).select(
-      "+emailVerificationLastSentAt"
-    );
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+    });
 
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
@@ -404,7 +419,15 @@ export const resendUserVerification = async (req, res, next) => {
     }
 
     const code = setVerificationCode(user);
-    await user.save();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        emailVerificationCodeHash: user.emailVerificationCodeHash,
+        emailVerificationExpiresAt: user.emailVerificationExpiresAt,
+        emailVerificationAttempts: user.emailVerificationAttempts,
+        emailVerificationLastSentAt: user.emailVerificationLastSentAt,
+      },
+    });
     await sendVerificationEmail({ to: user.email, name: user.name, code });
 
     return res.status(200).json({
@@ -422,17 +445,15 @@ export const resendUserVerification = async (req, res, next) => {
 
 export const getUsers = async (req, res, next) => {
   try {
-    const filter = req.user.role === "super_admin"
-      ? {}
-      : { role: { $ne: "super_admin" } };
-    const users = await User.find(filter)
-      .select("-password")
-      .sort({ createdAt: -1 });
+    const users = await prisma.user.findMany({
+      where: req.user.role === "super_admin" ? {} : { role: { not: "super_admin" } },
+      orderBy: { createdAt: "desc" },
+    });
 
     return res.status(200).json({
       success: true,
       count: users.length,
-      data: users,
+      data: users.map(sanitizeUser),
     });
   } catch (error) {
     next(error);
@@ -441,7 +462,7 @@ export const getUsers = async (req, res, next) => {
 
 export const updateUser = async (req, res, next) => {
   try {
-    const user = await User.findById(req.params.id).select("+password");
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
 
     if (!user) {
       return res.status(404).json({
@@ -450,7 +471,7 @@ export const updateUser = async (req, res, next) => {
       });
     }
 
-    const isSelf = user._id.toString() === req.user._id.toString();
+    const isSelf = user.id === req.user.id;
     let emailChanged = false;
     if (["admin", "super_admin"].includes(user.role) && req.user.role !== "super_admin") {
       return res.status(403).json({
@@ -494,9 +515,8 @@ export const updateUser = async (req, res, next) => {
         });
       }
       const email = normalizeEmail(req.body.email);
-      const duplicate = await User.findOne({
-        email,
-        _id: { $ne: user._id },
+      const duplicate = await prisma.user.findFirst({
+        where: { email, id: { not: user.id } },
       });
       if (duplicate) {
         return res.status(409).json({
@@ -536,8 +556,7 @@ export const updateUser = async (req, res, next) => {
       user.department = req.body.department.trim();
     }
     if (req.body.role !== undefined) {
-      const validRoles = User.schema.path("role").enumValues;
-      if (!validRoles.includes(req.body.role)) {
+      if (!USER_ROLES.includes(req.body.role)) {
         return res.status(400).json({
           success: false,
           message: "Invalid user role",
@@ -579,14 +598,30 @@ export const updateUser = async (req, res, next) => {
     }
 
     const verificationCode = emailChanged ? setVerificationCode(user) : null;
-    await user.save();
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        department: user.department,
+        isActive: user.isActive,
+        password: user.password,
+        emailVerified: user.emailVerified,
+        emailVerificationCodeHash: user.emailVerificationCodeHash,
+        emailVerificationExpiresAt: user.emailVerificationExpiresAt,
+        emailVerificationAttempts: user.emailVerificationAttempts,
+        emailVerificationLastSentAt: user.emailVerificationLastSentAt,
+      },
+    });
 
     let emailSent = null;
     if (emailChanged) {
       try {
         await sendVerificationEmail({
-          to: user.email,
-          name: user.name,
+          to: updatedUser.email,
+          name: updatedUser.name,
           code: verificationCode,
         });
         emailSent = true;
@@ -604,7 +639,7 @@ export const updateUser = async (req, res, next) => {
           ? "Email updated. The user must verify the new address before signing in."
           : "Email updated but verification email could not be sent. Check SMTP settings and resend the code."
         : "User updated successfully",
-      user: sanitizeUser(user),
+      user: sanitizeUser(updatedUser),
     });
   } catch (error) {
     next(error);

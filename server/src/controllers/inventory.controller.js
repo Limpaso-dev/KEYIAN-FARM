@@ -1,13 +1,15 @@
-import Inventory from "../models/Inventory.js";
+import prisma from "../config/prisma.js";
+import { prismaData, serializePrismaRecord } from "../utils/prismaRecords.js";
+
+const fields = ["itemCode", "name", "category", "unit", "quantity", "reorderLevel", "unitCost", "location", "status"];
 
 export const createInventory = async (req, res, next) => {
   try {
-    const item = await Inventory.create(req.body);
-
+    const item = await prisma.inventory.create({ data: prismaData(req.body, fields) });
     res.status(201).json({
       success: true,
       message: "Inventory item created",
-      data: item,
+      data: serializePrismaRecord(item),
     });
   } catch (error) {
     next(error);
@@ -16,13 +18,11 @@ export const createInventory = async (req, res, next) => {
 
 export const getInventory = async (req, res, next) => {
   try {
-    const items = await Inventory.find()
-      .sort({ createdAt: -1 });
-
+    const items = await prisma.inventory.findMany({ orderBy: { createdAt: "desc" } });
     res.json({
       success: true,
       count: items.length,
-      data: items,
+      data: serializePrismaRecord(items),
     });
   } catch (error) {
     next(error);
@@ -31,70 +31,51 @@ export const getInventory = async (req, res, next) => {
 
 export const getInventoryById = async (req, res, next) => {
   try {
-    const item = await Inventory.findById(req.params.id);
-
+    const item = await prisma.inventory.findUnique({ where: { id: req.params.id } });
     if (!item) {
-      return res.status(404).json({
-        success: false,
-        message: "Inventory item not found",
-      });
+      return res.status(404).json({ success: false, message: "Inventory item not found" });
     }
-
-    res.json({
-      success: true,
-      data: item,
-    });
+    return res.json({ success: true, data: serializePrismaRecord(item) });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const updateInventory = async (req, res, next) => {
   try {
-    const item = await Inventory.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
-
+    const item = await prisma.inventory.update({
+      where: { id: req.params.id },
+      data: prismaData(req.body, fields),
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
+    });
     if (!item) {
-      return res.status(404).json({
-        success: false,
-        message: "Inventory item not found",
-      });
+      return res.status(404).json({ success: false, message: "Inventory item not found" });
     }
-
-    res.json({
+    return res.json({
       success: true,
       message: "Inventory item updated",
-      data: item,
+      data: serializePrismaRecord(item),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const deleteInventory = async (req, res, next) => {
   try {
-    const item = await Inventory.findByIdAndDelete(
-      req.params.id
-    );
-
-    if (!item) {
-      return res.status(404).json({
-        success: false,
-        message: "Inventory item not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Inventory item deleted",
+    const item = await prisma.inventory.delete({
+      where: { id: req.params.id },
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
     });
+    if (!item) {
+      return res.status(404).json({ success: false, message: "Inventory item not found" });
+    }
+    return res.json({ success: true, message: "Inventory item deleted" });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };

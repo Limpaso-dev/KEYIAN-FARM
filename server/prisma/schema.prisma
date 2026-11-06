@@ -1,0 +1,1023 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                          String               @id @default(uuid())
+  name                        String
+  email                       String               @unique
+  phone                       String?
+  password                    String
+  role                        String
+  department                  String?
+  isActive                    Boolean              @default(true)
+  emailVerified               Boolean              @default(true)
+  emailVerificationCodeHash   String?
+  emailVerificationExpiresAt  DateTime?
+  emailVerificationAttempts   Int                  @default(0)
+  emailVerificationLastSentAt DateTime?
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+  auditLogs                   AuditLog[]
+  milkTests                   MilkTest[]
+  visits                      MedicalVisit[]       @relation("VisitClinician")
+  patientsDeleted             Patient[]            @relation("PatientDeletedBy")
+  patientsVoided              Patient[]            @relation("PatientVoidedBy")
+  visitsDeleted               MedicalVisit[]       @relation("VisitDeletedBy")
+  visitsVoided                MedicalVisit[]       @relation("VisitVoidedBy")
+  labResultsPerformed         MedicalLabResult[]   @relation("LabPerformedBy")
+  labResultsDeleted           MedicalLabResult[]   @relation("LabDeletedBy")
+  labResultsVoided            MedicalLabResult[]   @relation("LabVoidedBy")
+  prescriptions               Prescription[]       @relation("PrescriptionAuthor")
+  prescriptionsDeleted        Prescription[]       @relation("PrescriptionDeletedBy")
+  prescriptionsVoided         Prescription[]       @relation("PrescriptionVoidedBy")
+  billsCreated                MedicalBill[]        @relation("BillCreatedBy")
+  billsDeleted                MedicalBill[]        @relation("BillDeletedBy")
+  billsVoided                 MedicalBill[]        @relation("BillVoidedBy")
+  medicalBillPaymentsReceived MedicalBillPayment[] @relation("MedicalBillPaymentReceivedBy")
+  purchaseRequestsCreated     PurchaseRequest[]    @relation("PurchaseRequestCreatedBy")
+  purchaseOrdersRequested     PurchaseOrder[]      @relation("PurchaseOrderRequestedBy")
+  purchaseOrdersApproved      PurchaseOrder[]      @relation("PurchaseOrderApprovedBy")
+  goodsReceiptsReceived       GoodsReceipt[]       @relation("GoodsReceiptReceivedBy")
+  goodsReceiptsReleased       GoodsReceipt[]       @relation("GoodsReceiptReleasedBy")
+  supplierInvoicesSubmitted   SupplierInvoice[]    @relation("SupplierInvoiceSubmittedBy")
+  supplierPaymentsRequested   SupplierPayment[]    @relation("SupplierPaymentRequestedBy")
+  transactionsCreated         Transaction[]        @relation("TransactionCreatedBy")
+  workflowPoliciesCreated     WorkflowPolicy[]     @relation("WorkflowPolicyCreatedBy")
+  rentPaymentsRecorded        RentPayment[]        @relation("RentPaymentRecordedBy")
+  salePaymentsRecorded        SalePayment[]        @relation("SalePaymentRecordedBy")
+  salesCreated                Sale[]               @relation("SaleCreatedBy")
+
+  @@index([role, isActive])
+}
+
+model Farmer {
+  id               String           @id @default(uuid())
+  membershipNumber String           @unique
+  firstName        String
+  lastName         String
+  nationalId       String?          @unique
+  phone            String
+  email            String?
+  address          String?
+  farmLocation     String?
+  membershipStatus String           @default("active")
+  shares           Decimal          @default(0) @db.Decimal(18, 2)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  milkCollections  MilkCollection[]
+  livestock        Livestock[]
+  teaFarms         TeaFarm[]
+  sugarcaneFarms   SugarcaneFarm[]
+  patient          Patient?
+
+  @@index([lastName, firstName])
+  @@index([membershipStatus])
+}
+
+model MilkCollection {
+  id               String     @id @default(uuid())
+  farmerId         String
+  collectionCentre String
+  collectionDate   DateTime
+  quantityLitres   Decimal    @db.Decimal(18, 3)
+  pricePerLitre    Decimal    @db.Decimal(18, 4)
+  totalAmount      Decimal    @db.Decimal(18, 2)
+  status           String     @default("accepted")
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  farmer           Farmer     @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+  tests            MilkTest[]
+
+  @@index([farmerId, collectionDate])
+  @@index([collectionDate, status])
+}
+
+model MilkTest {
+  id                String         @id @default(uuid())
+  milkCollectionId  String
+  sampleNumber      String         @unique
+  fatPercentage     Float?
+  proteinPercentage Float?
+  snfPercentage     Float?
+  acidity           Float?
+  temperature       Float?
+  result            String         @default("pending")
+  testedById        String?
+  testedAt          DateTime?
+  remarks           String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  milkCollection    MilkCollection @relation(fields: [milkCollectionId], references: [id], onDelete: Restrict)
+  testedBy          User?          @relation(fields: [testedById], references: [id], onDelete: SetNull)
+
+  @@index([milkCollectionId])
+}
+
+model Livestock {
+  id           String    @id @default(uuid())
+  animalTag    String    @unique
+  farmerId     String
+  species      String
+  breed        String?
+  sex          String?
+  dateOfBirth  DateTime?
+  healthStatus String    @default("healthy")
+  status       String    @default("active")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  farmer       Farmer    @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+
+  @@index([farmerId, status])
+}
+
+model MilkValueAddition {
+  id              String    @id @default(uuid())
+  productName     String
+  batchNumber     String    @unique
+  inputMilkLitres Decimal   @db.Decimal(18, 3)
+  outputQuantity  Decimal   @db.Decimal(18, 3)
+  unit            String
+  productionDate  DateTime
+  expiryDate      DateTime?
+  status          String    @default("processing")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([productionDate, status])
+}
+
+model AnimalFeed {
+  id           String    @id @default(uuid())
+  name         String
+  feedType     String?
+  unit         String
+  quantity     Decimal   @default(0) @db.Decimal(18, 3)
+  reorderLevel Decimal   @default(0) @db.Decimal(18, 3)
+  unitCost     Decimal   @default(0) @db.Decimal(18, 2)
+  supplierId   String?
+  status       String    @default("active")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  supplier     Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  @@index([name])
+  @@index([supplierId])
+}
+
+model TeaFarm {
+  id                String                @id @default(uuid())
+  farmerId          String
+  farmName          String?
+  location          String?
+  acreage           Decimal               @db.Decimal(18, 3)
+  variety           String?
+  plantingDate      DateTime?
+  status            String                @default("active")
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  farmer            Farmer                @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+  productionRecords TeaProductionRecord[]
+
+  @@index([farmerId, status])
+}
+
+model TeaProductionRecord {
+  id         String    @id @default(uuid())
+  farmId     String
+  date       DateTime?
+  quantityKg Decimal?  @db.Decimal(18, 3)
+  grade      String?
+  createdAt  DateTime  @default(now())
+  farm       TeaFarm   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  @@index([farmId, date])
+}
+
+model SugarcaneFarm {
+  id                  String                   @id @default(uuid())
+  farmerId            String
+  farmName            String?
+  location            String?
+  acreage             Decimal                  @db.Decimal(18, 3)
+  variety             String?
+  plantingDate        DateTime?
+  expectedHarvestDate DateTime?
+  status              String                   @default("active")
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  farmer              Farmer                   @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+  harvestRecords      SugarcaneHarvestRecord[]
+
+  @@index([farmerId, status])
+}
+
+model SugarcaneHarvestRecord {
+  id             String        @id @default(uuid())
+  farmId         String
+  harvestDate    DateTime?
+  quantityTonnes Decimal?      @db.Decimal(18, 3)
+  createdAt      DateTime      @default(now())
+  farm           SugarcaneFarm @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  @@index([farmId, harvestDate])
+}
+
+model Patient {
+  id                  String             @id @default(uuid())
+  patientNumber       String             @unique
+  farmerId            String?            @unique
+  firstName           String
+  lastName            String
+  dateOfBirth         DateTime?
+  estimatedAge        Int?
+  sex                 String?
+  phone               String?
+  address             String?
+  nationalId          String?            @unique
+  payer               String             @default("cash")
+  payerDetails        Json?
+  isTemporary         Boolean            @default(false)
+  temporaryId         String?
+  status              String             @default("registered")
+  consentAcknowledged Boolean            @default(false)
+  consentDate         DateTime?
+  nextOfKin           Json?
+  deletedAt           DateTime?
+  deletedById         String?
+  voidReason          String?
+  voidedById          String?
+  voidedAt            DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  farmer              Farmer?            @relation(fields: [farmerId], references: [id], onDelete: SetNull)
+  deletedBy           User?              @relation("PatientDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  voidedBy            User?              @relation("PatientVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+  visits              MedicalVisit[]
+  labResults          MedicalLabResult[]
+  prescriptions       Prescription[]
+  bills               MedicalBill[]
+
+  @@index([lastName, firstName])
+  @@index([phone])
+  @@index([deletedAt, status])
+}
+
+model MedicalVisit {
+  id                    String             @id @default(uuid())
+  patientId             String
+  clinicianId           String
+  visitNumber           String?            @unique
+  visitDate             DateTime           @default(now())
+  visitType             String             @default("outpatient")
+  chiefComplaint        String?
+  clinicalNotes         String?
+  triagePriority        String             @default("routine")
+  temperature           Float?
+  pulseRate             Float?
+  respiratoryRate       Float?
+  bloodPressure         String?
+  oxygenSaturation      Float?
+  weightKg              Float?
+  heightCm              Float?
+  painScore             Int?
+  triageNotes           String?
+  triageCompletedAt     DateTime?
+  assessment            String?
+  diagnosis             String?
+  differentialDiagnosis String?
+  labOrders             Json?
+  treatmentPlan         String?
+  disposition           String             @default("observe")
+  ward                  String?
+  bedNumber             String?
+  admissionReason       String?
+  admittedAt            DateTime?
+  dischargeSummary      String?
+  dischargePlan         String?
+  dischargedAt          DateTime?
+  transferTo            String?
+  followUpDate          DateTime?
+  referredTo            String?
+  status                String             @default("registered")
+  deletedAt             DateTime?
+  deletedById           String?
+  voidReason            String?
+  voidedById            String?
+  voidedAt              DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  patient               Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  clinician             User               @relation("VisitClinician", fields: [clinicianId], references: [id], onDelete: Restrict)
+  deletedBy             User?              @relation("VisitDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  voidedBy              User?              @relation("VisitVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+  labResults            MedicalLabResult[]
+  prescriptions         Prescription[]
+  bills                 MedicalBill[]
+
+  @@index([patientId, visitDate])
+  @@index([clinicianId, visitDate])
+  @@index([deletedAt, status])
+}
+
+model MedicalLabResult {
+  id             String        @id @default(uuid())
+  patientId      String
+  visitId        String?
+  testName       String
+  unitPrice      Decimal       @default(2000) @db.Decimal(18, 2)
+  result         String?
+  referenceRange String?
+  status         String        @default("ordered")
+  performedById  String?
+  performedAt    DateTime?
+  deletedAt      DateTime?
+  deletedById    String?
+  voidReason     String?
+  voidedById     String?
+  voidedAt       DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  patient        Patient       @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visit          MedicalVisit? @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  performedBy    User?         @relation("LabPerformedBy", fields: [performedById], references: [id], onDelete: SetNull)
+  deletedBy      User?         @relation("LabDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  voidedBy       User?         @relation("LabVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+
+  @@index([patientId, visitId])
+  @@index([deletedAt, status])
+}
+
+model Prescription {
+  id             String                   @id @default(uuid())
+  patientId      String
+  visitId        String?
+  prescribedById String?
+  status         String                   @default("prescribed")
+  deletedAt      DateTime?
+  deletedById    String?
+  voidReason     String?
+  voidedById     String?
+  voidedAt       DateTime?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  patient        Patient                  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visit          MedicalVisit?            @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  prescribedBy   User?                    @relation("PrescriptionAuthor", fields: [prescribedById], references: [id], onDelete: SetNull)
+  deletedBy      User?                    @relation("PrescriptionDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  voidedBy       User?                    @relation("PrescriptionVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+  medications    PrescriptionMedication[]
+
+  @@index([patientId, visitId])
+  @@index([deletedAt, status])
+}
+
+model PrescriptionMedication {
+  id             String       @id @default(uuid())
+  prescriptionId String
+  name           String?
+  dosage         String?
+  frequency      String?
+  duration       String?
+  quantity       Decimal?     @db.Decimal(18, 3)
+  unitPrice      Decimal      @default(250) @db.Decimal(18, 2)
+  instructions   String?
+  createdAt      DateTime     @default(now())
+  prescription   Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  @@index([prescriptionId])
+}
+
+model MedicalBill {
+  id            String               @id @default(uuid())
+  billNumber    String               @unique
+  patientId     String
+  visitId       String
+  department    String               @default("hmis")
+  createdById   String
+  totalAmount   Decimal              @db.Decimal(18, 2)
+  amountPaid    Decimal              @default(0) @db.Decimal(18, 2)
+  status        String               @default("pending_approval")
+  policyId      String?
+  approvalSteps Json?
+  currentStep   Int                  @default(0)
+  history       Json?
+  deletedAt     DateTime?
+  deletedById   String?
+  voidReason    String?
+  voidedById    String?
+  voidedAt      DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  patient       Patient              @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  visit         MedicalVisit         @relation(fields: [visitId], references: [id], onDelete: Restrict)
+  createdBy     User                 @relation("BillCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  policy        WorkflowPolicy?      @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  deletedBy     User?                @relation("BillDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  voidedBy      User?                @relation("BillVoidedBy", fields: [voidedById], references: [id], onDelete: SetNull)
+  payments      MedicalBillPayment[]
+  items         MedicalBillItem[]
+
+  @@index([patientId, visitId])
+  @@index([deletedAt, status])
+}
+
+model MedicalBillItem {
+  id          String      @id @default(uuid())
+  billId      String
+  description String
+  quantity    Decimal     @db.Decimal(18, 3)
+  unitPrice   Decimal     @db.Decimal(18, 2)
+  total       Decimal     @db.Decimal(18, 2)
+  createdAt   DateTime    @default(now())
+  bill        MedicalBill @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([billId])
+}
+
+model MedicalBillPayment {
+  id            String       @id @default(uuid())
+  billId        String
+  amount        Decimal?     @db.Decimal(18, 2)
+  method        String?
+  reference     String?
+  accountId     String?
+  receivedById  String?
+  receivedAt    DateTime     @default(now())
+  transactionId String?      @unique
+  createdAt     DateTime     @default(now())
+  bill          MedicalBill  @relation(fields: [billId], references: [id], onDelete: Restrict)
+  account       Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  receivedBy    User?        @relation("MedicalBillPaymentReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([billId, receivedAt])
+}
+
+model Account {
+  id                  String               @id @default(uuid())
+  accountCode         String               @unique
+  accountName         String
+  accountType         String
+  openingBalance      Decimal              @default(0) @db.Decimal(18, 2)
+  status              String               @default("active")
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  transactions        Transaction[]
+  supplierPayments    SupplierPayment[]
+  medicalBillPayments MedicalBillPayment[]
+
+  @@index([accountName, accountType])
+}
+
+model Transaction {
+  id                 String              @id @default(uuid())
+  reference          String              @unique
+  transactionDate    DateTime            @default(now())
+  type               String
+  accountId          String
+  amount             Decimal             @db.Decimal(18, 2)
+  description        String?
+  status             String              @default("pending")
+  department         String              @default("finance")
+  policyId           String?
+  approvalSteps      Json?
+  currentStep        Int                 @default(0)
+  history            Json?
+  createdById        String?
+  sourceType         String?
+  sourceId           String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  account            Account             @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  policy             WorkflowPolicy?     @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  createdBy          User?               @relation("TransactionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  supplierPayment    SupplierPayment?
+  medicalBillPayment MedicalBillPayment?
+
+  @@index([transactionDate, status])
+  @@index([sourceType, sourceId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  entity    String
+  entityId  String?
+  action    String
+  actorId   String?
+  actorRole String?
+  before    Json?
+  after     Json?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}
+
+model Employee {
+  id             String    @id @default(uuid())
+  employeeNumber String    @unique
+  firstName      String
+  lastName       String
+  phone          String?
+  email          String?
+  department     String?
+  position       String?
+  employmentType String?
+  dateJoined     DateTime?
+  salary         Decimal?  @db.Decimal(18, 2)
+  status         String    @default("active")
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  payroll        Payroll[]
+
+  @@index([lastName, firstName])
+  @@index([department, status])
+}
+
+model Payroll {
+  id          String   @id @default(uuid())
+  employeeId  String
+  period      String
+  basicSalary Decimal  @default(0) @db.Decimal(18, 2)
+  allowances  Decimal  @default(0) @db.Decimal(18, 2)
+  grossSalary Decimal  @default(0) @db.Decimal(18, 2)
+  deductions  Decimal  @default(0) @db.Decimal(18, 2)
+  netSalary   Decimal  @db.Decimal(18, 2)
+  status      String   @default("draft")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@index([period, status])
+}
+
+model Inventory {
+  id           String             @id @default(uuid())
+  itemCode     String             @unique
+  name         String
+  category     String?
+  unit         String?
+  quantity     Decimal            @default(0) @db.Decimal(18, 3)
+  reorderLevel Decimal            @default(0) @db.Decimal(18, 3)
+  unitCost     Decimal            @default(0) @db.Decimal(18, 2)
+  location     String?
+  status       String             @default("active")
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  receiptItems GoodsReceiptItem[]
+
+  @@index([name, category])
+  @@index([status])
+}
+
+model Supplier {
+  id             String            @id @default(uuid())
+  supplierCode   String            @unique
+  name           String
+  contactPerson  String?
+  phone          String?
+  email          String?
+  address        String?
+  taxNumber      String?
+  status         String            @default("active")
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  animalFeeds    AnimalFeed[]
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
+  invoices       SupplierInvoice[]
+  payments       SupplierPayment[]
+
+  @@index([name])
+  @@index([status])
+}
+
+model PurchaseRequest {
+  id            String                @id @default(uuid())
+  requestNumber String                @unique
+  department    String
+  title         String
+  reason        String
+  priority      String                @default("normal")
+  totalAmount   Decimal               @db.Decimal(18, 2)
+  createdById   String
+  status        String                @default("pending_approval")
+  policyId      String?
+  approvalSteps Json?
+  currentStep   Int                   @default(0)
+  history       Json?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  createdBy     User                  @relation("PurchaseRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  policy        WorkflowPolicy?       @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  purchaseOrder PurchaseOrder?
+  items         PurchaseRequestItem[]
+
+  @@index([department, status, createdAt])
+}
+
+model PurchaseRequestItem {
+  id                String          @id @default(uuid())
+  purchaseRequestId String
+  description       String
+  quantity          Decimal         @db.Decimal(18, 3)
+  unitPrice         Decimal         @db.Decimal(18, 2)
+  total             Decimal         @db.Decimal(18, 2)
+  createdAt         DateTime        @default(now())
+  purchaseRequest   PurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseRequestId])
+}
+
+model PurchaseOrder {
+  id                 String              @id @default(uuid())
+  poNumber           String              @unique
+  supplierId         String
+  purchaseRequestId  String?             @unique
+  quotationUrl       String?
+  department         String
+  policyId           String?
+  subtotal           Decimal?            @db.Decimal(18, 2)
+  tax                Decimal             @default(0) @db.Decimal(18, 2)
+  totalAmount        Decimal?            @db.Decimal(18, 2)
+  status             String              @default("draft")
+  requestedById      String?
+  approvalSteps      Json?
+  currentStep        Int                 @default(0)
+  history            Json?
+  receivedQuantities Json?
+  approvedById       String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  supplier           Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  purchaseRequest    PurchaseRequest?    @relation(fields: [purchaseRequestId], references: [id], onDelete: SetNull)
+  policy             WorkflowPolicy?     @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  requestedBy        User?               @relation("PurchaseOrderRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  approvedBy         User?               @relation("PurchaseOrderApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  goodsReceipts      GoodsReceipt[]
+  invoices           SupplierInvoice[]
+  items              PurchaseOrderItem[]
+
+  @@index([supplierId, status])
+  @@index([department, status, createdAt])
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  description     String?
+  quantity        Decimal?      @db.Decimal(18, 3)
+  unitPrice       Decimal?      @db.Decimal(18, 2)
+  total           Decimal?      @db.Decimal(18, 2)
+  createdAt       DateTime      @default(now())
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+}
+
+model GoodsReceipt {
+  id              String             @id @default(uuid())
+  receiptNumber   String             @unique
+  purchaseOrderId String
+  supplierId      String
+  receivedById    String
+  receivedAt      DateTime           @default(now())
+  status          String             @default("pending_store")
+  releasedById    String?
+  releasedAt      DateTime?
+  notes           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  purchaseOrder   PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  supplier        Supplier           @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  receivedBy      User               @relation("GoodsReceiptReceivedBy", fields: [receivedById], references: [id], onDelete: Restrict)
+  releasedBy      User?              @relation("GoodsReceiptReleasedBy", fields: [releasedById], references: [id], onDelete: SetNull)
+  items           GoodsReceiptItem[]
+  invoices        SupplierInvoice[]
+
+  @@index([purchaseOrderId, status])
+  @@index([supplierId, receivedAt])
+}
+
+model GoodsReceiptItem {
+  id               String       @id @default(uuid())
+  goodsReceiptId   String
+  poItemIndex      Int?
+  description      String
+  orderedQuantity  Decimal      @db.Decimal(18, 3)
+  receivedQuantity Decimal      @db.Decimal(18, 3)
+  acceptedQuantity Decimal      @db.Decimal(18, 3)
+  damagedQuantity  Decimal      @db.Decimal(18, 3)
+  inventoryItemId  String?
+  createdAt        DateTime     @default(now())
+  goodsReceipt     GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+  inventoryItem    Inventory?   @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@index([goodsReceiptId])
+}
+
+model WorkflowPolicy {
+  id               String            @id @default(uuid())
+  name             String
+  workflowType     String            @default("purchase_request")
+  department       String
+  minAmount        Decimal           @default(0) @db.Decimal(18, 2)
+  maxAmount        Decimal?          @db.Decimal(18, 2)
+  steps            Json
+  isActive         Boolean           @default(true)
+  createdById      String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  createdBy        User              @relation("WorkflowPolicyCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  purchaseRequests PurchaseRequest[]
+  purchaseOrders   PurchaseOrder[]
+  supplierInvoices SupplierInvoice[]
+  supplierPayments SupplierPayment[]
+  medicalBills     MedicalBill[]
+  transactions     Transaction[]
+
+  @@unique([workflowType, department, minAmount, maxAmount])
+  @@index([workflowType, department, isActive])
+}
+
+model SupplierInvoice {
+  id                    String                @id @default(uuid())
+  invoiceNumber         String
+  supplierId            String
+  purchaseOrderId       String
+  goodsReceiptId        String
+  submittedById         String
+  department            String
+  invoiceDate           DateTime              @default(now())
+  supportingDocumentUrl String?
+  totalAmount           Decimal               @db.Decimal(18, 2)
+  matchStatus           String
+  discrepancies         Json?
+  status                String                @default("pending_approval")
+  policyId              String?
+  approvalSteps         Json?
+  currentStep           Int                   @default(0)
+  history               Json?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  supplier              Supplier              @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  purchaseOrder         PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  goodsReceipt          GoodsReceipt          @relation(fields: [goodsReceiptId], references: [id], onDelete: Restrict)
+  submittedBy           User                  @relation("SupplierInvoiceSubmittedBy", fields: [submittedById], references: [id], onDelete: Restrict)
+  policy                WorkflowPolicy?       @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  payments              SupplierPayment[]
+  items                 SupplierInvoiceItem[]
+
+  @@unique([supplierId, invoiceNumber])
+  @@index([purchaseOrderId, status])
+  @@index([goodsReceiptId])
+}
+
+model SupplierInvoiceItem {
+  id                String          @id @default(uuid())
+  supplierInvoiceId String
+  description       String?
+  quantity          Decimal?        @db.Decimal(18, 3)
+  unitPrice         Decimal?        @db.Decimal(18, 2)
+  total             Decimal?        @db.Decimal(18, 2)
+  createdAt         DateTime        @default(now())
+  supplierInvoice   SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+
+  @@index([supplierInvoiceId])
+}
+
+model SupplierPayment {
+  id            String          @id @default(uuid())
+  paymentNumber String          @unique
+  invoiceId     String
+  supplierId    String
+  accountId     String
+  amount        Decimal         @db.Decimal(18, 2)
+  paymentMethod String
+  reference     String
+  paymentDate   DateTime        @default(now())
+  requestedById String
+  status        String          @default("pending_approval")
+  policyId      String?
+  approvalSteps Json?
+  currentStep   Int             @default(0)
+  history       Json?
+  transactionId String?         @unique
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  invoice       SupplierInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  supplier      Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  account       Account         @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  requestedBy   User            @relation("SupplierPaymentRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  policy        WorkflowPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  transaction   Transaction?    @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId, status])
+  @@index([supplierId, paymentDate])
+}
+
+model Property {
+  id           String         @id @default(uuid())
+  name         String
+  location     String?
+  propertyType String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  units        PropertyUnit[]
+  tenants      Tenant[]
+  leases       Lease[]
+  rentPayments RentPayment[]
+
+  @@index([name])
+}
+
+model PropertyUnit {
+  id          String   @id @default(uuid())
+  propertyId  String
+  unitNumber  String?
+  monthlyRent Decimal? @db.Decimal(18, 2)
+  status      String   @default("vacant")
+  createdAt   DateTime @default(now())
+  property    Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, status])
+}
+
+model Tenant {
+  id           String        @id @default(uuid())
+  name         String
+  phone        String?
+  email        String?
+  propertyId   String?
+  unitNumber   String?
+  leaseStart   DateTime?
+  leaseEnd     DateTime?
+  monthlyRent  Decimal?      @db.Decimal(18, 2)
+  status       String        @default("active")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  property     Property?     @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  leases       Lease[]
+  rentPayments RentPayment[]
+
+  @@index([propertyId, status])
+}
+
+model Lease {
+  id              String        @id @default(uuid())
+  tenantId        String
+  propertyId      String
+  unitNumber      String
+  leaseStart      DateTime
+  leaseEnd        DateTime
+  monthlyRent     Decimal       @db.Decimal(18, 2)
+  securityDeposit Decimal       @default(0) @db.Decimal(18, 2)
+  paymentDueDay   Int           @default(5)
+  status          String        @default("draft")
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  property        Property      @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  rentPayments    RentPayment[]
+
+  @@index([tenantId, status])
+  @@index([propertyId, unitNumber, status])
+}
+
+model RentPayment {
+  id            String   @id @default(uuid())
+  tenantId      String
+  leaseId       String
+  propertyId    String
+  unitNumber    String
+  amount        Decimal  @db.Decimal(18, 2)
+  paymentDate   DateTime @default(now())
+  paymentMethod String
+  reference     String   @unique
+  period        String
+  status        String   @default("confirmed")
+  notes         String?
+  recordedById  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lease         Lease    @relation(fields: [leaseId], references: [id], onDelete: Restrict)
+  property      Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+  recordedBy    User?    @relation("RentPaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, paymentDate])
+  @@index([leaseId, period])
+}
+
+model Customer {
+  id           String        @id @default(uuid())
+  customerCode String        @unique
+  name         String
+  phone        String?
+  email        String?
+  address      String?
+  taxNumber    String?
+  customerType String        @default("individual")
+  creditLimit  Decimal       @default(0) @db.Decimal(18, 2)
+  status       String        @default("active")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sales        Sale[]
+  payments     SalePayment[]
+
+  @@index([name])
+  @@index([status])
+}
+
+model Product {
+  id            String     @id @default(uuid())
+  name          String
+  category      String?
+  sku           String?    @unique
+  unit          String?
+  sellingPrice  Decimal?   @db.Decimal(18, 2)
+  stockQuantity Decimal    @default(0) @db.Decimal(18, 3)
+  status        String     @default("active")
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  saleItems     SaleItem[]
+
+  @@index([name, category])
+}
+
+model Sale {
+  id            String        @id @default(uuid())
+  invoiceNumber String        @unique
+  customerId    String
+  saleDate      DateTime      @default(now())
+  subtotal      Decimal       @default(0) @db.Decimal(18, 2)
+  discount      Decimal       @default(0) @db.Decimal(18, 2)
+  tax           Decimal       @default(0) @db.Decimal(18, 2)
+  totalAmount   Decimal       @db.Decimal(18, 2)
+  amountPaid    Decimal       @default(0) @db.Decimal(18, 2)
+  balanceDue    Decimal       @default(0) @db.Decimal(18, 2)
+  paymentStatus String        @default("unpaid")
+  paymentMethod String        @default("cash")
+  status        String        @default("draft")
+  notes         String?
+  createdById   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  customer      Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy     User?         @relation("SaleCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items         SaleItem[]
+  payments      SalePayment[]
+
+  @@index([customerId, saleDate])
+  @@index([saleDate, status])
+}
+
+model SaleItem {
+  id          String   @id @default(uuid())
+  saleId      String
+  productId   String
+  description String?
+  quantity    Decimal  @db.Decimal(18, 3)
+  unitPrice   Decimal  @db.Decimal(18, 2)
+  discount    Decimal  @default(0) @db.Decimal(18, 2)
+  tax         Decimal  @default(0) @db.Decimal(18, 2)
+  total       Decimal  @db.Decimal(18, 2)
+  createdAt   DateTime @default(now())
+  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model SalePayment {
+  id            String   @id @default(uuid())
+  saleId        String
+  customerId    String
+  amount        Decimal  @db.Decimal(18, 2)
+  paymentDate   DateTime @default(now())
+  paymentMethod String
+  reference     String   @unique
+  status        String   @default("confirmed")
+  notes         String?
+  recordedById  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  sale          Sale     @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  recordedBy    User?    @relation("SalePaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([saleId, paymentDate])
+  @@index([customerId, paymentDate])
+}

@@ -1,19 +1,19 @@
-import Account from "../models/Account.js";
-import Transaction from "../models/Transaction.js";
+import prisma from "../config/prisma.js";
 import { getApprovalSteps } from "../services/approvalWorkflow.service.js";
+import { prismaData, serializePrismaRecord } from "../utils/prismaRecords.js";
 
-// ===============================
-// ACCOUNTS
-// ===============================
+const accountFields = ["accountCode", "accountName", "accountType", "openingBalance", "status"];
+const transactionFields = ["reference", "transactionDate", "type", "accountId", "amount", "description"];
+const transactionRelations = { account: "accountId" };
+const accountInclude = { account: true };
 
 export const createAccount = async (req, res, next) => {
   try {
-    const account = await Account.create(req.body);
-
+    const account = await prisma.account.create({ data: prismaData(req.body, accountFields) });
     res.status(201).json({
       success: true,
       message: "Account created",
-      data: account,
+      data: serializePrismaRecord(account),
     });
   } catch (error) {
     next(error);
@@ -22,13 +22,11 @@ export const createAccount = async (req, res, next) => {
 
 export const getAccounts = async (req, res, next) => {
   try {
-    const accounts = await Account.find()
-      .sort({ createdAt: -1 });
-
+    const accounts = await prisma.account.findMany({ orderBy: { createdAt: "desc" } });
     res.json({
       success: true,
       count: accounts.length,
-      data: accounts,
+      data: serializePrismaRecord(accounts),
     });
   } catch (error) {
     next(error);
@@ -37,108 +35,111 @@ export const getAccounts = async (req, res, next) => {
 
 export const getAccountById = async (req, res, next) => {
   try {
-    const account = await Account.findById(req.params.id);
-
-    if (!account) {
-      return res.status(404).json({
-        success: false,
-        message: "Account not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: account,
-    });
+    const account = await prisma.account.findUnique({ where: { id: req.params.id } });
+    if (!account) return res.status(404).json({ success: false, message: "Account not found" });
+    return res.json({ success: true, data: serializePrismaRecord(account) });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const updateAccount = async (req, res, next) => {
   try {
-    const account = await Account.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
-
-    if (!account) {
-      return res.status(404).json({
-        success: false,
-        message: "Account not found",
-      });
-    }
-
-    res.json({
+    const account = await prisma.account.update({
+      where: { id: req.params.id },
+      data: prismaData(req.body, accountFields),
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
+    });
+    if (!account) return res.status(404).json({ success: false, message: "Account not found" });
+    return res.json({
       success: true,
       message: "Account updated",
-      data: account,
+      data: serializePrismaRecord(account),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const deleteAccount = async (req, res, next) => {
   try {
-    const account = await Account.findByIdAndDelete(
-      req.params.id
-    );
-
-    if (!account) {
-      return res.status(404).json({
-        success: false,
-        message: "Account not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Account deleted",
+    const account = await prisma.account.delete({
+      where: { id: req.params.id },
+    }).catch((error) => {
+      if (error.code === "P2025") return null;
+      throw error;
     });
+    if (!account) return res.status(404).json({ success: false, message: "Account not found" });
+    return res.json({ success: true, message: "Account deleted" });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-// ===============================
-// TRANSACTIONS
-// ===============================
-
 export const createTransaction = async (req, res, next) => {
   try {
-    const { reference, transactionDate, type, account: accountId, amount, description } = req.body;
-    const account = await Account.findOne({ _id: accountId, status: "active", accountType: "asset" });
-    if (!account) return res.status(400).json({ success: false, message: "Select an active finance account" });
-    const numericAmount = Number(amount);
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) return res.status(400).json({ success: false, message: "Transaction amount must be greater than zero" });
-    const { policyId, steps } = await getApprovalSteps({ workflowType: "finance_transaction", department: "finance", amount: numericAmount });
-    const transaction = await Transaction.create({ reference, transactionDate, type, account: account._id, amount: numericAmount, description, createdBy: req.user._id, status: "pending", policy: policyId, approvalSteps: steps, history: [{ action: "submitted", by: req.user._id }] });
+    const {
+      reference,
+      transactionDate,
+      type,
+      account: accountId,
+      amount,
+      description,
+    } = req.body;
+    const account = await prisma.account.findFirst({
+      where: { id: accountId, status: "active", accountType: "asset" },
+    });
+    if (!account) {
+      return res.status(400).json({ success: false, message: "Select an active finance account" });
+    }
 
-    res.status(201).json({
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({ success: false, message: "Transaction amount must be greater than zero" });
+    }
+    const { policyId, steps } = await getApprovalSteps({
+      workflowType: "finance_transaction",
+      department: "finance",
+      amount: numericAmount,
+    });
+    const transaction = await prisma.transaction.create({
+      data: {
+        reference,
+        transactionDate: transactionDate ? new Date(transactionDate) : new Date(),
+        type,
+        accountId: account.id,
+        amount: numericAmount,
+        description,
+        createdById: req.user.id,
+        status: "pending",
+        policyId,
+        approvalSteps: steps,
+        history: [{ action: "submitted", by: req.user.id, at: new Date().toISOString() }],
+      },
+      include: accountInclude,
+    });
+    return res.status(201).json({
       success: true,
       message: "Transaction recorded",
-      data: transaction,
+      data: serializePrismaRecord(transaction),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const getTransactions = async (req, res, next) => {
   try {
-    const transactions = await Transaction.find()
-      .populate("account")
-      .sort({ transactionDate: -1 });
-
+    const transactions = await prisma.transaction.findMany({
+      include: accountInclude,
+      orderBy: { transactionDate: "desc" },
+    });
     res.json({
       success: true,
       count: transactions.length,
-      data: transactions,
+      data: serializePrismaRecord(transactions),
     });
   } catch (error) {
     next(error);
@@ -147,75 +148,62 @@ export const getTransactions = async (req, res, next) => {
 
 export const getTransactionById = async (req, res, next) => {
   try {
-    const transaction =
-      await Transaction.findById(req.params.id)
-        .populate("account");
-
-    if (!transaction) {
-      return res.status(404).json({
-        success: false,
-        message: "Transaction not found",
-      });
-    }
-
-    res.json({
-      success: true,
-      data: transaction,
+    const transaction = await prisma.transaction.findUnique({
+      where: { id: req.params.id },
+      include: accountInclude,
     });
+    if (!transaction) {
+      return res.status(404).json({ success: false, message: "Transaction not found" });
+    }
+    return res.json({ success: true, data: serializePrismaRecord(transaction) });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const updateTransaction = async (req, res, next) => {
   try {
-    const transaction = await Transaction.findById(req.params.id);
-
-    if (!transaction) {
-      return res.status(404).json({
-        success: false,
-        message: "Transaction not found",
-      });
+    const existing = await prisma.transaction.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ success: false, message: "Transaction not found" });
+    if (existing.status === "posted") {
+      return res.status(409).json({ success: false, message: "Posted ledger transactions are immutable" });
+    }
+    if (Array.isArray(existing.history) && existing.history.length) {
+      return res.status(409).json({ success: false, message: "Submitted transactions must be revised through the workflow inbox" });
+    }
+    if (["approved", "posted"].includes(req.body.status)) {
+      return res.status(403).json({ success: false, message: "Only an approval workflow can approve or post a financial transaction" });
     }
 
-    if (transaction.status === "posted") return res.status(409).json({ success: false, message: "Posted ledger transactions are immutable" });
-    if (transaction.history?.length) return res.status(409).json({ success: false, message: "Submitted transactions must be revised through the workflow inbox" });
-    if (["approved", "posted"].includes(req.body.status)) return res.status(403).json({ success: false, message: "Only an approval workflow can approve or post a financial transaction" });
-    for (const field of ["reference", "transactionDate", "type", "account", "amount", "description"]) {
-      if (req.body[field] !== undefined) transaction[field] = req.body[field];
-    }
-    await transaction.save();
-
-    res.json({
+    const data = prismaData(req.body, transactionFields, transactionRelations, ["transactionDate"]);
+    const transaction = await prisma.transaction.update({
+      where: { id: existing.id },
+      data,
+      include: accountInclude,
+    });
+    return res.json({
       success: true,
       message: "Transaction updated",
-      data: transaction,
+      data: serializePrismaRecord(transaction),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const deleteTransaction = async (req, res, next) => {
   try {
-    const transaction = await Transaction.findById(req.params.id);
-
-    if (!transaction) {
-      return res.status(404).json({
-        success: false,
-        message: "Transaction not found",
-      });
+    const transaction = await prisma.transaction.findUnique({ where: { id: req.params.id } });
+    if (!transaction) return res.status(404).json({ success: false, message: "Transaction not found" });
+    if (transaction.status === "posted") {
+      return res.status(409).json({ success: false, message: "Posted ledger transactions cannot be deleted" });
     }
-
-    if (transaction.status === "posted") return res.status(409).json({ success: false, message: "Posted ledger transactions cannot be deleted" });
-    if (transaction.history?.length) return res.status(409).json({ success: false, message: "Submitted transactions are retained for audit" });
-    await transaction.deleteOne();
-
-    res.json({
-      success: true,
-      message: "Transaction deleted",
-    });
+    if (Array.isArray(transaction.history) && transaction.history.length) {
+      return res.status(409).json({ success: false, message: "Submitted transactions are retained for audit" });
+    }
+    await prisma.transaction.delete({ where: { id: transaction.id } });
+    return res.json({ success: true, message: "Transaction deleted" });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };

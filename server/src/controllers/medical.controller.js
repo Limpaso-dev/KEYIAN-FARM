@@ -1,10 +1,7 @@
-import Patient from "../models/Patient.js";
-import MedicalVisit from "../models/MedicalVisit.js";
-import MedicalBill from "../models/MedicalBill.js";
-import MedicalLabResult from "../models/MedicalLabResult.js";
-import Prescription from "../models/Prescription.js";
 import { randomInt } from "node:crypto";
-import { logAudit, softDeleteRecord } from "../utils/globalRules.js";
+import prisma from "../config/prisma.js";
+import { logAudit } from "../utils/globalRules.js";
+import { serializePrismaRecord } from "../utils/prismaRecords.js";
 import {
   findPossibleDuplicates,
   generatePatientNumber,
@@ -43,6 +40,43 @@ import {
 // PATIENTS
 // =====================================================
 
+const farmerSummary = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  membershipNumber: true,
+  phone: true,
+};
+const isNationalIdConflict = (error) =>
+  error.code === "P2002" && String(error.meta?.target || "").includes("nationalId");
+const relationId = (value) => value && typeof value === "object"
+  ? value.id || value._id
+  : value;
+
+const patientData = (payload, existing) => ({
+  patientNumber: payload.patientNumber || existing?.patientNumber || generatePatientNumber(),
+  farmerId: payload.farmer === undefined ? existing?.farmerId : payload.farmer,
+  firstName: payload.firstName,
+  lastName: payload.lastName,
+  dateOfBirth: payload.dateOfBirth
+    ? new Date(payload.dateOfBirth)
+    : existing?.dateOfBirth || null,
+  estimatedAge: payload.estimatedAge ?? existing?.estimatedAge ?? null,
+  sex: payload.sex,
+  phone: payload.phone,
+  address: payload.address,
+  nationalId: payload.nationalId === undefined
+    ? existing?.nationalId || null
+    : payload.nationalId || null,
+  payer: payload.payer,
+  payerDetails: payload.payerDetails,
+  isTemporary: payload.isTemporary,
+  temporaryId: payload.temporaryId || existing?.temporaryId || null,
+  consentAcknowledged: payload.consentAcknowledged,
+  consentDate: payload.consentAcknowledged ? new Date() : existing?.consentDate || null,
+  nextOfKin: payload.nextOfKin,
+});
+
 export const createPatient = async (req, res, next) => {
   try {
     const normalizedPayload = normalizePatientRegistration(req.body);
@@ -61,13 +95,16 @@ export const createPatient = async (req, res, next) => {
       });
     }
 
-    if (normalizedPayload.nationalId && await Patient.exists({ nationalId: normalizedPayload.nationalId })) {
+    if (normalizedPayload.nationalId && await prisma.patient.findFirst({
+      where: { nationalId: normalizedPayload.nationalId },
+      select: { id: true },
+    })) {
       return res.status(409).json({ success: false, message: "This National ID / Birth Certificate number is already registered to a patient" });
     }
 
-    const existingPatients = await Patient.find({
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    }).lean();
+    const existingPatients = serializePrismaRecord(await prisma.patient.findMany({
+      where: { deletedAt: null },
+    }));
 
     const duplicates = findPossibleDuplicates(existingPatients, normalizedPayload);
 
@@ -79,78 +116,79 @@ export const createPatient = async (req, res, next) => {
       });
     }
 
-    const patientPayload = {
-      ...normalizedPayload,
-      patientNumber: normalizedPayload.patientNumber || generatePatientNumber(),
-      consentDate: normalizedPayload.consentAcknowledged ? new Date() : undefined,
-    };
-
-    const patient = await Patient.create(patientPayload);
+    const patient = await prisma.patient.create({
+      data: patientData(normalizedPayload),
+    });
 
     await logAudit({
       actor: req.user,
       action: "create",
       entity: "Patient",
-      entityId: patient._id,
+      entityId: patient.id,
       before: null,
-      after: patient.toObject(),
+      after: serializePrismaRecord(patient),
       metadata: {
         ip: req.ip,
       },
     });
 
-    const populatedPatient = await Patient.findById(
-      patient._id
-    ).populate(
-      "farmer",
-      "firstName lastName membershipNumber phone"
-    );
+    const populatedPatient = await prisma.patient.findUnique({
+      where: { id: patient.id },
+      include: { farmer: { select: farmerSummary } },
+    });
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Patient created successfully",
-      data: populatedPatient,
+      data: serializePrismaRecord(populatedPatient),
     });
   } catch (error) {
-    if (error.code === 11000 && (error.keyPattern?.nationalId || error.keyValue?.nationalId !== undefined)) {
+    if (isNationalIdConflict(error)) {
       return res.status(409).json({ success: false, message: "This National ID / Birth Certificate number is already registered to a patient" });
     }
-    next(error);
+    return next(error);
   }
 };
 
 export const getPatients = async (req, res, next) => {
   try {
-    const patientQuery = Patient.find({
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    }).sort({ createdAt: -1 });
-    const patients = ["pharmacist", "pharmacy"].includes(req.user.role)
-      ? await patientQuery.select("firstName lastName patientNumber estimatedAge dateOfBirth sex status")
-      : await patientQuery.populate(
-        "farmer",
-        "firstName lastName membershipNumber phone"
-      );
+    const pharmacyRole = ["pharmacist", "pharmacy"].includes(req.user.role);
+    const patients = await prisma.patient.findMany({
+      where: { deletedAt: null },
+      ...(pharmacyRole
+        ? {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            patientNumber: true,
+            estimatedAge: true,
+            dateOfBirth: true,
+            sex: true,
+            status: true,
+          },
+        }
+        : { include: { farmer: { select: farmerSummary } } }),
+      orderBy: { createdAt: "desc" },
+    });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: patients.length,
-      data: patients,
+      data: serializePrismaRecord(patients),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const getPatientById = async (req, res, next) => {
   try {
     const isPharmacyRole = ["pharmacist", "pharmacy"].includes(req.user.role);
-    const patient = await Patient.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const patient = await prisma.patient.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+      ...(isPharmacyRole ? {} : { include: { farmer: { select: farmerSummary } } }),
     });
-    if (!isPharmacyRole) {
-      await patient?.populate("farmer", "firstName lastName membershipNumber phone");
-    }
 
     if (!patient) {
       return res.status(404).json({
@@ -160,39 +198,41 @@ export const getPatientById = async (req, res, next) => {
     }
 
     if (req.user.role === "receptionist") {
-      return res.status(200).json({ success: true, data: patient });
+      return res.status(200).json({ success: true, data: serializePrismaRecord(patient) });
     }
 
     const [visits, labResults, prescriptions] = await Promise.all([
-      MedicalVisit.find({
-        patient: patient._id,
-        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-      })
-        .populate("clinician", "name role department")
-        .sort({ visitDate: -1 })
-        .lean(),
-      isPharmacyRole ? Promise.resolve([]) : MedicalLabResult.find({
-        patient: patient._id,
-        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-      })
-        .populate("visit", "visitNumber visitDate")
-        .populate("performedBy", "name role department")
-        .sort({ createdAt: -1 })
-        .lean(),
-      Prescription.find({
-        patient: patient._id,
-        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-      })
-        .populate("visit", "visitNumber visitDate")
-        .populate("prescribedBy", "name role department")
-        .sort({ createdAt: -1 })
-        .lean(),
+      prisma.medicalVisit.findMany({
+        where: { patientId: patient.id, deletedAt: null },
+        include: { clinician: { select: { id: true, name: true, role: true, department: true } } },
+        orderBy: { visitDate: "desc" },
+      }),
+      isPharmacyRole ? Promise.resolve([]) : prisma.medicalLabResult.findMany({
+        where: { patientId: patient.id, deletedAt: null },
+        include: {
+          visit: { select: { id: true, visitNumber: true, visitDate: true } },
+          performedBy: { select: { id: true, name: true, role: true, department: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.prescription.findMany({
+        where: { patientId: patient.id, deletedAt: null },
+        include: {
+          visit: { select: { id: true, visitNumber: true, visitDate: true } },
+          prescribedBy: { select: { id: true, name: true, role: true, department: true } },
+          medications: true,
+        },
+        orderBy: { createdAt: "desc" },
+      }),
     ]);
+    const patientRecord = serializePrismaRecord(patient);
+    const visitRecords = serializePrismaRecord(visits);
+    const labRecords = serializePrismaRecord(labResults);
+    const prescriptionRecords = serializePrismaRecord(prescriptions);
 
     if (isPharmacyRole) {
-      const patientRecord = patient.toObject();
       const data = {
-        _id: patientRecord._id,
+        _id: patientRecord.id,
         firstName: patientRecord.firstName,
         lastName: patientRecord.lastName,
         patientNumber: patientRecord.patientNumber,
@@ -201,8 +241,8 @@ export const getPatientById = async (req, res, next) => {
         sex: patientRecord.sex,
         status: patientRecord.status,
         history: {
-          visits: visits.map((visit) => ({
-            _id: visit._id,
+          visits: visitRecords.map((visit) => ({
+            _id: visit.id,
             visitNumber: visit.visitNumber,
             visitDate: visit.visitDate,
             visitType: visit.visitType,
@@ -210,30 +250,29 @@ export const getPatientById = async (req, res, next) => {
             treatmentPlan: visit.treatmentPlan,
             clinician: visit.clinician,
           })),
-          prescriptions,
+          prescriptions: prescriptionRecords,
         },
       };
 
       return res.status(200).json({ success: true, data });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: {
-        ...patient.toObject(),
-        history: { visits, labResults, prescriptions },
+        ...patientRecord,
+        history: { visits: visitRecords, labResults: labRecords, prescriptions: prescriptionRecords },
       },
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const updatePatient = async (req, res, next) => {
   try {
-    const existingPatient = await Patient.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const existingPatient = await prisma.patient.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!existingPatient) {
@@ -252,16 +291,19 @@ export const updatePatient = async (req, res, next) => {
       });
     }
 
-    if (normalizedPayload.nationalId && await Patient.exists({ nationalId: normalizedPayload.nationalId, _id: { $ne: existingPatient._id } })) {
+    if (normalizedPayload.nationalId && await prisma.patient.findFirst({
+      where: { nationalId: normalizedPayload.nationalId, id: { not: existingPatient.id } },
+      select: { id: true },
+    })) {
       return res.status(409).json({ success: false, message: "This National ID / Birth Certificate number is already registered to another patient" });
     }
 
-    const patientLookup = await Patient.find({
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    }).lean();
+    const patientLookup = serializePrismaRecord(await prisma.patient.findMany({
+      where: { deletedAt: null },
+    }));
 
     const otherDuplicates = findPossibleDuplicates(
-      patientLookup.filter((patient) => patient._id.toString() !== req.params.id),
+      patientLookup.filter((patient) => patient.id !== req.params.id),
       normalizedPayload
     );
 
@@ -273,52 +315,41 @@ export const updatePatient = async (req, res, next) => {
       });
     }
 
-    const patient = await Patient.findByIdAndUpdate(
-      req.params.id,
-      {
-        ...normalizedPayload,
-        patientNumber: normalizedPayload.patientNumber || existingPatient.patientNumber,
-        consentDate: normalizedPayload.consentAcknowledged ? new Date() : existingPatient.consentDate,
-      },
-      {
-        new: true,
-        runValidators: true,
-      }
-    ).populate(
-      "farmer",
-      "firstName lastName membershipNumber phone"
-    );
+    const patient = await prisma.patient.update({
+      where: { id: req.params.id },
+      data: patientData(normalizedPayload, existingPatient),
+      include: { farmer: { select: farmerSummary } },
+    });
 
     await logAudit({
       actor: req.user,
       action: "update",
       entity: "Patient",
-      entityId: patient._id,
-      before: existingPatient.toObject(),
-      after: patient.toObject(),
+      entityId: patient.id,
+      before: serializePrismaRecord(existingPatient),
+      after: serializePrismaRecord(patient),
       metadata: {
         ip: req.ip,
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Patient updated successfully",
-      data: patient,
+      data: serializePrismaRecord(patient),
     });
   } catch (error) {
-    if (error.code === 11000 && (error.keyPattern?.nationalId || error.keyValue?.nationalId !== undefined)) {
+    if (isNationalIdConflict(error)) {
       return res.status(409).json({ success: false, message: "This National ID / Birth Certificate number is already registered to another patient" });
     }
-    next(error);
+    return next(error);
   }
 };
 
 export const deletePatient = async (req, res, next) => {
   try {
-    const patient = await Patient.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const patient = await prisma.patient.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!patient) {
@@ -328,41 +359,40 @@ export const deletePatient = async (req, res, next) => {
       });
     }
 
-    const softDeletedPatient = softDeleteRecord(patient.toObject(), {
-      actor: req.user,
-      reason: req.body?.reason || "Administrative void",
-      metadata: { ip: req.ip },
+    const now = new Date();
+    const reason = req.body?.reason || "Administrative void";
+    const updatedPatient = await prisma.patient.update({
+      where: { id: patient.id },
+      data: {
+        status: patient.status === "cancelled" ? "cancelled" : "voided",
+        deletedAt: now,
+        deletedById: req.user.id,
+        voidedAt: now,
+        voidedById: req.user.id,
+        voidReason: reason,
+      },
     });
-
-    const updatedPatient = await Patient.findByIdAndUpdate(
-      req.params.id,
-      softDeletedPatient,
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
 
     await logAudit({
       actor: req.user,
       action: "void",
       entity: "Patient",
-      entityId: patient._id,
-      before: patient.toObject(),
-      after: updatedPatient.toObject(),
+      entityId: patient.id,
+      before: serializePrismaRecord(patient),
+      after: serializePrismaRecord(updatedPatient),
       metadata: {
-        reason: req.body?.reason || "Administrative void",
+        reason,
         ip: req.ip,
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Patient voided successfully",
-      data: updatedPatient,
+      data: serializePrismaRecord(updatedPatient),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -373,6 +403,40 @@ export const deletePatient = async (req, res, next) => {
 const pickVisitFields = (source, fields) => Object.fromEntries(
   fields.filter((field) => source[field] !== undefined).map((field) => [field, source[field]])
 );
+
+const visitInclude = {
+  patient: true,
+  clinician: { select: { id: true, name: true, email: true, role: true, department: true } },
+};
+
+const visitFields = [
+  "patientId", "clinicianId", "visitNumber", "visitDate", "visitType",
+  "chiefComplaint", "clinicalNotes", "triagePriority", "temperature", "pulseRate",
+  "respiratoryRate", "bloodPressure", "oxygenSaturation", "weightKg", "heightCm",
+  "painScore", "triageNotes", "triageCompletedAt", "assessment", "diagnosis",
+  "differentialDiagnosis", "labOrders", "treatmentPlan", "disposition", "ward",
+  "bedNumber", "admissionReason", "admittedAt", "dischargeSummary", "dischargePlan",
+  "dischargedAt", "transferTo", "followUpDate", "referredTo", "status",
+];
+
+const visitData = (payload) => {
+  const data = {};
+  const aliases = { patient: "patientId", clinician: "clinicianId" };
+  for (const field of visitFields) {
+    const alias = Object.entries(aliases).find(([, target]) => target === field)?.[0];
+    const sourceField = alias && payload[alias] !== undefined
+      ? alias
+      : field;
+    if (payload[sourceField] === undefined) continue;
+    const value = payload[sourceField];
+    data[field] = [
+      "visitDate", "triageCompletedAt", "admittedAt", "dischargedAt", "followUpDate",
+    ].includes(field) && value !== null && !(value instanceof Date)
+      ? new Date(value)
+      : value;
+  }
+  return data;
+};
 
 const projectReceptionVisit = (visit) => {
   const record = visit?.toObject ? visit.toObject() : visit;
@@ -419,70 +483,76 @@ const projectNurseTriageVisit = (visit) => {
 
 const attachLabResultsToVisits = async (visits) => {
   if (!visits.length) return visits;
-  const visitIds = visits.map((visit) => visit._id);
-  const results = await MedicalLabResult.find({
-    visit: { $in: visitIds },
-    $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-  })
-    .populate("performedBy", "name role department")
-    .sort({ createdAt: -1 })
-    .lean();
+  const visitIds = visits.map((visit) => visit.id || visit._id);
+  const results = await prisma.medicalLabResult.findMany({
+    where: { visitId: { in: visitIds }, deletedAt: null },
+    include: { performedBy: { select: { id: true, name: true, role: true, department: true } } },
+    orderBy: { createdAt: "desc" },
+  });
   const resultsByVisit = new Map();
   results.forEach((result) => {
-    const key = String(result.visit);
-    resultsByVisit.set(key, [...(resultsByVisit.get(key) || []), result]);
+    const key = String(result.visitId);
+    resultsByVisit.set(key, [
+      ...(resultsByVisit.get(key) || []),
+      serializePrismaRecord(result),
+    ]);
   });
   return visits.map((visit) => ({
-    ...(visit.toObject ? visit.toObject() : visit),
-    labResults: resultsByVisit.get(String(visit._id)) || [],
+    ...serializePrismaRecord(visit),
+    labResults: resultsByVisit.get(String(visit.id || visit._id)) || [],
   }));
 };
 
 const areVisitLabOrdersComplete = async (visit) => {
   const orders = normalizeLabOrders(visit?.labOrders);
   if (!orders.length) return true;
-  const completedResults = await MedicalLabResult.find({
-    visit: visit._id,
-    status: "completed",
-    $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-  }).select("testName").lean();
+  const visitId = visit.id || visit._id;
+  const completedResults = await prisma.medicalLabResult.findMany({
+    where: { visitId, status: "completed", deletedAt: null },
+    select: { testName: true },
+  });
   const completedNames = new Set(completedResults.map((result) => String(result.testName).trim().toLowerCase()));
   return orders.every((order) => completedNames.has(order.toLowerCase()));
 };
 
 const countOutstandingLabTests = async () => {
-  const visits = await MedicalVisit.find({
-    labOrders: { $exists: true, $ne: [] },
-    status: { $nin: ["cancelled", "voided", "deceased"] },
-    $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-  }).select("_id labOrders").lean();
-  if (!visits.length) return 0;
-  const completed = await MedicalLabResult.find({
-    visit: { $in: visits.map((visit) => visit._id) },
-    status: "completed",
-    $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-  }).select("visit testName").lean();
+  const visits = await prisma.medicalVisit.findMany({
+    where: {
+      status: { notIn: ["cancelled", "voided", "deceased"] },
+      deletedAt: null,
+    },
+    select: { id: true, labOrders: true },
+  });
+  const visitsWithOrders = visits.filter((visit) => normalizeLabOrders(visit.labOrders).length > 0);
+  if (!visitsWithOrders.length) return 0;
+  const completed = await prisma.medicalLabResult.findMany({
+    where: { visitId: { in: visitsWithOrders.map((visit) => visit.id) }, status: "completed", deletedAt: null },
+    select: { visitId: true, testName: true },
+  });
   const completedByVisit = new Map();
   completed.forEach((result) => {
-    const key = String(result.visit);
+    const key = String(result.visitId);
     completedByVisit.set(key, [...(completedByVisit.get(key) || []), result.testName]);
   });
-  return visits.reduce((total, visit) => total + getOutstandingLabOrders(visit.labOrders, completedByVisit.get(String(visit._id)) || []).length, 0);
+  return visitsWithOrders.reduce((total, visit) =>
+    total + getOutstandingLabOrders(visit.labOrders, completedByVisit.get(String(visit.id)) || []).length, 0);
 };
 
 const returnVisitToDoctorWhenLabsComplete = async (visitId, actor) => {
-  const visit = await MedicalVisit.findById(visitId);
+  const visit = await prisma.medicalVisit.findUnique({ where: { id: visitId } });
   if (!visit || visit.status !== "awaiting_results" || !(await areVisitLabOrdersComplete(visit))) return;
-  const before = visit.toObject();
-  visit.status = "waiting_for_doctor";
-  await visit.save();
+  const before = serializePrismaRecord(visit);
+  const updatedVisit = await prisma.medicalVisit.update({
+    where: { id: visit.id },
+    data: { status: "waiting_for_doctor" },
+  });
   await logAudit({
     actor,
     action: "lab_results_completed",
     entity: "MedicalVisit",
-    entityId: visit._id,
+    entityId: visit.id,
     before,
-    after: visit.toObject(),
+    after: serializePrismaRecord(updatedVisit),
   });
 };
 
@@ -537,48 +607,63 @@ export const createMedicalVisit = async (
       payload.clinician = req.user._id;
     }
 
-    const visit = await MedicalVisit.create(payload);
-
-    if (role === "receptionist") {
-      if (consultationFee > 0) {
-        await MedicalBill.create({
-          billNumber: `HB-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}-${randomInt(100, 1000)}`,
-          patient: visit.patient, visit: visit._id, department: "reception", createdBy: req.user._id,
-          items: [{ description: "Consultation fee", quantity: 1, unitPrice: consultationFee, total: consultationFee }],
-          totalAmount: consultationFee, status: "approved",
-          history: [{ action: "sent_to_cashier", by: req.user._id, comment: "Reception consultation fee sent to cashier" }],
+    if (!payload.clinician && req.user?.id) payload.clinician = req.user.id;
+    const visit = await prisma.$transaction(async (transaction) => {
+      const createdVisit = await transaction.medicalVisit.create({
+        data: visitData(payload),
+        include: visitInclude,
+      });
+      if (role === "receptionist" && consultationFee > 0) {
+        await transaction.medicalBill.create({
+          data: {
+            billNumber: `HB-${new Date().getFullYear()}-${Date.now().toString().slice(-7)}-${randomInt(100, 1000)}`,
+            patientId: createdVisit.patientId,
+            visitId: createdVisit.id,
+            department: "reception",
+            createdById: req.user.id,
+            items: {
+              create: [{
+                description: "Consultation fee",
+                quantity: 1,
+                unitPrice: consultationFee,
+                total: consultationFee,
+              }],
+            },
+            totalAmount: consultationFee,
+            status: "approved",
+            history: [{
+              action: "sent_to_cashier",
+              by: req.user.id,
+              at: new Date().toISOString(),
+              comment: "Reception consultation fee sent to cashier",
+            }],
+          },
         });
       }
-    }
+      return createdVisit;
+    }, { isolationLevel: "Serializable" });
 
     await logAudit({
       actor: req.user,
       action: "create",
       entity: "MedicalVisit",
-      entityId: visit._id,
+      entityId: visit.id,
       before: null,
-      after: visit.toObject(),
+      after: serializePrismaRecord(visit),
       metadata: {
         ip: req.ip,
       },
     });
 
-    const populatedVisit = await MedicalVisit.findById(
-      visit._id
-    )
-      .populate("patient")
-      .populate(
-        "clinician",
-        "name email role department"
-      );
-
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Medical visit created successfully",
-      data: role === "receptionist" ? projectReceptionVisit(populatedVisit) : populatedVisit,
+      data: role === "receptionist"
+        ? projectReceptionVisit(serializePrismaRecord(visit))
+        : serializePrismaRecord(visit),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -588,33 +673,32 @@ export const getMedicalVisits = async (
   next
 ) => {
   try {
-    const filter = {
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    };
-    if (req.user.role === "nurse") filter.status = { $in: ["waiting_for_triage", "in_triage"] };
-    if (req.user.role === "doctor") filter.status = { $in: ["waiting_for_doctor", "in_consultation"] };
-    const visits = await MedicalVisit.find(filter)
-      .populate("patient")
-      .populate(
-        "clinician",
-        "name email role department"
-      )
-      .sort({ visitDate: -1, createdAt: -1 });
+    const where = { deletedAt: null };
+    if (req.user.role === "nurse") where.status = { in: ["waiting_for_triage", "in_triage"] };
+    if (req.user.role === "doctor") where.status = { in: ["waiting_for_doctor", "in_consultation"] };
+    const visits = await prisma.medicalVisit.findMany({
+      where,
+      include: visitInclude,
+      orderBy: [{ visitDate: "desc" }, { createdAt: "desc" }],
+    });
 
-    const doctorVisits = req.user.role === "doctor" ? await attachLabResultsToVisits(visits) : visits;
+    const serializedVisits = serializePrismaRecord(visits);
+    const doctorVisits = req.user.role === "doctor"
+      ? await attachLabResultsToVisits(serializedVisits)
+      : serializedVisits;
     const data = req.user.role === "receptionist"
-      ? visits.map(projectReceptionVisit)
+      ? serializedVisits.map(projectReceptionVisit)
       : req.user.role === "nurse"
-        ? visits.map(projectNurseTriageVisit)
+        ? serializedVisits.map(projectNurseTriageVisit)
         : doctorVisits;
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: data.length,
       data,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -624,18 +708,10 @@ export const getMedicalVisitById = async (
   next
 ) => {
   try {
-    const filter = {
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    };
-    if (req.user.role === "nurse") filter.status = { $in: ["waiting_for_triage", "in_triage"] };
-    if (req.user.role === "doctor") filter.status = { $in: ["waiting_for_doctor", "in_consultation"] };
-    const visit = await MedicalVisit.findOne(filter)
-      .populate("patient")
-      .populate(
-        "clinician",
-        "name email role department"
-      );
+    const where = { id: req.params.id, deletedAt: null };
+    if (req.user.role === "nurse") where.status = { in: ["waiting_for_triage", "in_triage"] };
+    if (req.user.role === "doctor") where.status = { in: ["waiting_for_doctor", "in_consultation"] };
+    const visit = await prisma.medicalVisit.findFirst({ where, include: visitInclude });
 
     if (!visit) {
       return res.status(404).json({
@@ -644,20 +720,21 @@ export const getMedicalVisitById = async (
       });
     }
 
+    const serializedVisit = serializePrismaRecord(visit);
     const data = req.user.role === "doctor"
-      ? (await attachLabResultsToVisits([visit]))[0]
+      ? (await attachLabResultsToVisits([serializedVisit]))[0]
       : req.user.role === "receptionist"
-        ? projectReceptionVisit(visit)
+        ? projectReceptionVisit(serializedVisit)
         : req.user.role === "nurse"
-          ? projectNurseTriageVisit(visit)
-          : visit;
+          ? projectNurseTriageVisit(serializedVisit)
+          : serializedVisit;
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -667,9 +744,8 @@ export const updateMedicalVisit = async (
   next
 ) => {
   try {
-    const existingVisit = await MedicalVisit.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const existingVisit = await prisma.medicalVisit.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!existingVisit) {
@@ -707,7 +783,7 @@ export const updateMedicalVisit = async (
       : normalizeLabOrders(visitInput.labOrders);
     const diagnosis = visitInput?.diagnosis ?? existingVisit.diagnosis;
     const visitForLabCheck = {
-      ...existingVisit.toObject(),
+      ...serializePrismaRecord(existingVisit),
       labOrders: labOrders ?? existingVisit.labOrders,
     };
     const hasPendingLabOrders = role === "doctor" && !await areVisitLabOrdersComplete(visitForLabCheck);
@@ -726,21 +802,20 @@ export const updateMedicalVisit = async (
     if (role === "doctor" && nextStatus === "awaiting_results" && !labOrders?.length && !existingVisit.labOrders?.length) {
       return res.status(400).json({ success: false, message: "Order at least one laboratory test before sending the visit to the lab" });
     }
-    if (role === "doctor" && nextStatus === "awaiting_pharmacy" && !await Prescription.exists({
-      visit: existingVisit._id,
-      status: "prescribed",
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    })) {
+    if (role === "doctor" && nextStatus === "awaiting_pharmacy" &&
+        !await prisma.prescription.findFirst({
+          where: { visitId: existingVisit.id, status: "prescribed", deletedAt: null },
+          select: { id: true },
+        })) {
       return res.status(400).json({ success: false, message: "Create a prescription before sending the patient to Pharmacy" });
     }
     if (role === "doctor" && nextStatus === "awaiting_billing") {
-      if (!(await areVisitLabOrdersComplete({ ...existingVisit.toObject(), labOrders: labOrders ?? existingVisit.labOrders }))) {
+      if (!(await areVisitLabOrdersComplete({ ...serializePrismaRecord(existingVisit), labOrders: labOrders ?? existingVisit.labOrders }))) {
         return res.status(409).json({ success: false, message: "Wait for all ordered laboratory results before billing" });
       }
-      if (await Prescription.exists({
-        visit: existingVisit._id,
-        status: "prescribed",
-        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      if (await prisma.prescription.findFirst({
+        where: { visitId: existingVisit.id, status: "prescribed", deletedAt: null },
+        select: { id: true },
       })) {
         return res.status(409).json({ success: false, message: "Send prescribed medication through Pharmacy before billing" });
       }
@@ -749,7 +824,7 @@ export const updateMedicalVisit = async (
     const payload = role === "doctor"
       ? {
           ...visitInput,
-          clinician: req.user._id,
+          clinician: req.user.id,
           ...(labOrders === undefined ? {} : { labOrders }),
           status: nextStatus,
           ...normalizeConsultationSummary(visitInput),
@@ -768,39 +843,33 @@ export const updateMedicalVisit = async (
             status: normalizeVisitStatus(visitInput?.status ?? existingVisit.status),
           };
 
-    const visit = await MedicalVisit.findByIdAndUpdate(
-      req.params.id,
-      payload,
-      {
-        new: true,
-        runValidators: true,
-      }
-    )
-      .populate("patient")
-      .populate(
-        "clinician",
-        "name email role department"
-      );
+    const visit = await prisma.medicalVisit.update({
+      where: { id: req.params.id },
+      data: visitData(payload),
+      include: visitInclude,
+    });
 
     await logAudit({
       actor: req.user,
       action: "update",
       entity: "MedicalVisit",
-      entityId: visit._id,
-      before: existingVisit.toObject(),
-      after: visit.toObject(),
+      entityId: visit.id,
+      before: serializePrismaRecord(existingVisit),
+      after: serializePrismaRecord(visit),
       metadata: {
         ip: req.ip,
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Medical visit updated successfully",
-      data: role === "receptionist" ? projectReceptionVisit(visit) : visit,
+      data: role === "receptionist"
+        ? projectReceptionVisit(serializePrismaRecord(visit))
+        : serializePrismaRecord(visit),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -810,9 +879,8 @@ export const deleteMedicalVisit = async (
   next
 ) => {
   try {
-    const visit = await MedicalVisit.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const visit = await prisma.medicalVisit.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!visit) {
@@ -822,49 +890,47 @@ export const deleteMedicalVisit = async (
       });
     }
 
-    const softDeletedVisit = softDeleteRecord(visit.toObject(), {
-      actor: req.user,
-      reason: req.body?.reason || "Administrative void",
-      metadata: { ip: req.ip },
+    const reason = req.body?.reason || "Administrative void";
+    const now = new Date();
+    const updatedVisit = await prisma.medicalVisit.update({
+      where: { id: visit.id },
+      data: {
+        status: visit.status === "cancelled" ? "cancelled" : "voided",
+        deletedAt: now,
+        deletedById: req.user.id,
+        voidedAt: now,
+        voidedById: req.user.id,
+        voidReason: reason,
+      },
     });
-
-    const updatedVisit = await MedicalVisit.findByIdAndUpdate(
-      req.params.id,
-      softDeletedVisit,
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
 
     await logAudit({
       actor: req.user,
       action: "void",
       entity: "MedicalVisit",
-      entityId: visit._id,
-      before: visit.toObject(),
-      after: updatedVisit.toObject(),
+      entityId: visit.id,
+      before: serializePrismaRecord(visit),
+      after: serializePrismaRecord(updatedVisit),
       metadata: {
-        reason: req.body?.reason || "Administrative void",
+        reason,
         ip: req.ip,
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Medical visit voided successfully",
-      data: updatedVisit,
+      data: serializePrismaRecord(updatedVisit),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const admitMedicalVisit = async (req, res, next) => {
   try {
-    const existingVisit = await MedicalVisit.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const existingVisit = await prisma.medicalVisit.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!existingVisit) {
@@ -875,34 +941,29 @@ export const admitMedicalVisit = async (req, res, next) => {
     }
 
     const normalizedAdmission = normalizeAdmissionRequest({
-      ...existingVisit.toObject(),
+      ...existingVisit,
       ...req.body,
     });
 
-    const visit = await MedicalVisit.findByIdAndUpdate(
-      req.params.id,
-      {
-        ...existingVisit.toObject(),
+    const visit = await prisma.medicalVisit.update({
+      where: { id: req.params.id },
+      data: visitData({
+        ...existingVisit,
         ...req.body,
         ...normalizedAdmission,
         disposition: req.body?.disposition || "admit",
         status: normalizedAdmission.status,
-      },
-      {
-        new: true,
-        runValidators: true,
-      }
-    )
-      .populate("patient")
-      .populate("clinician", "name email role department");
+      }),
+      include: visitInclude,
+    });
 
     await logAudit({
       actor: req.user,
       action: "admit",
       entity: "MedicalVisit",
-      entityId: visit._id,
-      before: existingVisit.toObject(),
-      after: visit.toObject(),
+      entityId: visit.id,
+      before: serializePrismaRecord(existingVisit),
+      after: serializePrismaRecord(visit),
       metadata: {
         ward: normalizedAdmission.ward,
         bedNumber: normalizedAdmission.bedNumber,
@@ -910,21 +971,20 @@ export const admitMedicalVisit = async (req, res, next) => {
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Patient admitted successfully",
-      data: visit,
+      data: serializePrismaRecord(visit),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const dischargeMedicalVisit = async (req, res, next) => {
   try {
-    const existingVisit = await MedicalVisit.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const existingVisit = await prisma.medicalVisit.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!existingVisit) {
@@ -935,34 +995,29 @@ export const dischargeMedicalVisit = async (req, res, next) => {
     }
 
     const normalizedDischarge = normalizeDischargeSummary({
-      ...existingVisit.toObject(),
+      ...existingVisit,
       ...req.body,
     });
 
-    const visit = await MedicalVisit.findByIdAndUpdate(
-      req.params.id,
-      {
-        ...existingVisit.toObject(),
+    const visit = await prisma.medicalVisit.update({
+      where: { id: req.params.id },
+      data: visitData({
+        ...existingVisit,
         ...req.body,
         ...normalizedDischarge,
         disposition: req.body?.disposition || "discharge",
         status: normalizedDischarge.status,
-      },
-      {
-        new: true,
-        runValidators: true,
-      }
-    )
-      .populate("patient")
-      .populate("clinician", "name email role department");
+      }),
+      include: visitInclude,
+    });
 
     await logAudit({
       actor: req.user,
       action: "discharge",
       entity: "MedicalVisit",
-      entityId: visit._id,
-      before: existingVisit.toObject(),
-      after: visit.toObject(),
+      entityId: visit.id,
+      before: serializePrismaRecord(existingVisit),
+      after: serializePrismaRecord(visit),
       metadata: {
         dischargeSummary: normalizedDischarge.dischargeSummary,
         dischargePlan: normalizedDischarge.dischargePlan,
@@ -970,13 +1025,13 @@ export const dischargeMedicalVisit = async (req, res, next) => {
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Patient discharge summary saved successfully",
-      data: visit,
+      data: serializePrismaRecord(visit),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -986,38 +1041,47 @@ export const dischargeMedicalVisit = async (req, res, next) => {
 
 export const getMedicalLabWorklist = async (req, res, next) => {
   try {
-    const visits = await MedicalVisit.find({
-      diagnosis: { $exists: true, $nin: [null, ""] },
-      labOrders: { $exists: true, $ne: [] },
-      status: { $nin: ["cancelled", "voided", "deceased"] },
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    })
-      .populate({
-        path: "patient",
-        match: { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] },
-        select: "firstName lastName patientNumber estimatedAge dateOfBirth sex",
-      })
-      .populate("clinician", "name role department")
-      .sort({ visitDate: -1 })
-      .lean();
-
-    const completedResults = await MedicalLabResult.find({
-      visit: { $in: visits.map((visit) => visit._id) },
-      status: "completed",
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    }).select("visit testName").lean();
+    const visitRows = await prisma.medicalVisit.findMany({
+      where: {
+        diagnosis: { not: null },
+        status: { notIn: ["cancelled", "voided", "deceased"] },
+        deletedAt: null,
+      },
+      include: {
+        patient: {
+          select: {
+            id: true, firstName: true, lastName: true, patientNumber: true,
+            estimatedAge: true, dateOfBirth: true, sex: true, deletedAt: true,
+          },
+        },
+        clinician: { select: { id: true, name: true, role: true, department: true } },
+      },
+      orderBy: { visitDate: "desc" },
+    });
+    const visits = serializePrismaRecord(visitRows).filter((visit) =>
+      visit.patient && String(visit.diagnosis || "").trim() &&
+      normalizeLabOrders(visit.labOrders).length > 0 &&
+      !visit.patient.deletedAt);
+    const completedResults = visits.length ? await prisma.medicalLabResult.findMany({
+      where: {
+        visitId: { in: visits.map((visit) => visit.id) },
+        status: "completed",
+        deletedAt: null,
+      },
+      select: { visitId: true, testName: true },
+    }) : [];
     const completedByVisit = new Map();
     completedResults.forEach((result) => {
-      const key = String(result.visit);
+      const key = String(result.visitId);
       completedByVisit.set(key, new Set([...(completedByVisit.get(key) || []), String(result.testName).trim().toLowerCase()]));
     });
 
     const data = visits
       .filter((visit) => visit.patient)
       .map((visit) => {
-        const completed = completedByVisit.get(String(visit._id)) || new Set();
+        const completed = completedByVisit.get(String(visit.id)) || new Set();
         return {
-          _id: visit._id,
+          _id: visit.id,
           patient: visit.patient,
           clinician: visit.clinician,
           visitNumber: visit.visitNumber,
@@ -1029,36 +1093,70 @@ export const getMedicalLabWorklist = async (req, res, next) => {
       })
       .filter((visit) => visit.labOrders.length > 0);
 
-    res.status(200).json({ success: true, count: data.length, data });
+    return res.status(200).json({ success: true, count: data.length, data });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const getMedicalLabPatients = async (req, res, next) => {
   try {
-    const patients = await Patient.find({
-      status: { $ne: "voided" },
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    })
-      .select("firstName lastName patientNumber estimatedAge dateOfBirth sex")
-      .sort({ lastName: 1, firstName: 1 })
-      .lean();
-
-    res.status(200).json({ success: true, count: patients.length, data: patients });
+    const patients = await prisma.patient.findMany({
+      where: { status: { not: "voided" }, deletedAt: null },
+      select: {
+        id: true, firstName: true, lastName: true, patientNumber: true,
+        estimatedAge: true, dateOfBirth: true, sex: true,
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    });
+    return res.status(200).json({
+      success: true,
+      count: patients.length,
+      data: serializePrismaRecord(patients),
+    });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
-const populateMedicalLabResult = (query) => query
-  .populate("patient", "firstName lastName patientNumber estimatedAge dateOfBirth sex nationalId phone address status")
-  .populate({
-    path: "visit",
-    select: "visitDate visitType visitNumber diagnosis labOrders clinician",
-    populate: { path: "clinician", select: "name role department" },
-  })
-  .populate("performedBy", "name role department");
+const labResultInclude = {
+  patient: {
+    select: {
+      id: true, firstName: true, lastName: true, patientNumber: true,
+      estimatedAge: true, dateOfBirth: true, sex: true, nationalId: true,
+      phone: true, address: true, status: true,
+    },
+  },
+  visit: {
+    select: {
+      id: true, visitDate: true, visitType: true, visitNumber: true,
+      diagnosis: true, labOrders: true, clinician: {
+        select: { id: true, name: true, role: true, department: true },
+      },
+    },
+  },
+  performedBy: { select: { id: true, name: true, role: true, department: true } },
+};
+
+const labResultData = (payload) => {
+  const data = {};
+  const aliases = { patient: "patientId", visit: "visitId", performedBy: "performedById" };
+  for (const field of [
+    "patientId", "visitId", "testName", "unitPrice", "result", "referenceRange",
+    "status", "performedById", "performedAt",
+  ]) {
+    const alias = Object.entries(aliases).find(([, target]) => target === field)?.[0];
+    const sourceField = alias && payload[alias] !== undefined
+      ? alias
+      : field;
+    if (payload[sourceField] === undefined) continue;
+    let value = payload[sourceField];
+    if (["patientId", "visitId", "performedById"].includes(field)) value = relationId(value);
+    if (field === "performedAt" && value !== null && !(value instanceof Date)) value = new Date(value);
+    data[field] = value;
+  }
+  return data;
+};
 
 export const createMedicalLabResult = async (
   req,
@@ -1067,13 +1165,16 @@ export const createMedicalLabResult = async (
 ) => {
   try {
     if (req.user.role === "laboratory") {
-      const visit = await MedicalVisit.findOne({
-        _id: req.body.visit,
-        patient: req.body.patient,
-        diagnosis: { $exists: true, $nin: [null, ""] },
-        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+      const visit = await prisma.medicalVisit.findFirst({
+        where: {
+          id: relationId(req.body.visit),
+          patientId: relationId(req.body.patient),
+          diagnosis: { not: null },
+          deletedAt: null,
+        },
       });
-      if (!visit || !hasRequestedLabOrder(visit, req.body.testName)) {
+      if (!visit || !String(visit.diagnosis || "").trim() ||
+          !hasRequestedLabOrder(visit, req.body.testName)) {
         return res.status(400).json({ success: false, message: "Select a patient visit and test ordered by a doctor" });
       }
     }
@@ -1084,8 +1185,8 @@ export const createMedicalLabResult = async (
     };
 
     // Automatically assign logged-in user as lab performer
-    if (!payload.performedBy && req.user?._id) {
-      payload.performedBy = req.user._id;
+    if (!payload.performedBy && req.user?.id) {
+      payload.performedBy = req.user.id;
     }
 
     // Automatically set performedAt when not provided
@@ -1093,37 +1194,34 @@ export const createMedicalLabResult = async (
       payload.performedAt = new Date();
     }
 
-    const labResult = await MedicalLabResult.create(
-      payload
-    );
+    const labResult = await prisma.medicalLabResult.create({
+      data: labResultData(payload),
+      include: labResultInclude,
+    });
 
-    if (labResult.visit && labResult.status === "completed") {
-      await returnVisitToDoctorWhenLabsComplete(labResult.visit, req.user);
+    if (labResult.visitId && labResult.status === "completed") {
+      await returnVisitToDoctorWhenLabsComplete(labResult.visitId, req.user);
     }
 
     await logAudit({
       actor: req.user,
       action: "create",
       entity: "MedicalLabResult",
-      entityId: labResult._id,
+      entityId: labResult.id,
       before: null,
-      after: labResult.toObject(),
+      after: serializePrismaRecord(labResult),
       metadata: {
         ip: req.ip,
       },
     });
 
-    const populatedLabResult = await populateMedicalLabResult(
-      MedicalLabResult.findById(labResult._id)
-    );
-
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Medical lab result created successfully",
-      data: populatedLabResult,
+      data: serializePrismaRecord(labResult),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -1133,22 +1231,27 @@ export const getMedicalLabResults = async (
   next
 ) => {
   try {
-    const filter = {
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-    };
+    const where = { deletedAt: null };
     if (req.user.role === "doctor") {
-      const doctorVisits = await MedicalVisit.find({ clinician: req.user._id }).distinct("_id");
-      filter.visit = { $in: doctorVisits };
+      const doctorVisits = await prisma.medicalVisit.findMany({
+        where: { clinicianId: req.user.id },
+        select: { id: true },
+      });
+      where.visitId = { in: doctorVisits.map((visit) => visit.id) };
     }
-    const labResults = await populateMedicalLabResult(MedicalLabResult.find(filter)).sort({ createdAt: -1 });
+    const labResults = await prisma.medicalLabResult.findMany({
+      where,
+      include: labResultInclude,
+      orderBy: { createdAt: "desc" },
+    });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: labResults.length,
-      data: labResults,
+      data: serializePrismaRecord(labResults),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -1158,10 +1261,10 @@ export const getMedicalLabResultById = async (
   next
 ) => {
   try {
-    const labResult = await populateMedicalLabResult(MedicalLabResult.findOne({
-        _id: req.params.id,
-        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-      }));
+    const labResult = await prisma.medicalLabResult.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+      include: labResultInclude,
+    });
 
     if (!labResult) {
       return res.status(404).json({
@@ -1170,12 +1273,12 @@ export const getMedicalLabResultById = async (
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      data: labResult,
+      data: serializePrismaRecord(labResult),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -1185,9 +1288,8 @@ export const updateMedicalLabResult = async (
   next
 ) => {
   try {
-    const existingLabResult = await MedicalLabResult.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const existingLabResult = await prisma.medicalLabResult.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!existingLabResult) {
@@ -1198,56 +1300,55 @@ export const updateMedicalLabResult = async (
     }
 
     if (req.user.role === "laboratory") {
-      const visitId = req.body.visit || existingLabResult.visit;
-      const patientId = req.body.patient || existingLabResult.patient;
+      const visitId = relationId(req.body.visit) || existingLabResult.visitId;
+      const patientId = relationId(req.body.patient) || existingLabResult.patientId;
       const testName = req.body.testName || existingLabResult.testName;
-      const visit = await MedicalVisit.findOne({ _id: visitId, patient: patientId });
+      const visit = await prisma.medicalVisit.findFirst({
+        where: { id: visitId, patientId },
+      });
       if (!visit || !hasRequestedLabOrder(visit, testName)) {
         return res.status(400).json({ success: false, message: "Laboratory results must match a doctor-ordered test" });
       }
     }
 
     const normalizedPayload = {
-      ...existingLabResult.toObject(),
+      ...existingLabResult,
       ...req.body,
       status: normalizeLabStatus(req.body?.status ?? existingLabResult.status, {
-        ...existingLabResult.toObject(),
+        ...existingLabResult,
         ...req.body,
       }),
     };
 
-    const labResult = await populateMedicalLabResult(MedicalLabResult.findByIdAndUpdate(
-        req.params.id,
-        normalizedPayload,
-        {
-          new: true,
-          runValidators: true,
-        }
-      ));
+    const labResult = await prisma.medicalLabResult.update({
+      where: { id: req.params.id },
+      data: labResultData(normalizedPayload),
+      include: labResultInclude,
+    });
 
-    if (labResult.visit && labResult.status === "completed") {
-      await returnVisitToDoctorWhenLabsComplete(labResult.visit._id || labResult.visit, req.user);
+    if (labResult.visitId && labResult.status === "completed") {
+      await returnVisitToDoctorWhenLabsComplete(labResult.visitId, req.user);
     }
 
     await logAudit({
       actor: req.user,
       action: "update",
       entity: "MedicalLabResult",
-      entityId: labResult._id,
-      before: existingLabResult.toObject(),
-      after: labResult.toObject(),
+      entityId: labResult.id,
+      before: serializePrismaRecord(existingLabResult),
+      after: serializePrismaRecord(labResult),
       metadata: {
         ip: req.ip,
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Medical lab result updated successfully",
-      data: labResult,
+      data: serializePrismaRecord(labResult),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -1257,9 +1358,8 @@ export const deleteMedicalLabResult = async (
   next
 ) => {
   try {
-    const labResult = await MedicalLabResult.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const labResult = await prisma.medicalLabResult.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!labResult) {
@@ -1269,41 +1369,40 @@ export const deleteMedicalLabResult = async (
       });
     }
 
-    const softDeletedLabResult = softDeleteRecord(labResult.toObject(), {
-      actor: req.user,
-      reason: req.body?.reason || "Administrative void",
-      metadata: { ip: req.ip },
+    const reason = req.body?.reason || "Administrative void";
+    const now = new Date();
+    const updatedLabResult = await prisma.medicalLabResult.update({
+      where: { id: labResult.id },
+      data: {
+        status: labResult.status === "cancelled" ? "cancelled" : "voided",
+        deletedAt: now,
+        deletedById: req.user.id,
+        voidedAt: now,
+        voidedById: req.user.id,
+        voidReason: reason,
+      },
     });
-
-    const updatedLabResult = await MedicalLabResult.findByIdAndUpdate(
-      req.params.id,
-      softDeletedLabResult,
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
 
     await logAudit({
       actor: req.user,
       action: "void",
       entity: "MedicalLabResult",
-      entityId: labResult._id,
-      before: labResult.toObject(),
-      after: updatedLabResult.toObject(),
+      entityId: labResult.id,
+      before: serializePrismaRecord(labResult),
+      after: serializePrismaRecord(updatedLabResult),
       metadata: {
-        reason: req.body?.reason || "Administrative void",
+        reason,
         ip: req.ip,
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Medical lab result voided successfully",
-      data: updatedLabResult,
+      data: serializePrismaRecord(updatedLabResult),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -1311,10 +1410,47 @@ export const deleteMedicalLabResult = async (
 // PRESCRIPTIONS
 // =====================================================
 
-const populatePrescription = (query) => query
-  .populate("patient", "firstName lastName patientNumber estimatedAge dateOfBirth sex nationalId phone address status")
-  .populate("visit", "visitNumber visitDate visitType diagnosis treatmentPlan")
-  .populate("prescribedBy", "name role department");
+const prescriptionInclude = {
+  patient: {
+    select: {
+      id: true, firstName: true, lastName: true, patientNumber: true,
+      estimatedAge: true, dateOfBirth: true, sex: true, nationalId: true,
+      phone: true, address: true, status: true,
+    },
+  },
+  visit: {
+    select: {
+      id: true, visitNumber: true, visitDate: true, visitType: true,
+      diagnosis: true, treatmentPlan: true,
+    },
+  },
+  prescribedBy: { select: { id: true, name: true, role: true, department: true } },
+  medications: true,
+};
+
+const prescriptionData = (payload) => {
+  const data = {};
+  const aliases = { patient: "patientId", visit: "visitId", prescribedBy: "prescribedById" };
+  for (const field of ["patientId", "visitId", "prescribedById", "status"]) {
+    const alias = Object.entries(aliases).find(([, target]) => target === field)?.[0];
+    const sourceField = alias && payload[alias] !== undefined ? alias : field;
+    if (payload[sourceField] !== undefined) data[field] = relationId(payload[sourceField]);
+  }
+  if (Array.isArray(payload.medications)) {
+    data.medications = {
+      create: payload.medications.map((medication) => ({
+        name: medication.name,
+        dosage: medication.dosage,
+        frequency: medication.frequency,
+        duration: medication.duration,
+        quantity: medication.quantity,
+        unitPrice: medication.unitPrice,
+        instructions: medication.instructions,
+      })),
+    };
+  }
+  return data;
+};
 
 export const createPrescription = async (
   req,
@@ -1327,13 +1463,15 @@ export const createPrescription = async (
       if (!req.body.visit) {
         return res.status(400).json({ success: false, message: "Link the prescription to the active medical visit" });
       }
-      consultationVisit = await MedicalVisit.findOne({
-        _id: req.body.visit,
-        patient: req.body.patient,
-        status: "in_consultation",
-        diagnosis: { $exists: true, $nin: [null, ""] },
+      consultationVisit = await prisma.medicalVisit.findFirst({
+        where: {
+          id: relationId(req.body.visit),
+          patientId: relationId(req.body.patient),
+          status: "in_consultation",
+          diagnosis: { not: null },
+        },
       });
-      if (!consultationVisit) {
+      if (!consultationVisit || !String(consultationVisit.diagnosis || "").trim()) {
         return res.status(409).json({ success: false, message: "Prescriptions require a diagnosed visit in consultation" });
       }
       if (!(await areVisitLabOrdersComplete(consultationVisit))) {
@@ -1348,52 +1486,58 @@ export const createPrescription = async (
 
     // Automatically assign logged-in user as prescriber
     if (req.user.role === "doctor") {
-      payload.prescribedBy = req.user._id;
-    } else if (!payload.prescribedBy && req.user?._id) {
-      payload.prescribedBy = req.user._id;
+      payload.prescribedBy = req.user.id;
+    } else if (!payload.prescribedBy && req.user?.id) {
+      payload.prescribedBy = req.user.id;
     }
 
-    const prescription =
-      await Prescription.create(payload);
+    const result = await prisma.$transaction(async (transaction) => {
+      const prescription = await transaction.prescription.create({
+        data: prescriptionData(payload),
+        include: prescriptionInclude,
+      });
+      let updatedVisit = null;
+      if (consultationVisit) {
+        updatedVisit = await transaction.medicalVisit.update({
+          where: { id: consultationVisit.id },
+          data: { status: "awaiting_pharmacy" },
+        });
+      }
+      return { prescription, updatedVisit };
+    }, { isolationLevel: "Serializable" });
+    const { prescription } = result;
 
     await logAudit({
       actor: req.user,
       action: "create",
       entity: "Prescription",
-      entityId: prescription._id,
+      entityId: prescription.id,
       before: null,
-      after: prescription.toObject(),
+      after: serializePrismaRecord(prescription),
       metadata: {
         ip: req.ip,
       },
     });
 
     if (consultationVisit) {
-      const beforeVisit = consultationVisit.toObject();
-      consultationVisit.status = "awaiting_pharmacy";
-      await consultationVisit.save();
       await logAudit({
         actor: req.user,
         action: "prescription_sent_to_pharmacy",
         entity: "MedicalVisit",
-        entityId: consultationVisit._id,
-        before: beforeVisit,
-        after: consultationVisit.toObject(),
-        metadata: { prescription: prescription._id, ip: req.ip },
+        entityId: consultationVisit.id,
+        before: serializePrismaRecord(consultationVisit),
+        after: serializePrismaRecord(result.updatedVisit),
+        metadata: { prescription: prescription.id, ip: req.ip },
       });
     }
 
-    const populatedPrescription = await populatePrescription(
-      Prescription.findById(prescription._id)
-    );
-
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Prescription created successfully",
-      data: populatedPrescription,
+      data: serializePrismaRecord(prescription),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -1403,17 +1547,19 @@ export const getPrescriptions = async (
   next
 ) => {
   try {
-    const prescriptions = await populatePrescription(Prescription.find({
-        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-      })).sort({ createdAt: -1 });
+    const prescriptions = await prisma.prescription.findMany({
+      where: { deletedAt: null },
+      include: prescriptionInclude,
+      orderBy: { createdAt: "desc" },
+    });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: prescriptions.length,
-      data: prescriptions,
+      data: serializePrismaRecord(prescriptions),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -1423,10 +1569,10 @@ export const getPrescriptionById = async (
   next
 ) => {
   try {
-    const prescription = await populatePrescription(Prescription.findOne({
-        _id: req.params.id,
-        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
-      }));
+    const prescription = await prisma.prescription.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+      include: prescriptionInclude,
+    });
 
     if (!prescription) {
       return res.status(404).json({
@@ -1435,12 +1581,12 @@ export const getPrescriptionById = async (
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      data: prescription,
+      data: serializePrismaRecord(prescription),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -1450,9 +1596,8 @@ export const updatePrescription = async (
   next
 ) => {
   try {
-    const existingPrescription = await Prescription.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const existingPrescription = await prisma.prescription.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!existingPrescription) {
@@ -1476,66 +1621,84 @@ export const updatePrescription = async (
     }
 
     const normalizedPayload = {
-      ...existingPrescription.toObject(),
+      ...existingPrescription,
       ...req.body,
       status: normalizePrescriptionStatus(req.body?.status ?? existingPrescription.status, {
-        ...existingPrescription.toObject(),
+        ...existingPrescription,
         ...req.body,
       }),
     };
 
-    const prescription = await populatePrescription(Prescription.findByIdAndUpdate(
-        req.params.id,
-        normalizedPayload,
-        {
-          new: true,
-          runValidators: true,
+    const updateData = prescriptionData(normalizedPayload);
+    if (Array.isArray(req.body.medications)) {
+      updateData.medications = {
+        deleteMany: {},
+        ...prescriptionData({ medications: req.body.medications }).medications,
+      };
+    }
+    if (["pharmacist", "pharmacy"].includes(req.user.role)) {
+      updateData.status = "dispensed";
+    }
+    const prescription = await prisma.$transaction(async (transaction) => {
+      const updated = await transaction.prescription.update({
+        where: { id: req.params.id },
+        data: updateData,
+        include: prescriptionInclude,
+      });
+      let handoffVisit = null;
+      if (["pharmacist", "pharmacy"].includes(req.user.role) &&
+          updated.status === "dispensed" && updated.visitId) {
+        const remainingPrescriptions = await transaction.prescription.count({
+          where: {
+            visitId: updated.visitId,
+            status: "prescribed",
+            deletedAt: null,
+          },
+        });
+        const visit = await transaction.medicalVisit.findFirst({
+          where: { id: updated.visitId, status: "awaiting_pharmacy" },
+        });
+        if (visit && remainingPrescriptions === 0) {
+          handoffVisit = await transaction.medicalVisit.update({
+            where: { id: visit.id },
+            data: { status: "awaiting_billing" },
+          });
         }
-      ));
+      }
+      return { prescription: updated, handoffVisit };
+    }, { isolationLevel: "Serializable" });
 
     await logAudit({
       actor: req.user,
       action: "update",
       entity: "Prescription",
-      entityId: prescription._id,
-      before: existingPrescription.toObject(),
-      after: prescription.toObject(),
+      entityId: prescription.prescription.id,
+      before: serializePrismaRecord(existingPrescription),
+      after: serializePrismaRecord(prescription.prescription),
       metadata: {
         ip: req.ip,
       },
     });
 
-    if (["pharmacist", "pharmacy"].includes(req.user.role) && prescription.status === "dispensed" && prescription.visit) {
-      const visitId = prescription.visit._id || prescription.visit;
-      const remainingPrescriptions = await Prescription.countDocuments({
-        visit: visitId,
-        status: "prescribed",
-        $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    if (prescription.handoffVisit) {
+      await logAudit({
+        actor: req.user,
+        action: "pharmacy_handoff_completed",
+        entity: "MedicalVisit",
+        entityId: prescription.handoffVisit.id,
+        before: { ...serializePrismaRecord(prescription.handoffVisit), status: "awaiting_pharmacy" },
+        after: serializePrismaRecord(prescription.handoffVisit),
+        metadata: { prescription: prescription.prescription.id, ip: req.ip },
       });
-      const visit = await MedicalVisit.findOne({ _id: visitId, status: "awaiting_pharmacy" });
-      if (visit && remainingPrescriptions === 0) {
-        const beforeVisit = visit.toObject();
-        visit.status = "awaiting_billing";
-        await visit.save();
-        await logAudit({
-          actor: req.user,
-          action: "pharmacy_handoff_completed",
-          entity: "MedicalVisit",
-          entityId: visit._id,
-          before: beforeVisit,
-          after: visit.toObject(),
-          metadata: { prescription: prescription._id, ip: req.ip },
-        });
-      }
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Prescription updated successfully",
-      data: prescription,
+      data: serializePrismaRecord(prescription.prescription),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
@@ -1545,9 +1708,8 @@ export const deletePrescription = async (
   next
 ) => {
   try {
-    const prescription = await Prescription.findOne({
-      _id: req.params.id,
-      $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }],
+    const prescription = await prisma.prescription.findFirst({
+      where: { id: req.params.id, deletedAt: null },
     });
 
     if (!prescription) {
@@ -1557,49 +1719,49 @@ export const deletePrescription = async (
       });
     }
 
-    const softDeletedPrescription = softDeleteRecord(prescription.toObject(), {
-      actor: req.user,
-      reason: req.body?.reason || "Administrative void",
-      metadata: { ip: req.ip },
+    const reason = req.body?.reason || "Administrative void";
+    const now = new Date();
+    const updatedPrescription = await prisma.prescription.update({
+      where: { id: prescription.id },
+      data: {
+        status: prescription.status === "cancelled" ? "cancelled" : "voided",
+        deletedAt: now,
+        deletedById: req.user.id,
+        voidedAt: now,
+        voidedById: req.user.id,
+        voidReason: reason,
+      },
     });
-
-    const updatedPrescription = await Prescription.findByIdAndUpdate(
-      req.params.id,
-      softDeletedPrescription,
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
 
     await logAudit({
       actor: req.user,
       action: "void",
       entity: "Prescription",
-      entityId: prescription._id,
-      before: prescription.toObject(),
-      after: updatedPrescription.toObject(),
+      entityId: prescription.id,
+      before: serializePrismaRecord(prescription),
+      after: serializePrismaRecord(updatedPrescription),
       metadata: {
-        reason: req.body?.reason || "Administrative void",
+        reason,
         ip: req.ip,
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Prescription voided successfully",
-      data: updatedPrescription,
+      data: serializePrismaRecord(updatedPrescription),
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
 };
 
 export const getMedicalExceptions = async (req, res, next) => {
   try {
-    const visits = await MedicalVisit.find({
-      status: {
-        $in: [
+    const visits = await prisma.medicalVisit.findMany({
+      where: {
+        status: {
+          in: [
           "left_without_being_seen",
           "referred",
           "cancelled",
@@ -1607,14 +1769,16 @@ export const getMedicalExceptions = async (req, res, next) => {
           "deceased",
           "manual_back_entry",
           "downtime_entry",
-        ],
+          ],
+        },
       },
-    })
-      .populate("patient", "firstName lastName patientNumber")
-      .sort({ updatedAt: -1 })
-      .lean();
+      include: {
+        patient: { select: { id: true, firstName: true, lastName: true, patientNumber: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
 
-    const queue = buildExceptionQueue(visits);
+    const queue = buildExceptionQueue(serializePrismaRecord(visits));
 
     return res.status(200).json({
       success: true,
@@ -1656,21 +1820,24 @@ export const getMedicalSummary = async (req, res, next) => {
     const startOfTomorrow = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
 
     const [patients, todaysVisits, pendingLab, prescriptions, exceptions] = await Promise.all([
-      canReadPatients ? Patient.countDocuments() : null,
+      canReadPatients ? prisma.patient.count() : null,
       canReadVisits
-        ? MedicalVisit.countDocuments({
-            visitDate: { $gte: startOfToday, $lt: startOfTomorrow },
-            status: { $ne: "cancelled" },
+        ? prisma.medicalVisit.count({
+            where: {
+              visitDate: { gte: startOfToday, lt: startOfTomorrow },
+              status: { not: "cancelled" },
+            },
           })
         : null,
       canReadLab
         ? countOutstandingLabTests()
         : null,
-      canReadPrescriptions ? Prescription.countDocuments() : null,
+      canReadPrescriptions ? prisma.prescription.count() : null,
       canReadVisits
-        ? MedicalVisit.countDocuments({
-            status: {
-              $in: [
+        ? prisma.medicalVisit.count({
+            where: {
+              status: {
+                in: [
                 "left_without_being_seen",
                 "referred",
                 "cancelled",
@@ -1678,7 +1845,8 @@ export const getMedicalSummary = async (req, res, next) => {
                 "deceased",
                 "manual_back_entry",
                 "downtime_entry",
-              ],
+                ],
+              },
             },
           })
         : null,

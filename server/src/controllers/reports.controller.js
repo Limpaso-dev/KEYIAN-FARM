@@ -1,7 +1,7 @@
 import PDFDocument from "pdfkit";
 
-import Farmer from "../models/Farmer.js";
-import Sale from "../models/Sale.js";
+import prisma from "../config/prisma.js";
+import { serializePrismaRecord } from "../utils/prismaRecords.js";
 
 const parseReportPeriod = (query) => {
   const dateRange = {};
@@ -13,17 +13,17 @@ const parseReportPeriod = (query) => {
 
   if (query.from) {
     if (!isValidDate(query.from)) return { error: "Invalid start date" };
-    dateRange.$gte = new Date(`${query.from}T00:00:00.000Z`);
+    dateRange.gte = new Date(`${query.from}T00:00:00.000Z`);
   }
 
   if (query.to) {
     if (!isValidDate(query.to)) return { error: "Invalid end date" };
     const endExclusive = new Date(`${query.to}T00:00:00.000Z`);
     endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
-    dateRange.$lt = endExclusive;
+    dateRange.lt = endExclusive;
   }
 
-  if (dateRange.$gte && dateRange.$lt && dateRange.$gte >= dateRange.$lt) {
+  if (dateRange.gte && dateRange.lt && dateRange.gte >= dateRange.lt) {
     return { error: "Start date must be on or before end date" };
   }
 
@@ -31,21 +31,30 @@ const parseReportPeriod = (query) => {
 };
 
 const getFarmerReportData = async (status) => {
-  const filter = {};
+  const where = {};
   if (status && status !== "all") {
     if (!["active", "inactive", "suspended"].includes(status)) {
       return { error: "Invalid farmer status filter" };
     }
-    filter.membershipStatus = status;
+    where.membershipStatus = status;
   }
 
-  const farmers = await Farmer.find(filter)
-    .select("membershipNumber firstName lastName phone farmLocation membershipStatus shares")
-    .sort({ membershipNumber: 1 })
-    .lean();
+  const farmers = await prisma.farmer.findMany({
+    where,
+    select: {
+      membershipNumber: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      farmLocation: true,
+      membershipStatus: true,
+      shares: true,
+    },
+    orderBy: { membershipNumber: "asc" },
+  });
 
   return {
-    farmers,
+    farmers: serializePrismaRecord(farmers),
     count: farmers.length,
     totalShares: farmers.reduce((sum, farmer) => sum + Number(farmer.shares || 0), 0),
   };
@@ -55,48 +64,45 @@ const getSalesReportData = async (query) => {
   const period = parseReportPeriod(query);
   if (period.error) return period;
 
-  const filter = { status: { $ne: "cancelled" } };
+  const where = { status: { not: "cancelled" } };
   if (Object.keys(period.dateRange).length) {
-    filter.saleDate = period.dateRange;
+    where.saleDate = period.dateRange;
   }
 
   const [sales, aggregates] = await Promise.all([
-    Sale.find(filter)
-      .select("invoiceNumber saleDate customer totalAmount amountPaid balanceDue status paymentStatus")
-      .populate("customer", "name")
-      .sort({ saleDate: -1, invoiceNumber: 1 })
-      .lean(),
-    Sale.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          count: { $sum: 1 },
-          totalSales: { $sum: "$totalAmount" },
-          totalPaid: { $sum: "$amountPaid" },
-          outstanding: { $sum: "$balanceDue" },
-        },
+    prisma.sale.findMany({
+      where,
+      select: {
+        invoiceNumber: true,
+        saleDate: true,
+        customer: { select: { id: true, name: true } },
+        totalAmount: true,
+        amountPaid: true,
+        balanceDue: true,
+        status: true,
+        paymentStatus: true,
       },
-    ]),
+      orderBy: [{ saleDate: "desc" }, { invoiceNumber: "asc" }],
+    }),
+    prisma.sale.aggregate({
+      where,
+      _count: { _all: true },
+      _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
+    }),
   ]);
 
-  const summary = aggregates[0] || {
-    count: 0,
-    totalSales: 0,
-    totalPaid: 0,
-    outstanding: 0,
-  };
+  const summary = aggregates;
 
   return {
     from: query.from || null,
     to: query.to || null,
     summary: {
-      count: summary.count,
-      totalSales: summary.totalSales,
-      totalPaid: summary.totalPaid,
-      outstanding: summary.outstanding,
+      count: summary._count._all,
+      totalSales: Number(summary._sum.totalAmount || 0),
+      totalPaid: Number(summary._sum.amountPaid || 0),
+      outstanding: Number(summary._sum.balanceDue || 0),
     },
-    sales,
+    sales: serializePrismaRecord(sales),
   };
 };
 

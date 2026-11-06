@@ -1,4 +1,4 @@
-import AuditLog from "../models/AuditLog.js";
+import prisma from "../config/prisma.js";
 
 export const normalizeActor = (actor) => ({
   id: actor?._id || actor?.id || null,
@@ -30,22 +30,27 @@ export const buildAuditPayload = ({
 };
 
 export const logAudit = async ({ actor, action, entity, entityId, before, after, metadata = {} }) => {
-  try {
-    const payload = buildAuditPayload({
-      actor,
-      action,
-      entity,
-      entityId,
-      before,
-      after,
-      metadata,
-    });
+  const payload = buildAuditPayload({
+    actor,
+    action,
+    entity,
+    entityId,
+    before,
+    after,
+    metadata,
+  });
+  const toJson = (value) => JSON.parse(JSON.stringify(value ?? null));
 
-    return await AuditLog.create(payload);
-  } catch (error) {
-    console.error("Audit logging failed:", error.message);
-    return null;
-  }
+  return prisma.auditLog.create({
+    data: {
+      ...payload,
+      actorId: payload.actorId == null ? null : String(payload.actorId),
+      entityId: payload.entityId == null ? null : String(payload.entityId),
+      ...(payload.before == null ? {} : { before: toJson(payload.before) }),
+      ...(payload.after == null ? {} : { after: toJson(payload.after) }),
+      metadata: toJson(payload.metadata),
+    },
+  });
 };
 
 export const softDeleteRecord = (record, { actor, reason, metadata = {} } = {}) => {
