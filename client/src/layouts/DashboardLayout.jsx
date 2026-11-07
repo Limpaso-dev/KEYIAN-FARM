@@ -77,7 +77,7 @@ const DashboardLayout = () => {
             <p>Keiyian Farmers Cooperative Society Ltd · <span className="italic">Nuru ya Jamii</span></p>
             <p>
               Developed &amp; managed by{" "}
-              <a href="https://payiani-technologies.vercel.app/" target="_blank" rel="noreferrer" className="font-semibold text-primary-700 transition-colors hover:text-primary-800 hover:underline">Payiani Technologies</a>
+              <a href="https://www.payianitechnologies.com/" target="_blank" rel="noreferrer" className="font-semibold text-primary-700 transition-colors hover:text-primary-800 hover:underline">Payiani Technologies</a>
               {" "}· &copy; {new Date().getFullYear()}
             </p>
           </div>

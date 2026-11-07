@@ -20,6 +20,12 @@ const Login = () => {
   });
 
   const [showPassword, setShowPassword] = useState(false);
+  // Saved passwords stay available, but the browser must not drop them in
+  // on its own when the page loads. A read-only field is never autofilled,
+  // so the form unlocks on the first click. Both fields unlock together, so
+  // picking a saved login from the email list fills in its password as well.
+  const [unlocked, setUnlocked] = useState(false);
+  const unlock = () => setUnlocked(true);
   const [loading, setLoading] = useState(false);
 
   // If already logged in
@@ -108,7 +114,7 @@ const Login = () => {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5" autoComplete="off">
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label htmlFor="email" className="mb-2 block text-[13px] font-semibold text-slate-700">
                 Email address
@@ -122,7 +128,10 @@ const Login = () => {
                   value={formData.email}
                   onChange={handleChange}
                   placeholder="Enter your email address"
-                  autoComplete="off"
+                  autoComplete="username"
+                  readOnly={!unlocked}
+                  onPointerDown={unlock}
+                  onFocus={unlock}
                   required
                   className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-600 focus:ring-2 focus:ring-primary-400/20"
                 />
@@ -142,7 +151,10 @@ const Login = () => {
                   value={formData.password}
                   onChange={handleChange}
                   placeholder="Enter your password"
-                  autoComplete="off"
+                  autoComplete="current-password"
+                  readOnly={!unlocked}
+                  onPointerDown={unlock}
+                  onFocus={unlock}
                   required
                   className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-600 focus:ring-2 focus:ring-primary-400/20"
                 />
@@ -172,7 +184,7 @@ const Login = () => {
           <p className="mt-1.5 text-xs text-slate-500">
             Developed &amp; Managed by{" "}
             <a
-              href="https://payiani-technologies.vercel.app/"
+              href="https://www.payianitechnologies.com/"
               target="_blank"
               rel="noreferrer"
               className="font-bold text-primary-700 transition-colors hover:text-primary-800 hover:underline"
