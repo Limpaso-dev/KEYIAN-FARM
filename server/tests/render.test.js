@@ -35,3 +35,19 @@ test("cell formatting", () => {
   assert.equal(formatCell(new Date("2026-11-06T00:00:00Z"), "date"), "2026-11-06");
   assert.equal(formatCell(null), "");
 });
+
+test("PDF page numbers do not add blank pages", async () => {
+  const pages = (pdf) => (pdf.toString("latin1").match(/\/Type \/Page\b/g) || []).length;
+  assert.equal(pages(await toPdf([report], meta)), 1);
+  assert.equal(pages(await toPdf([report, report], meta)), 2);
+  // Crop reports carry the period, motto and a sign-off per report.
+  const crop = await toPdf([report, report], { ...meta, reportName: "Crop report", periodText: "May 2024", motto: "Nuru ya Jamii", signatures: ["Prepared by", "Checked by", "Confirmed by"], signEachReport: true });
+  assert.equal(pages(crop), 2);
+});
+
+test("CSV for a period report names the report and period", () => {
+  const csv = toCsv([{ ...report, heading: "Tea farm report - May 2024", summary: [{ label: "Achieved", value: 110.25, type: "percent" }] }], { ...meta, reportName: "Crop report", periodText: "May 2024" });
+  assert.match(csv, /Crop report,May 2024/);
+  assert.match(csv, /Tea farm report - May 2024/);
+  assert.match(csv, /Achieved,110.25/);
+});

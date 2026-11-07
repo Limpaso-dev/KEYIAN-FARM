@@ -5,12 +5,14 @@ import { audit } from "../../lib/audit.js";
 import { crud, inTransaction } from "../../lib/crud.js";
 import { badRequest, conflict, notFound, ok } from "../../lib/http.js";
 import { parseBody } from "../../lib/validate.js";
+import { cropReport } from "./crops.reports.js";
 
 const router = express.Router();
 const farmBrief = { select: { id: true, farmNumber: true, cropType: true, location: true } };
 
 // ---------------------------------------------------------------------
-// Farms (sugarcane, tea, coffee)
+// Farms (sugarcane, tea, coffee, fodder). Registered once, then kept up to
+// date through status changes and harvests.
 // ---------------------------------------------------------------------
 const farmRouter = express.Router();
 
@@ -47,11 +49,17 @@ router.use("/farms", crud({
   label: "Farm",
   fields: {
     farmNumber: "string!",
+    longFarmNumber: "string",
     cropType: "option:cropTypes!",
+    variety: "string",
     acreage: "decimal!",
+    hectares: "decimal",
     location: "string!",
     plantingDate: "date",
+    cycleStartDate: "date",
     ratoonCount: "int",
+    expectedTch: "decimal",
+    dailyTarget: "decimal",
     status: "option:farmStatus",
     statusNote: "text",
     notes: "text",
@@ -59,20 +67,37 @@ router.use("/farms", crud({
   // Status changes go through POST /:id/status so they are logged.
   updateFields: {
     farmNumber: "string!",
+    longFarmNumber: "string",
     cropType: "option:cropTypes!",
+    variety: "string",
     acreage: "decimal!",
+    hectares: "decimal",
     location: "string!",
     plantingDate: "date",
+    cycleStartDate: "date",
     ratoonCount: "int",
+    expectedTch: "decimal",
+    dailyTarget: "decimal",
     notes: "text",
   },
   include: { _count: { select: { harvests: true } } },
-  search: ["farmNumber", "location"],
+  search: ["farmNumber", "longFarmNumber", "location", "variety"],
   filters: ["cropType", "status"],
   orderBy: { farmNumber: "asc" },
   prepare: (data) => {
     if (data.acreage !== undefined && !(data.acreage > 0)) throw badRequest("Acreage must be more than zero");
     if (data.ratoonCount !== undefined && data.ratoonCount !== null && data.ratoonCount < 0) throw badRequest("Ratoon count cannot be negative");
+    if (data.hectares !== undefined && data.hectares !== null && data.acreage !== undefined && data.hectares > data.acreage) throw badRequest("Hectares cannot be more than the acreage");
+  },
+  // Log the status the farm was registered with, so reports for earlier
+  // periods show where it stood before any later change. It is dated from
+  // when the standing crop started, since farms are often registered after
+  // the fact.
+  afterWrite: async (farm, { tx, action }) => {
+    if (action !== "create") return;
+    const today = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`);
+    const date = [farm.cycleStartDate, farm.plantingDate].filter((d) => d && d <= today).sort((x, y) => x - y)[0] || today;
+    await tx.cropStatusLog.create({ data: { farmId: farm.id, date, status: farm.status, note: farm.statusNote } });
   },
   beforeDelete: async (farm, { tx }) => {
     if (await tx.cropHarvest.count({ where: { farmId: farm.id } })) throw conflict("This farm has harvest records and cannot be deleted");
@@ -80,7 +105,9 @@ router.use("/farms", crud({
 }));
 
 // ---------------------------------------------------------------------
-// Harvests. Each sugarcane harvest adds one to the farm's ratoon count.
+// Harvests. Each sugarcane harvest adds one to the farm's ratoon count and
+// starts the next ratoon. Tea and coffee are recorded per plucking day,
+// with that day's target copied from the farm.
 // ---------------------------------------------------------------------
 const harvestRouter = express.Router();
 harvestRouter.post("/", allow("cropHarvests", "write"), async (req, res) => {
@@ -89,6 +116,7 @@ harvestRouter.post("/", allow("cropHarvests", "write"), async (req, res) => {
     harvestDate: "date!",
     quantity: "decimal!",
     unit: "option:harvestUnits!",
+    target: "decimal",
     buyer: "string",
     amount: "decimal",
     notes: "text",
@@ -99,8 +127,11 @@ harvestRouter.post("/", allow("cropHarvests", "write"), async (req, res) => {
   const harvest = await inTransaction(async (tx) => {
     const farm = await tx.cropFarm.findUnique({ where: { id: fields.farmId } });
     if (!farm) throw notFound("Farm");
+    if (fields.target === undefined && farm.dailyTarget != null && ["tea", "coffee"].includes(farm.cropType)) fields.target = Number(farm.dailyTarget);
     const created = await tx.cropHarvest.create({ data: fields, include: { farm: farmBrief } });
     const update = {};
+    // A cut starts the next ratoon. Reports count the crop's age from the
+    // latest cut, so the cycle start recorded at registration is kept as is.
     if (farm.cropType === "sugarcane") update.ratoonCount = farm.ratoonCount + 1;
     if (markHarvested) {
       update.status = "harvested";
@@ -118,7 +149,7 @@ router.use("/harvests", crud({
   resource: "cropHarvests",
   model: "cropHarvest",
   fields: {},
-  updateFields: { quantity: "decimal!", unit: "option:harvestUnits!", buyer: "string", amount: "decimal", notes: "text" },
+  updateFields: { quantity: "decimal!", unit: "option:harvestUnits!", target: "decimal", buyer: "string", amount: "decimal", notes: "text" },
   include: { farm: farmBrief },
   dateField: "harvestDate",
   filters: ["farmId"],
@@ -131,5 +162,11 @@ router.use("/harvests", crud({
     }
   },
 }));
+
+// ---------------------------------------------------------------------
+// Period reports: monthly, quarterly, half-year and annual.
+// GET /api/crops/reports?crop=tea&period=month&year=2024&index=5&format=json|pdf|csv
+// ---------------------------------------------------------------------
+router.get("/reports", allow("cropFarms", "read"), cropReport);
 
 export default router;

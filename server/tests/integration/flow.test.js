@@ -250,6 +250,75 @@ if (!url) {
     assert.equal(updated.status, "harvested");
   });
 
+  test("Crops: period reports match the tea and cane report sheets", async () => {
+    // Tea farm report, May and June 2024: 2,500 kg a day target.
+    const tea = await call("crops", "POST", "/crops/farms", { farmNumber: "TEA-01", cropType: "tea", acreage: 60, location: "Keiyian", dailyTarget: 2500 });
+    const may = [["02", 3082.3], ["03", 3468.6], ["06", 3037.1], ["07", 4797.3], ["08", 4865.6], ["09", 5997], ["10", 2785.7], ["13", 2395.7], ["14", 2912], ["15", 2455],
+      ["16", 2446.7], ["17", 2208.3], ["20", 2495.7], ["21", 2851.1], ["22", 2283.4], ["24", 2324.1], ["27", 1820.1], ["28", 2168], ["29", 3046.7], ["30", 1539.7]];
+    const june = [["03", 2346.8], ["04", 3063.2], ["05", 2392.2], ["06", 2354.9], ["07", 2636.4], ["10", 3367.9], ["11", 1582.3], ["12", 2112.2], ["17", 4101.8],
+      ["18", 4110.6], ["19", 3390.7], ["20", 3390.7], ["21", 1991.1], ["24", 3620], ["25", 3194.9], ["26", 2103.3], ["27", 2410.6]];
+    for (const [month, rows] of [["05", may], ["06", june]]) {
+      for (const [d, kgs] of rows) await call("crops", "POST", "/crops/harvests", { farmId: tea.id, harvestDate: `2024-${month}-${d}`, quantity: kgs, unit: "kg", markHarvested: false });
+    }
+    const pick = (report, label) => report.summary.find((s) => s.label.startsWith(label)).value;
+
+    const mayReport = (await call("crops", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=5")).reports[0];
+    assert.equal(pick(mayReport, "Kgs plucked"), 58980.1);
+    assert.equal(pick(mayReport, "Target"), 50000);
+    assert.equal(pick(mayReport, "Variance"), 8980.1);
+    assert.equal(pick(mayReport, "Plucking days"), 20);
+    assert.equal(pick(mayReport, "Average per plucking day"), 2949.01);
+    const daily = mayReport.sections[0];
+    assert.equal(daily.rows.length, 20);
+    assert.equal(daily.rows.find((r) => r.date.startsWith("2024-05-30")).variance, -960.3);
+
+    const juneReport = (await call("crops", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=6")).reports[0];
+    assert.equal(pick(juneReport, "Kgs plucked"), 48169.6);
+    assert.equal(pick(juneReport, "Variance"), 5669.6);
+    assert.equal(pick(juneReport, "Change vs May 2024"), -18.33);
+
+    const q2 = (await call("crops", "GET", "/crops/reports?crop=tea&period=quarter&year=2024&index=2")).reports[0];
+    const monthly = q2.sections[0].rows;
+    assert.deepEqual(monthly.map((r) => r.kgs), [0, 58980.1, 48169.6]);
+    assert.deepEqual(monthly.map((r) => r.toDate), [0, 58980.1, 107149.7]);
+    assert.equal(monthly[1].average, 2949.01);
+
+    // Cane status: 397B, 43.6 ha, RII, 150 TCH, cut on 20 June 2024.
+    const cane = await call("crops", "POST", "/crops/farms", { farmNumber: "397B", longFarmNumber: "27130300", cropType: "sugarcane", acreage: 109, hectares: 43.6, location: "Keiyian", ratoonCount: 2, expectedTch: 150, cycleStartDate: "2023-01-01" });
+    await call("crops", "POST", "/crops/harvests", { farmId: cane.id, harvestDate: "2024-06-20", quantity: 3434.64, unit: "tonnes", markHarvested: true });
+    const caneRow = (report) => report.sections[0].rows.find((r) => r.farmNumber === "397B");
+
+    const feb = (await call("crops", "GET", "/crops/reports?crop=sugarcane&period=month&year=2024&index=2")).reports[0];
+    assert.equal(feb.sections[0].title, "Cane status as at 2024-02-29");
+    assert.deepEqual({ ...caneRow(feb), remarks: undefined, sNo: undefined }, {
+      sNo: undefined, farmNumber: "397B", longFarmNumber: "27130300", hectares: 43.6, acreage: 109, age: 13, cycle: "RII", tch: 150, expectedYield: 6540, achieved: null, yearToDate: null, remarks: undefined,
+    });
+    // Status as at the end of February is the one it was registered with,
+    // not the "Harvested" set by the June cut.
+    assert.equal(caneRow(feb).remarks, "Land preparation");
+    const juneCane = (await call("crops", "GET", "/crops/reports?crop=sugarcane&period=month&year=2024&index=6")).reports[0];
+    assert.equal(caneRow(juneCane).remarks, "Harvested - Recorded with harvest");
+    assert.equal(caneRow(juneCane).cycle, "RIII");
+    assert.equal(caneRow(juneCane).age, 0);
+    assert.equal(caneRow(juneCane).achieved, 3434.64);
+    assert.equal(pick(juneCane, "Average TCH achieved"), 78.78);
+    const h1 = (await call("crops", "GET", "/crops/reports?crop=sugarcane&period=half&year=2024&index=1")).reports[0];
+    assert.equal(h1.sections[2].rows[5].toDate, 3434.64);
+
+    // Every crop at once, downloads, and access.
+    const all = await call("crops", "GET", "/crops/reports?crop=all&period=year&year=2024");
+    assert.deepEqual(all.reports.map((r) => r.crop), ["tea", "sugarcane"]);
+    assert.ok(all.years.includes(2024));
+    const csv = await call("crops", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=5&format=csv", null, { raw: true });
+    assert.match(csv.headers.get("content-disposition"), /keiyian-tea-report-2024-05\.csv/);
+    assert.match(await csv.text(), /Prepared by|Daily plucking - May 2024/);
+    const pdf = await call("crops", "GET", "/crops/reports?crop=all&period=year&year=2024&format=pdf", null, { raw: true });
+    assert.equal(pdf.headers.get("content-type"), "application/pdf");
+    assert.ok((await pdf.arrayBuffer()).byteLength > 2000);
+    await call("crops", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=13", null, { expect: 400 });
+    await call("sales", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=5", null, { expect: 403 });
+  });
+
   test("Accounts: farmer milk payment run", async () => {
     const run = await call("accounts", "POST", "/accounts/milk-payments", { periodStart: today, periodEnd: today });
     assert.equal(run.totalAmount, 5000);

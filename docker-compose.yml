@@ -80,6 +80,24 @@ services:
     networks:
       - application
 
+  # Applies database migrations. The database network is internal, so this
+  # runs inside Docker instead of from the host:
+  #   docker compose run --rm migrate
+  migrate:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      target: build
+    environment:
+      DATABASE_URL: ${DATABASE_URL_DOCKER:?Set DATABASE_URL_DOCKER in the root .env file}
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - database
+
 volumes:
   keiyian_postgres_data:
 

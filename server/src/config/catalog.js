@@ -115,7 +115,8 @@ export const OPTIONS = {
   ]),
   receiptSources: list([["purchase", "Purchase"], ["donation", "Donation"], ["return", "Returned by department"], ["opening", "Opening stock"]]),
 
-  cropTypes: list([["sugarcane", "Sugarcane"], ["tea", "Tea"], ["coffee", "Coffee"]]),
+  cropTypes: list([["sugarcane", "Sugarcane"], ["tea", "Tea"], ["coffee", "Coffee"], ["fodder", "Fodder"]]),
+  reportPeriods: list([["month", "Monthly"], ["quarter", "Quarterly"], ["half", "Half-yearly"], ["year", "Annual"]]),
   farmStatus: list([
     ["land_preparation", "Land preparation"],
     ["planted", "Planted"],
@@ -128,7 +129,7 @@ export const OPTIONS = {
     ["harvested", "Harvested"],
     ["fallow", "Fallow"],
   ]),
-  harvestUnits: list([["tonnes", "Tonnes"], ["kg", "Kilograms"]]),
+  harvestUnits: list([["tonnes", "Tonnes"], ["kg", "Kilograms"], ["bales", "Bales"]]),
 
   requisitionStatus: list([
     ["pending", "Pending approval"],

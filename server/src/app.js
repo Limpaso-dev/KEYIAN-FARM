@@ -23,7 +23,8 @@ const app = express();
 
 app.set("trust proxy", 1);
 app.use(helmet());
-app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173", credentials: true }));
+// Content-Disposition carries the file name of report downloads.
+app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173", credentials: true, exposedHeaders: ["Content-Disposition"] }));
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (req, res) => res.json({ success: true, message: "Keiyian ERP API is running" }));

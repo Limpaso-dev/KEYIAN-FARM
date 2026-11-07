@@ -32,25 +32,25 @@ enum Role {
 }
 
 model User {
-  id                          String      @id @default(uuid())
+  id                          String        @id @default(uuid())
   name                        String
-  email                       String      @unique
+  email                       String        @unique
   phone                       String?
   password                    String
   role                        Role
   department                  Department?
-  employeeId                  String?     @unique
-  isActive                    Boolean     @default(true)
-  mustChangePassword          Boolean     @default(true)
+  employeeId                  String?       @unique
+  isActive                    Boolean       @default(true)
+  mustChangePassword          Boolean       @default(true)
   lastLoginAt                 DateTime?
-  emailVerified               Boolean     @default(true)
+  emailVerified               Boolean       @default(true)
   emailVerificationCodeHash   String?
   emailVerificationExpiresAt  DateTime?
-  emailVerificationAttempts   Int         @default(0)
+  emailVerificationAttempts   Int           @default(0)
   emailVerificationLastSentAt DateTime?
-  createdAt                   DateTime    @default(now())
-  updatedAt                   DateTime    @updatedAt
-  employee                    Employee?   @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  createdAt                   DateTime      @default(now())
+  updatedAt                   DateTime      @updatedAt
+  employee                    Employee?     @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   auditLogs                   AuditLog[]
   requisitions                Requisition[] @relation("RequisitionRequestedBy")
   requisitionsDecided         Requisition[] @relation("RequisitionDecidedBy")
@@ -87,34 +87,34 @@ model Sequence {
 // =====================================================================
 
 model Employee {
-  id               String             @id @default(uuid())
-  staffNumber      String             @unique
-  firstName        String
-  lastName         String
-  nationalId       String?            @unique
-  gender           String?
-  dateOfBirth      DateTime?
-  phone            String?
-  email            String?
-  address          String?
-  department       Department
-  jobTitle         String
-  employmentType   String             @default("permanent")
-  dateHired        DateTime
-  basicSalary      Decimal            @default(0) @db.Decimal(18, 2)
-  bankName         String?
-  bankAccount      String?
-  kraPin           String?
-  status           String             @default("active")
-  notes            String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  user             User?
-  contracts        Contract[]
-  salaryReviews    SalaryReview[]
-  payrolls         Payroll[]
+  id                String             @id @default(uuid())
+  staffNumber       String             @unique
+  firstName         String
+  lastName          String
+  nationalId        String?            @unique
+  gender            String?
+  dateOfBirth       DateTime?
+  phone             String?
+  email             String?
+  address           String?
+  department        Department
+  jobTitle          String
+  employmentType    String             @default("permanent")
+  dateHired         DateTime
+  basicSalary       Decimal            @default(0) @db.Decimal(18, 2)
+  bankName          String?
+  bankAccount       String?
+  kraPin            String?
+  status            String             @default("active")
+  notes             String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  user              User?
+  contracts         Contract[]
+  salaryReviews     SalaryReview[]
+  payrolls          Payroll[]
   disciplinaryCases DisciplinaryCase[]
-  termination      Termination?
+  termination       Termination?
 
   @@index([department, status])
 }
@@ -353,18 +353,18 @@ model MilkTransfer {
 /// Local farmers who deliver milk to MVA. supplierNumber is the short
 /// number farmers are known by (130, 131, ...).
 model MilkSupplier {
-  id             String         @id @default(uuid())
-  supplierNumber Int            @unique
+  id             String            @id @default(uuid())
+  supplierNumber Int               @unique
   firstName      String
   lastName       String
-  nationalId     String?        @unique
+  nationalId     String?           @unique
   phone          String?
   location       String?
-  paymentMethod  String         @default("mpesa")
+  paymentMethod  String            @default("mpesa")
   paymentDetails String?
-  status         String         @default("active")
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  status         String            @default("active")
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
   deliveries     MilkDelivery[]
   paymentLines   MilkPaymentLine[]
 }
@@ -378,17 +378,17 @@ model MilkPrice {
 }
 
 model MilkDelivery {
-  id            String       @id @default(uuid())
+  id            String          @id @default(uuid())
   supplierId    String
-  date          DateTime     @db.Date
+  date          DateTime        @db.Date
   session       String
-  litres        Decimal      @db.Decimal(10, 2)
-  pricePerLitre Decimal      @db.Decimal(10, 2)
-  amount        Decimal      @db.Decimal(18, 2)
+  litres        Decimal         @db.Decimal(10, 2)
+  pricePerLitre Decimal         @db.Decimal(10, 2)
+  amount        Decimal         @db.Decimal(18, 2)
   paymentRunId  String?
   notes         String?
-  createdAt     DateTime     @default(now())
-  supplier      MilkSupplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdAt     DateTime        @default(now())
+  supplier      MilkSupplier    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   paymentRun    MilkPaymentRun? @relation(fields: [paymentRunId], references: [id], onDelete: SetNull)
 
   @@index([date, supplierId])
@@ -618,17 +618,17 @@ model DamageReplacement {
 // =====================================================================
 
 model StoreItem {
-  id             String         @id @default(uuid())
-  code           String         @unique
+  id             String              @id @default(uuid())
+  code           String              @unique
   name           String
   category       String
   unit           String
-  quantityOnHand Decimal        @default(0) @db.Decimal(12, 2)
-  reorderLevel   Decimal        @default(0) @db.Decimal(12, 2)
-  unitCost       Decimal        @default(0) @db.Decimal(12, 2)
-  isActive       Boolean        @default(true)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  quantityOnHand Decimal             @default(0) @db.Decimal(12, 2)
+  reorderLevel   Decimal             @default(0) @db.Decimal(12, 2)
+  unitCost       Decimal             @default(0) @db.Decimal(12, 2)
+  isActive       Boolean             @default(true)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
   receipts       StoreReceipt[]
   issues         StoreIssue[]
   orderItems     PurchaseOrderItem[]
@@ -678,20 +678,32 @@ model StoreIssue {
 // =====================================================================
 
 model CropFarm {
-  id           String          @id @default(uuid())
-  farmNumber   String          @unique
-  cropType     String
-  acreage      Decimal         @db.Decimal(10, 2)
-  location     String
-  plantingDate DateTime?
-  ratoonCount  Int             @default(0)
-  status       String          @default("land_preparation")
-  statusNote   String?
-  notes        String?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  harvests     CropHarvest[]
-  statusLogs   CropStatusLog[]
+  id             String          @id @default(uuid())
+  farmNumber     String          @unique
+  // Miller/factory registration number, e.g. 27431400 on the cane register.
+  longFarmNumber String?
+  // Cane variety, tea clone, or the fodder grown (Boma rhodes, sorghum...).
+  variety        String?
+  cropType       String
+  acreage        Decimal         @db.Decimal(10, 2)
+  // As recorded on the register; worked out from acreage when blank.
+  hectares       Decimal?        @db.Decimal(10, 2)
+  // Sugarcane: expected tonnes of cane per hectare (TCH).
+  expectedTch    Decimal?        @db.Decimal(8, 2)
+  // Tea and coffee: target kilograms per plucking day.
+  dailyTarget    Decimal?        @db.Decimal(12, 2)
+  location       String
+  plantingDate   DateTime?
+  ratoonCount    Int             @default(0)
+  // When the standing crop started: planting, or the last cut for ratoons.
+  cycleStartDate DateTime?       @db.Date
+  status         String          @default("land_preparation")
+  statusNote     String?
+  notes          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  harvests       CropHarvest[]
+  statusLogs     CropStatusLog[]
 
   @@index([cropType, status])
 }
@@ -714,6 +726,8 @@ model CropHarvest {
   harvestDate DateTime @db.Date
   quantity    Decimal  @db.Decimal(12, 2)
   unit        String
+  // Tea and coffee: the target for that day, copied from the farm.
+  target      Decimal? @db.Decimal(12, 2)
   buyer       String?
   amount      Decimal  @default(0) @db.Decimal(18, 2)
   notes       String?
@@ -742,25 +756,25 @@ model Account {
 /// One income or expense entry. category is one of the fixed income or
 /// expense heads configured in src/config/accounts.js.
 model Transaction {
-  id            String   @id @default(uuid())
-  reference     String   @unique
-  date          DateTime @db.Date
-  type          String
-  category      String
-  accountId     String
-  amount        Decimal  @db.Decimal(18, 2)
-  description   String
-  party         String?
-  department    Department?
-  sourceType    String?
-  sourceId      String?
-  status        String   @default("posted")
-  voidReason    String?
-  createdById   String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  account       Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  createdBy     User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  id          String      @id @default(uuid())
+  reference   String      @unique
+  date        DateTime    @db.Date
+  type        String
+  category    String
+  accountId   String
+  amount      Decimal     @db.Decimal(18, 2)
+  description String
+  party       String?
+  department  Department?
+  sourceType  String?
+  sourceId    String?
+  status      String      @default("posted")
+  voidReason  String?
+  createdById String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  account     Account     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  createdBy   User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([date, type, category])
   @@index([sourceType, sourceId])
