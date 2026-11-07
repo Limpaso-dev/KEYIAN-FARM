@@ -6,3 +6,4 @@ dist/
 build/
 .vite/
 .env.example
+/generated/prisma

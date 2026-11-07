@@ -1,2540 +1,326 @@
-import { useEffect, useMemo, useState } from "react";
+import { Truck } from "lucide-react";
+import { ActionButton } from "../../components/resource/ActionButton";
+import { ModulePage } from "../../components/resource/ModulePage";
+import { ResourcePage } from "../../components/resource/ResourcePage";
+import { StockPanel } from "../../components/resource/StockPanel";
+import { Badge, Card, StatCard } from "../../components/ui/ui";
+import { get } from "../../lib/api";
+import { money, number, today } from "../../lib/format";
+import { refs } from "../../lib/refs";
+import { useFetch } from "../../lib/useFetch";
+import { productLines, productTransfers } from "../mva/productTransfers";
 
-import {
-  Plus,
-  Search,
-  RefreshCw,
-  Trash2,
-  X,
-  ShoppingCart,
-  Users,
-  Package,
-  CreditCard,
-  FileText,
-  DollarSign,
-} from "lucide-react";
+const blankToZero = (value) => (value === "" || value == null ? 0 : Number(value));
 
-import {
-  createProduct,
-  getProducts,
-  deleteProduct,
-} from "../../services/salesProduct.service";
-
-import {
-  createCustomer,
-  getCustomers,
-  deleteCustomer,
-} from "../../services/salesCustomer.service";
-
-import {
-  createSale,
-  getSales,
-  deleteSale,
-  getSalesSummary,
-} from "../../services/sales.service";
-
-import {
-  createSalePayment,
-  getSalePayments,
-  deleteSalePayment,
-} from "../../services/salePayment.service";
-
-const emptySaleItem = {
-  product: "",
-  quantity: 1,
-  unitPrice: 0,
-  discount: 0,
-  tax: 0,
+const received = {
+  ...productTransfers,
+  title: "Products received from MVA",
+  description: "Confirm deliveries from MVA. Stock is added to Sales only when you receive it.",
+  defaultQuery: { status: "sent" },
+  toolbar: undefined,
+  deletable: false,
 };
 
-const SalesPage = () => {
-  const [activeTab, setActiveTab] = useState("overview");
+// ---------------------------------------------------------------------
+const SalesSummary = () => {
+  const { data } = useFetch("/sales/summary");
+  const { data: todaySales } = useFetch("/sales/sales", { from: today(), to: today() });
+  const rows = todaySales || [];
+  return (
+    <Card className="p-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Local sales today" value={money(rows.reduce((s, r) => s + r.totalAmount, 0))} />
+        <StatCard label="Collected today" value={money(rows.reduce((s, r) => s + r.amountPaid, 0))} />
+        <StatCard label="Credit outstanding" value={money(data?.creditOutstanding)} hint={`${data?.creditSales ?? 0} sale(s)`} tone={data?.creditOutstanding ? "warn" : "default"} />
+        <StatCard label="Vehicles on the road" value={data?.openDispatches ?? 0} />
+      </div>
+    </Card>
+  );
+};
 
-  const [products, setProducts] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [sales, setSales] = useState([]);
-  const [payments, setPayments] = useState([]);
-  const [summary, setSummary] = useState(null);
+const saleFields = [
+  { name: "date", label: "Date", type: "date", required: true },
+  { name: "paymentMethod", label: "Payment", type: "select", options: "paymentMethods", required: true },
+  { name: "customerId", label: "Registered customer", type: "select", ref: refs.customers, placeholder: "Walk-in customer" },
+  { name: "customerName", label: "Or customer name", showIf: (v) => !v.customerId },
+  {
+    name: "items", label: "Products", type: "items", addLabel: "Add product",
+    columns: [
+      { name: "productId", label: "Product", type: "select", ref: refs.products, required: true, onSelect: (p) => ({ unitPrice: p.unitPrice }) },
+      { name: "quantity", label: "Quantity", type: "number", required: true, width: 110 },
+      { name: "unitPrice", label: "Price", type: "number", width: 120 },
+      { name: "total", label: "Total", type: "display", width: 120, render: (r) => money(blankToZero(r.quantity) * blankToZero(r.unitPrice)) },
+    ],
+    total: (r) => blankToZero(r.quantity) * blankToZero(r.unitPrice),
+    formatTotal: money,
+  },
+  { name: "amountPaid", label: "Amount paid now (KES)", type: "number", help: "Leave blank if paid in full", showIf: (v) => v.paymentMethod !== "credit" },
+  { name: "amountPaidCredit", label: "Deposit paid now (KES)", type: "number", showIf: (v) => v.paymentMethod === "credit" },
+  { name: "notes", label: "Notes", type: "textarea" },
+];
 
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+const sales = {
+  resource: "sales",
+  endpoint: "/sales/sales",
+  title: "Local sales",
+  singular: "Sale",
+  createLabel: "New sale",
+  formSize: "lg",
+  editFields: false,
+  defaultQuery: { from: today(), to: today() },
+  filters: [{ type: "search", placeholder: "Sale no. or customer" }, { name: "status", label: "Payment", options: "saleStatus" }, { type: "dateRange" }],
+  columns: [
+    { key: "saleNumber", label: "Sale" },
+    { key: "date", label: "Date", type: "date" },
+    { key: "customer", label: "Customer", render: (r) => r.customer?.name || r.customerName || "Walk-in" },
+    { key: "items", label: "Products", render: (r) => productLines(r.items) },
+    { key: "paymentMethod", label: "Payment", type: "option:paymentMethods" },
+    { key: "totalAmount", label: "Total", type: "money" },
+    { key: "amountPaid", label: "Paid", type: "money" },
+    { key: "status", label: "Status", type: "status:saleStatus" },
+  ],
+  createFields: saleFields,
+  createInitial: () => ({ date: today(), paymentMethod: "cash", items: [{ productId: "", quantity: "", unitPrice: "" }] }),
+  toPayload: (v) => ({
+    date: v.date,
+    paymentMethod: v.paymentMethod,
+    customerId: v.customerId || undefined,
+    customerName: v.customerId ? undefined : v.customerName,
+    amountPaid: v.paymentMethod === "credit" ? v.amountPaidCredit || 0 : v.amountPaid === "" ? undefined : v.amountPaid,
+    notes: v.notes,
+    items: (v.items || []).filter((i) => i.productId).map((i) => ({ productId: i.productId, quantity: i.quantity, unitPrice: i.unitPrice === "" ? undefined : i.unitPrice })),
+  }),
+  actions: [{
+    key: "pay", label: "Receive payment", allowed: (c) => c.can("sales", "write"), when: (r) => r.status !== "paid",
+    path: (r) => `/sales/sales/${r.id}/payments`, title: (r) => `Payment for ${r.saleNumber} (balance ${money(r.totalAmount - r.amountPaid)})`,
+    fields: [
+      { name: "amount", label: "Amount (KES)", type: "number", required: true },
+      { name: "paymentMethod", label: "Paid by", type: "select", options: "paymentMethods", optionFilter: (o) => o.value !== "credit", required: true },
+      { name: "date", label: "Date", type: "date", required: true },
+      { name: "reference", label: "Reference (e.g. M-Pesa code)" },
+    ],
+    initial: (r) => ({ amount: r.totalAmount - r.amountPaid, paymentMethod: "mpesa", date: today() }),
+  }],
+  footer: (rows) => rows.length > 0 && (
+    <div className="flex justify-end gap-6 border-t border-slate-100 px-4 py-3 text-sm">
+      <span>Total: <strong>{money(rows.reduce((s, r) => s + r.totalAmount, 0))}</strong></span>
+      <span>Paid: <strong>{money(rows.reduce((s, r) => s + r.amountPaid, 0))}</strong></span>
+    </div>
+  ),
+};
 
-  const [search, setSearch] = useState("");
+// ---------------------------------------------------------------------
+const vehicles = {
+  resource: "vehicles",
+  endpoint: "/sales/vehicles",
+  title: "Vehicles and crew",
+  description: "Each vehicle has a driver and a sales person who report back every evening.",
+  singular: "Vehicle",
+  createLabel: "Register vehicle",
+  filters: [{ type: "search", placeholder: "Registration or crew" }, { name: "status", label: "Status", options: "vehicleStatus" }],
+  columns: [
+    { key: "registrationNumber", label: "Registration" },
+    { key: "description", label: "Description" },
+    { key: "driver", label: "Driver", render: (r) => `${r.driverName}${r.driverPhone ? ` (${r.driverPhone})` : ""}` },
+    { key: "sales", label: "Sales person", render: (r) => `${r.salesPersonName}${r.salesPersonPhone ? ` (${r.salesPersonPhone})` : ""}` },
+    { key: "status", label: "Status", type: "status:vehicleStatus" },
+  ],
+  createFields: [
+    { name: "registrationNumber", label: "Registration number", required: true },
+    { name: "description", label: "Description", placeholder: "e.g. Toyota Probox, white" },
+    { name: "driverName", label: "Driver", required: true },
+    { name: "driverPhone", label: "Driver phone", type: "tel" },
+    { name: "salesPersonName", label: "Sales person", required: true },
+    { name: "salesPersonPhone", label: "Sales person phone", type: "tel" },
+    { name: "status", label: "Status", type: "select", options: "vehicleStatus" },
+  ],
+  createInitial: () => ({ status: "active" }),
+};
 
-  const [showProductForm, setShowProductForm] =
-    useState(false);
+const DispatchDetails = ({ row }) => (
+  <table className="w-full max-w-3xl text-sm">
+    <thead className="text-left text-xs uppercase text-slate-500"><tr><th className="py-1">Product</th><th className="text-right">Loaded</th><th className="text-right">Returned</th><th className="text-right">Damaged</th><th className="text-right">Sold</th><th className="text-right">Price</th><th className="text-right">Value sold</th></tr></thead>
+    <tbody className="divide-y divide-slate-200">
+      {row.items.map((i) => (
+        <tr key={i.id}><td className="py-1.5">{i.product?.name}</td><td className="text-right">{number(i.quantityDispatched)}</td><td className="text-right">{number(i.quantityReturned)}</td><td className="text-right">{number(i.quantityDamaged)}</td><td className="text-right">{number(i.quantitySold)}</td><td className="text-right">{money(i.unitPrice)}</td><td className="text-right">{money(i.quantitySold * i.unitPrice)}</td></tr>
+      ))}
+    </tbody>
+    {row.status === "reconciled" && (
+      <tfoot className="font-medium"><tr><td className="pt-2" colSpan={7}>Cash {money(row.cashReturned)} + M-Pesa {money(row.mpesaReturned)} against {money(row.expectedAmount)} expected: {row.variance < 0 ? <Badge tone="red">Short {money(-row.variance)}</Badge> : row.variance > 0 ? <Badge tone="blue">Over {money(row.variance)}</Badge> : <Badge tone="green">Balanced</Badge>}</td></tr></tfoot>
+    )}
+  </table>
+);
 
-  const [showCustomerForm, setShowCustomerForm] =
-    useState(false);
-
-  const [showSaleForm, setShowSaleForm] =
-    useState(false);
-
-  const [showPaymentForm, setShowPaymentForm] =
-    useState(false);
-
-  const [message, setMessage] = useState({
-    type: "",
-    text: "",
-  });
-
-  const [productForm, setProductForm] = useState({
-    name: "",
-    category: "",
-    sku: "",
-    unit: "",
-    sellingPrice: "",
-    stockQuantity: "",
-    status: "active",
-  });
-
-  const [customerForm, setCustomerForm] = useState({
-    customerCode: "",
-    name: "",
-    phone: "",
-    email: "",
-    address: "",
-    taxNumber: "",
-    customerType: "individual",
-    creditLimit: "",
-    status: "active",
-  });
-
-  const [saleForm, setSaleForm] = useState({
-    invoiceNumber: "",
-    customer: "",
-    saleDate: "",
-    discount: 0,
-    tax: 0,
-    amountPaid: 0,
-    paymentMethod: "cash",
-    status: "confirmed",
-    notes: "",
-    items: [{ ...emptySaleItem }],
-  });
-
-  const [paymentForm, setPaymentForm] = useState({
-    sale: "",
-    customer: "",
-    amount: "",
-    paymentDate: "",
-    paymentMethod: "cash",
-    reference: "",
-    status: "confirmed",
-    notes: "",
-  });
-
-  const showMessage = (type, text) => {
-    setMessage({ type, text });
-
-    setTimeout(() => {
-      setMessage({ type: "", text: "" });
-    }, 4000);
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | DATA LOADING
-  |--------------------------------------------------------------------------
-  */
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-
-      const [
-        productsResponse,
-        customersResponse,
-        salesResponse,
-        paymentsResponse,
-        summaryResponse,
-      ] = await Promise.all([
-        getProducts(),
-        getCustomers(),
-        getSales(),
-        getSalePayments(),
-        getSalesSummary(),
-      ]);
-
-      setProducts(
-        productsResponse?.products ||
-          productsResponse?.data ||
-          []
-      );
-
-      setCustomers(
-        customersResponse?.customers ||
-          customersResponse?.data ||
-          []
-      );
-
-      setSales(
-        salesResponse?.sales ||
-          salesResponse?.data ||
-          []
-      );
-
-      setPayments(
-        paymentsResponse?.payments ||
-          paymentsResponse?.data ||
-          []
-      );
-
-      setSummary(
-        summaryResponse?.summary ||
-          summaryResponse?.data ||
-          summaryResponse ||
-          null
-      );
-    } catch (error) {
-      console.error(error);
-
-      showMessage(
-        "error",
-        error.response?.data?.message ||
-          "Failed to load sales data."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  /*
-  |--------------------------------------------------------------------------
-  | PRODUCT FORM
-  |--------------------------------------------------------------------------
-  */
-
-  const handleProductChange = (e) => {
-    const { name, value } = e.target;
-
-    setProductForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  const handleCreateProduct = async (e) => {
-    e.preventDefault();
-
-    try {
-      setSubmitting(true);
-
-      await createProduct({
-        ...productForm,
-        sellingPrice: Number(
-          productForm.sellingPrice || 0
-        ),
-        stockQuantity: Number(
-          productForm.stockQuantity || 0
-        ),
-      });
-
-      setProductForm({
-        name: "",
-        category: "",
-        sku: "",
-        unit: "",
-        sellingPrice: "",
-        stockQuantity: "",
-        status: "active",
-      });
-
-      setShowProductForm(false);
-
-      showMessage(
-        "success",
-        "Product created successfully."
-      );
-
-      await loadData();
-    } catch (error) {
-      showMessage(
-        "error",
-        error.response?.data?.message ||
-          "Failed to create product."
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | CUSTOMER FORM
-  |--------------------------------------------------------------------------
-  */
-
-  const handleCustomerChange = (e) => {
-    const { name, value } = e.target;
-
-    setCustomerForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  const handleCreateCustomer = async (e) => {
-    e.preventDefault();
-
-    try {
-      setSubmitting(true);
-
-      await createCustomer({
-        ...customerForm,
-        creditLimit: Number(
-          customerForm.creditLimit || 0
-        ),
-      });
-
-      setCustomerForm({
-        customerCode: "",
-        name: "",
-        phone: "",
-        email: "",
-        address: "",
-        taxNumber: "",
-        customerType: "individual",
-        creditLimit: "",
-        status: "active",
-      });
-
-      setShowCustomerForm(false);
-
-      showMessage(
-        "success",
-        "Customer created successfully."
-      );
-
-      await loadData();
-    } catch (error) {
-      showMessage(
-        "error",
-        error.response?.data?.message ||
-          "Failed to create customer."
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | SALE FORM
-  |--------------------------------------------------------------------------
-  */
-
-  const handleSaleChange = (e) => {
-    const { name, value } = e.target;
-
-    setSaleForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
-
-  const handleSaleItemChange = (
-    index,
-    field,
-    value
-  ) => {
-    setSaleForm((prev) => {
-      const items = [...prev.items];
-
-      items[index] = {
-        ...items[index],
-        [field]: value,
-      };
-
-      if (field === "product") {
-        const selectedProduct = products.find(
-          (product) =>
-            product._id === value
-        );
-
-        if (selectedProduct) {
-          items[index].unitPrice =
-            selectedProduct.sellingPrice || 0;
-        }
-      }
-
-      return {
-        ...prev,
-        items,
-      };
-    });
-  };
-
-  const addSaleItem = () => {
-    setSaleForm((prev) => ({
-      ...prev,
-      items: [
-        ...prev.items,
-        { ...emptySaleItem },
-      ],
-    }));
-  };
-
-  const removeSaleItem = (index) => {
-    setSaleForm((prev) => ({
-      ...prev,
-      items: prev.items.filter(
-        (_, itemIndex) =>
-          itemIndex !== index
-      ),
-    }));
-  };
-
-  const saleSubtotal = useMemo(() => {
-    return saleForm.items.reduce(
-      (total, item) => {
-        const quantity =
-          Number(item.quantity) || 0;
-
-        const unitPrice =
-          Number(item.unitPrice) || 0;
-
-        const discount =
-          Number(item.discount) || 0;
-
-        const itemTotal =
-          quantity * unitPrice;
-
-        return (
-          total +
-          Math.max(
-            itemTotal - discount,
-            0
-          )
-        );
+const dispatches = {
+  resource: "dispatches",
+  endpoint: "/sales/dispatches",
+  title: "Vehicle dispatch and evening returns",
+  description: "Load vehicles in the morning; in the evening record what came back, what was damaged and the money handed in.",
+  singular: "Dispatch",
+  editFields: false,
+  deletableWhen: (r) => r.status === "dispatched",
+  defaultQuery: { from: today(), to: today() },
+  filters: [{ name: "status", label: "Status", options: "dispatchStatus" }, { type: "dateRange" }],
+  columns: [
+    { key: "dispatchNumber", label: "Dispatch" },
+    { key: "date", label: "Date", type: "date" },
+    { key: "vehicle", label: "Vehicle", render: (r) => r.vehicle?.registrationNumber },
+    { key: "crew", label: "Crew", render: (r) => `${r.driverName} / ${r.salesPersonName}` },
+    { key: "items", label: "Loaded", render: (r) => r.items.map((i) => `${i.product?.name} ${number(i.quantityDispatched)}`).join(", ") },
+    { key: "expectedAmount", label: "Expected", type: "money" },
+    { key: "handedIn", label: "Handed in", render: (r) => (r.status === "reconciled" ? money(r.cashReturned + r.mpesaReturned) : ""), align: "right" },
+    { key: "variance", label: "Variance", render: (r) => (r.status === "reconciled" ? <span className={r.variance < 0 ? "font-medium text-rose-700" : ""}>{money(r.variance)}</span> : ""), align: "right" },
+    { key: "status", label: "Status", type: "status:dispatchStatus" },
+  ],
+  expand: (row) => <DispatchDetails row={row} />,
+  actions: [{
+    key: "reconcile", label: "Evening return", variant: "primary",
+    allowed: (c) => c.can("dispatches", "reconcile"), when: (r) => r.status === "dispatched",
+    path: (r) => `/sales/dispatches/${r.id}/reconcile`, title: (r) => `Evening return - ${r.vehicle?.registrationNumber} (${r.driverName} / ${r.salesPersonName})`,
+    size: "lg",
+    fields: [
+      {
+        name: "items", label: "What came back", type: "items", fixedRows: true,
+        columns: [
+          { name: "product", label: "Product", type: "display" },
+          { name: "loaded", label: "Loaded", type: "display", width: 90 },
+          { name: "quantityReturned", label: "Returned unsold", type: "number", width: 130 },
+          { name: "quantityDamaged", label: "Damaged", type: "number", width: 110 },
+          { name: "sold", label: "Sold", type: "display", width: 90, render: (r) => number(r.loaded - blankToZero(r.quantityReturned) - blankToZero(r.quantityDamaged)) },
+          { name: "value", label: "Value sold", type: "display", width: 120, render: (r) => money((r.loaded - blankToZero(r.quantityReturned) - blankToZero(r.quantityDamaged)) * r.unitPrice) },
+        ],
+        total: (r) => (r.loaded - blankToZero(r.quantityReturned) - blankToZero(r.quantityDamaged)) * r.unitPrice,
+        formatTotal: (t) => `Expected: ${money(t)}`,
       },
-      0
-    );
-  }, [saleForm.items]);
-
-  const saleTotal = useMemo(() => {
-    const discount =
-      Number(saleForm.discount) || 0;
-
-    const tax =
-      Number(saleForm.tax) || 0;
-
-    return Math.max(
-      saleSubtotal - discount + tax,
-      0
-    );
-  }, [
-    saleSubtotal,
-    saleForm.discount,
-    saleForm.tax,
-  ]);
-
-  const handleCreateSale = async (e) => {
-    e.preventDefault();
-
-    if (!saleForm.customer) {
-      showMessage(
-        "error",
-        "Please select a customer."
-      );
-      return;
-    }
-
-    if (
-      saleForm.items.length === 0 ||
-      saleForm.items.some(
-        (item) => !item.product
-      )
-    ) {
-      showMessage(
-        "error",
-        "Please add at least one valid product."
-      );
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-
-      const items = saleForm.items.map(
-        (item) => {
-          const quantity =
-            Number(item.quantity) || 0;
-
-          const unitPrice =
-            Number(item.unitPrice) || 0;
-
-          const discount =
-            Number(item.discount) || 0;
-
-          const tax =
-            Number(item.tax) || 0;
-
-          const total = Math.max(
-            quantity * unitPrice -
-              discount +
-              tax,
-            0
-          );
-
-          return {
-            product: item.product,
-            quantity,
-            unitPrice,
-            discount,
-            tax,
-            total,
-          };
-        }
-      );
-
-      await createSale({
-        invoiceNumber:
-          saleForm.invoiceNumber.trim(),
-
-        customer: saleForm.customer,
-
-        saleDate:
-          saleForm.saleDate ||
-          new Date().toISOString(),
-
-        items,
-
-        discount: Number(
-          saleForm.discount || 0
-        ),
-
-        tax: Number(
-          saleForm.tax || 0
-        ),
-
-        amountPaid: Number(
-          saleForm.amountPaid || 0
-        ),
-
-        paymentMethod:
-          saleForm.paymentMethod,
-
-        status: saleForm.status,
-
-        notes: saleForm.notes,
-      });
-
-      setSaleForm({
-        invoiceNumber: "",
-        customer: "",
-        saleDate: "",
-        discount: 0,
-        tax: 0,
-        amountPaid: 0,
-        paymentMethod: "cash",
-        status: "confirmed",
-        notes: "",
-        items: [{ ...emptySaleItem }],
-      });
-
-      setShowSaleForm(false);
-
-      showMessage(
-        "success",
-        "Sale created successfully."
-      );
-
-      await loadData();
-    } catch (error) {
-      showMessage(
-        "error",
-        error.response?.data?.message ||
-          "Failed to create sale."
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | PAYMENT FORM
-  |--------------------------------------------------------------------------
-  */
-
-  const handlePaymentChange = (e) => {
-    const { name, value } = e.target;
-
-    setPaymentForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-
-    if (name === "sale") {
-      const selectedSale = sales.find(
-        (sale) => sale._id === value
-      );
-
-      if (selectedSale) {
-        setPaymentForm((prev) => ({
-          ...prev,
-          sale: value,
-          customer:
-            selectedSale.customer?._id ||
-            selectedSale.customer ||
-            "",
-        }));
-      }
-    }
-  };
-
-  const handleCreatePayment = async (e) => {
-    e.preventDefault();
-
-    if (
-      !paymentForm.sale ||
-      !paymentForm.customer
-    ) {
-      showMessage(
-        "error",
-        "Please select a sale."
-      );
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-
-      await createSalePayment({
-        ...paymentForm,
-        amount: Number(
-          paymentForm.amount || 0
-        ),
-        paymentDate:
-          paymentForm.paymentDate ||
-          new Date().toISOString(),
-      });
-
-      setPaymentForm({
-        sale: "",
-        customer: "",
-        amount: "",
-        paymentDate: "",
-        paymentMethod: "cash",
-        reference: "",
-        status: "confirmed",
-        notes: "",
-      });
-
-      setShowPaymentForm(false);
-
-      showMessage(
-        "success",
-        "Payment recorded successfully."
-      );
-
-      await loadData();
-    } catch (error) {
-      showMessage(
-        "error",
-        error.response?.data?.message ||
-          "Failed to record payment."
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | DELETE HANDLERS
-  |--------------------------------------------------------------------------
-  */
-
-  const handleDeleteProduct = async (id) => {
-    if (
-      !window.confirm(
-        "Are you sure you want to delete this product?"
-      )
-    ) {
-      return;
-    }
-
-    try {
-      await deleteProduct(id);
-
-      showMessage(
-        "success",
-        "Product deleted successfully."
-      );
-
-      await loadData();
-    } catch (error) {
-      showMessage(
-        "error",
-        error.response?.data?.message ||
-          "Failed to delete product."
-      );
-    }
-  };
-
-  const handleDeleteCustomer = async (id) => {
-    if (
-      !window.confirm(
-        "Are you sure you want to delete this customer?"
-      )
-    ) {
-      return;
-    }
-
-    try {
-      await deleteCustomer(id);
-
-      showMessage(
-        "success",
-        "Customer deleted successfully."
-      );
-
-      await loadData();
-    } catch (error) {
-      showMessage(
-        "error",
-        error.response?.data?.message ||
-          "Failed to delete customer."
-      );
-    }
-  };
-
-  const handleDeleteSale = async (id) => {
-    if (
-      !window.confirm(
-        "Are you sure you want to delete this sale?"
-      )
-    ) {
-      return;
-    }
-
-    try {
-      await deleteSale(id);
-
-      showMessage(
-        "success",
-        "Sale deleted successfully."
-      );
-
-      await loadData();
-    } catch (error) {
-      showMessage(
-        "error",
-        error.response?.data?.message ||
-          "Failed to delete sale."
-      );
-    }
-  };
-
-  const handleDeletePayment = async (id) => {
-    if (
-      !window.confirm(
-        "Are you sure you want to delete this payment?"
-      )
-    ) {
-      return;
-    }
-
-    try {
-      await deleteSalePayment(id);
-
-      showMessage(
-        "success",
-        "Payment deleted successfully."
-      );
-
-      await loadData();
-    } catch (error) {
-      showMessage(
-        "error",
-        error.response?.data?.message ||
-          "Failed to delete payment."
-      );
-    }
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | FILTERING
-  |--------------------------------------------------------------------------
-  */
-
-  const filteredProducts = products.filter(
-    (product) =>
-      `${product.name} ${product.sku || ""} ${
-        product.category || ""
-      }`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-  );
-
-  const filteredCustomers = customers.filter(
-    (customer) =>
-      `${customer.name} ${
-        customer.customerCode || ""
-      } ${customer.phone || ""}`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-  );
-
-  const filteredSales = sales.filter(
-    (sale) =>
-      `${sale.invoiceNumber || ""} ${
-        sale.customer?.name || ""
-      }`
-        .toLowerCase()
-        .includes(search.toLowerCase())
-  );
-
-  /*
-  |--------------------------------------------------------------------------
-  | HELPERS
-  |--------------------------------------------------------------------------
-  */
-
-  const getCustomerName = (customer) => {
-    if (!customer) return "Unknown";
-
-    if (typeof customer === "object") {
-      return customer.name || "Unknown";
-    }
-
-    const found = customers.find(
-      (item) => item._id === customer
-    );
-
-    return found?.name || "Unknown";
-  };
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat(
-      "en-KE",
-      {
-        style: "currency",
-        currency: "KES",
-        minimumFractionDigits: 2,
-      }
-    ).format(Number(amount) || 0);
-  };
-
-  const formatDate = (date) => {
-    if (!date) return "-";
-
-    return new Date(date).toLocaleDateString(
-      "en-KE",
-      {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      }
-    );
-  };
-
-  const statusBadge = (status) => {
-    const styles = {
-      paid: "bg-emerald-50 text-emerald-700",
-      confirmed:
-        "bg-emerald-50 text-emerald-700",
-      completed:
-        "bg-emerald-50 text-emerald-700",
-      partially_paid:
-        "bg-amber-50 text-amber-700",
-      unpaid:
-        "bg-red-50 text-red-700",
-      cancelled:
-        "bg-red-50 text-red-700",
-      draft:
-        "bg-slate-100 text-slate-700",
-      pending:
-        "bg-amber-50 text-amber-700",
-      reversed:
-        "bg-red-50 text-red-700",
-    };
-
-    return (
-      <span
-        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-          styles[status] ||
-          "bg-slate-100 text-slate-700"
-        }`}
-      >
-        {String(status || "unknown")
-          .replaceAll("_", " ")
-          .replace(
-            /\b\w/g,
-            (letter) => letter.toUpperCase()
-          )}
-      </span>
-    );
-  };
-
-  /*
-  |--------------------------------------------------------------------------
-  | LOADING
-  |--------------------------------------------------------------------------
-  */
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[500px] items-center justify-center">
-        <div className="flex items-center gap-3 text-slate-500">
-          <RefreshCw
-            size={20}
-            className="animate-spin"
-          />
-          Loading sales module...
-        </div>
-      </div>
-    );
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | RENDER
-  |--------------------------------------------------------------------------
-  */
-
-  return (
-    <div className="space-y-6">
-      {/* HEADER */}
-
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            Sales
-          </h1>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Manage products, customers, sales,
-            invoices and payments.
-          </p>
-        </div>
-
-        <button
-          onClick={loadData}
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-        >
-          <RefreshCw size={17} />
-          Refresh
-        </button>
-      </div>
-
-      {/* ALERT */}
-
-      {message.text && (
-        <div
-          className={`rounded-lg border px-4 py-3 text-sm ${
-            message.type === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-              : "border-red-200 bg-red-50 text-red-700"
-          }`}
-        >
-          {message.text}
-        </div>
-      )}
-
-      {/* SUMMARY */}
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard
-          title="Total Sales"
-          value={
-            summary?.totalSales ??
-            sales.length
-          }
-          icon={ShoppingCart}
-        />
-
-        <SummaryCard
-          title="Total Revenue"
-          value={formatCurrency(
-            summary?.totalRevenue ??
-              sales.reduce(
-                (total, sale) =>
-                  total +
-                  Number(
-                    sale.totalAmount || 0
-                  ),
-                0
-              )
-          )}
-          icon={DollarSign}
-        />
-
-        <SummaryCard
-          title="Customers"
-          value={customers.length}
-          icon={Users}
-        />
-
-        <SummaryCard
-          title="Products"
-          value={products.length}
-          icon={Package}
-        />
-      </div>
-
-      {/* TABS */}
-
-      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <div className="flex min-w-max border-b border-slate-200">
-          {[
-            ["overview", "Overview"],
-            ["sales", "Sales"],
-            ["customers", "Customers"],
-            ["products", "Products"],
-            ["payments", "Payments"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => {
-                setActiveTab(key);
-                setSearch("");
-              }}
-              className={`border-b-2 px-5 py-3 text-sm font-medium transition ${
-                activeTab === key
-                  ? "border-primary-600 text-primary-700"
-                  : "border-transparent text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* OVERVIEW */}
-
-      {activeTab === "overview" && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 bg-white p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <h2 className="font-semibold text-slate-900">
-                  Recent Sales
-                </h2>
-
-                <p className="text-sm text-slate-500">
-                  Latest transactions
-                </p>
-              </div>
-
-              <FileText
-                size={20}
-                className="text-primary-600"
-              />
-            </div>
-
-            {sales.length === 0 ? (
-              <EmptyState text="No sales recorded yet." />
-            ) : (
-              <div className="space-y-3">
-                {sales.slice(0, 5).map(
-                  (sale) => (
-                    <div
-                      key={sale._id}
-                      className="flex items-center justify-between rounded-lg bg-slate-50 p-3"
-                    >
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">
-                          {sale.invoiceNumber}
-                        </p>
-
-                        <p className="text-xs text-slate-500">
-                          {getCustomerName(
-                            sale.customer
-                          )}
-                        </p>
-                      </div>
-
-                      <div className="text-right">
-                        <p className="text-sm font-semibold text-slate-900">
-                          {formatCurrency(
-                            sale.totalAmount
-                          )}
-                        </p>
-
-                        {statusBadge(
-                          sale.paymentStatus
-                        )}
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-white p-6">
-            <div className="mb-5 flex items-center justify-between">
-              <div>
-                <h2 className="font-semibold text-slate-900">
-                  Recent Payments
-                </h2>
-
-                <p className="text-sm text-slate-500">
-                  Latest customer payments
-                </p>
-              </div>
-
-              <CreditCard
-                size={20}
-                className="text-primary-600"
-              />
-            </div>
-
-            {payments.length === 0 ? (
-              <EmptyState text="No payments recorded yet." />
-            ) : (
-              <div className="space-y-3">
-                {payments
-                  .slice(0, 5)
-                  .map((payment) => (
-                    <div
-                      key={payment._id}
-                      className="flex items-center justify-between rounded-lg bg-slate-50 p-3"
-                    >
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">
-                          {payment.reference}
-                        </p>
-
-                        <p className="text-xs text-slate-500">
-                          {payment.paymentMethod}
-                        </p>
-                      </div>
-
-                      <div className="text-right">
-                        <p className="text-sm font-semibold text-slate-900">
-                          {formatCurrency(
-                            payment.amount
-                          )}
-                        </p>
-
-                        {statusBadge(
-                          payment.status
-                        )}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* SALES */}
-
-      {activeTab === "sales" && (
-        <div className="space-y-4">
-          <SectionHeader
-            title="Sales & Invoices"
-            buttonText="New Sale"
-            onClick={() =>
-              setShowSaleForm(true)
-            }
-          />
-
-          <SearchBox
-            value={search}
-            onChange={setSearch}
-            placeholder="Search invoice or customer..."
-          />
-
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  <TableHeader>
-                    Invoice
-                  </TableHeader>
-
-                  <TableHeader>
-                    Customer
-                  </TableHeader>
-
-                  <TableHeader>
-                    Date
-                  </TableHeader>
-
-                  <TableHeader>
-                    Total
-                  </TableHeader>
-
-                  <TableHeader>
-                    Payment
-                  </TableHeader>
-
-                  <TableHeader>
-                    Status
-                  </TableHeader>
-
-                  <TableHeader>
-                    Actions
-                  </TableHeader>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredSales.length ===
-                0 ? (
-                  <tr>
-                    <td
-                      colSpan="7"
-                      className="px-6 py-10 text-center text-slate-500"
-                    >
-                      No sales found.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredSales.map(
-                    (sale) => (
-                      <tr
-                        key={sale._id}
-                        className="border-t border-slate-100"
-                      >
-                        <TableCell strong>
-                          {
-                            sale.invoiceNumber
-                          }
-                        </TableCell>
-
-                        <TableCell>
-                          {getCustomerName(
-                            sale.customer
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          {formatDate(
-                            sale.saleDate
-                          )}
-                        </TableCell>
-
-                        <TableCell strong>
-                          {formatCurrency(
-                            sale.totalAmount
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          {statusBadge(
-                            sale.paymentStatus
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          {statusBadge(
-                            sale.status
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          <button
-                            onClick={() =>
-                              handleDeleteSale(
-                                sale._id
-                              )
-                            }
-                            className="rounded-lg p-2 text-red-500 hover:bg-red-50"
-                            title="Delete"
-                          >
-                            <Trash2
-                              size={16}
-                            />
-                          </button>
-                        </TableCell>
-                      </tr>
-                    )
-                  )
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* CUSTOMERS */}
-
-      {activeTab === "customers" && (
-        <div className="space-y-4">
-          <SectionHeader
-            title="Customers"
-            buttonText="Add Customer"
-            onClick={() =>
-              setShowCustomerForm(true)
-            }
-          />
-
-          <SearchBox
-            value={search}
-            onChange={setSearch}
-            placeholder="Search customers..."
-          />
-
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  <TableHeader>
-                    Code
-                  </TableHeader>
-
-                  <TableHeader>
-                    Customer
-                  </TableHeader>
-
-                  <TableHeader>
-                    Phone
-                  </TableHeader>
-
-                  <TableHeader>
-                    Type
-                  </TableHeader>
-
-                  <TableHeader>
-                    Credit Limit
-                  </TableHeader>
-
-                  <TableHeader>
-                    Status
-                  </TableHeader>
-
-                  <TableHeader>
-                    Actions
-                  </TableHeader>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredCustomers.length ===
-                0 ? (
-                  <tr>
-                    <td
-                      colSpan="7"
-                      className="px-6 py-10 text-center text-slate-500"
-                    >
-                      No customers found.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredCustomers.map(
-                    (customer) => (
-                      <tr
-                        key={customer._id}
-                        className="border-t border-slate-100"
-                      >
-                        <TableCell strong>
-                          {
-                            customer.customerCode
-                          }
-                        </TableCell>
-
-                        <TableCell>
-                          {customer.name}
-                        </TableCell>
-
-                        <TableCell>
-                          {customer.phone ||
-                            "-"}
-                        </TableCell>
-
-                        <TableCell>
-                          {customer.customerType}
-                        </TableCell>
-
-                        <TableCell>
-                          {formatCurrency(
-                            customer.creditLimit
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          {statusBadge(
-                            customer.status
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          <button
-                            onClick={() =>
-                              handleDeleteCustomer(
-                                customer._id
-                              )
-                            }
-                            className="rounded-lg p-2 text-red-500 hover:bg-red-50"
-                            title="Delete"
-                          >
-                            <Trash2
-                              size={16}
-                            />
-                          </button>
-                        </TableCell>
-                      </tr>
-                    )
-                  )
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* PRODUCTS */}
-
-      {activeTab === "products" && (
-        <div className="space-y-4">
-          <SectionHeader
-            title="Products"
-            buttonText="Add Product"
-            onClick={() =>
-              setShowProductForm(true)
-            }
-          />
-
-          <SearchBox
-            value={search}
-            onChange={setSearch}
-            placeholder="Search products..."
-          />
-
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  <TableHeader>
-                    Product
-                  </TableHeader>
-
-                  <TableHeader>
-                    SKU
-                  </TableHeader>
-
-                  <TableHeader>
-                    Category
-                  </TableHeader>
-
-                  <TableHeader>
-                    Unit
-                  </TableHeader>
-
-                  <TableHeader>
-                    Selling Price
-                  </TableHeader>
-
-                  <TableHeader>
-                    Stock
-                  </TableHeader>
-
-                  <TableHeader>
-                    Status
-                  </TableHeader>
-
-                  <TableHeader>
-                    Actions
-                  </TableHeader>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredProducts.length ===
-                0 ? (
-                  <tr>
-                    <td
-                      colSpan="8"
-                      className="px-6 py-10 text-center text-slate-500"
-                    >
-                      No products found.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredProducts.map(
-                    (product) => (
-                      <tr
-                        key={product._id}
-                        className="border-t border-slate-100"
-                      >
-                        <TableCell strong>
-                          {product.name}
-                        </TableCell>
-
-                        <TableCell>
-                          {product.sku ||
-                            "-"}
-                        </TableCell>
-
-                        <TableCell>
-                          {product.category ||
-                            "-"}
-                        </TableCell>
-
-                        <TableCell>
-                          {product.unit ||
-                            "-"}
-                        </TableCell>
-
-                        <TableCell>
-                          {formatCurrency(
-                            product.sellingPrice
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          {
-                            product.stockQuantity
-                          }
-                        </TableCell>
-
-                        <TableCell>
-                          {statusBadge(
-                            product.status
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          <button
-                            onClick={() =>
-                              handleDeleteProduct(
-                                product._id
-                              )
-                            }
-                            className="rounded-lg p-2 text-red-500 hover:bg-red-50"
-                            title="Delete"
-                          >
-                            <Trash2
-                              size={16}
-                            />
-                          </button>
-                        </TableCell>
-                      </tr>
-                    )
-                  )
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* PAYMENTS */}
-
-      {activeTab === "payments" && (
-        <div className="space-y-4">
-          <SectionHeader
-            title="Sales Payments"
-            buttonText="Record Payment"
-            onClick={() =>
-              setShowPaymentForm(true)
-            }
-          />
-
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50">
-                <tr>
-                  <TableHeader>
-                    Reference
-                  </TableHeader>
-
-                  <TableHeader>
-                    Sale
-                  </TableHeader>
-
-                  <TableHeader>
-                    Customer
-                  </TableHeader>
-
-                  <TableHeader>
-                    Date
-                  </TableHeader>
-
-                  <TableHeader>
-                    Method
-                  </TableHeader>
-
-                  <TableHeader>
-                    Amount
-                  </TableHeader>
-
-                  <TableHeader>
-                    Status
-                  </TableHeader>
-
-                  <TableHeader>
-                    Actions
-                  </TableHeader>
-                </tr>
-              </thead>
-
-              <tbody>
-                {payments.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan="8"
-                      className="px-6 py-10 text-center text-slate-500"
-                    >
-                      No payments found.
-                    </td>
-                  </tr>
-                ) : (
-                  payments.map(
-                    (payment) => (
-                      <tr
-                        key={payment._id}
-                        className="border-t border-slate-100"
-                      >
-                        <TableCell strong>
-                          {
-                            payment.reference
-                          }
-                        </TableCell>
-
-                        <TableCell>
-                          {payment.sale
-                            ?.invoiceNumber ||
-                            "-"}
-                        </TableCell>
-
-                        <TableCell>
-                          {getCustomerName(
-                            payment.customer
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          {formatDate(
-                            payment.paymentDate
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          {
-                            payment.paymentMethod
-                          }
-                        </TableCell>
-
-                        <TableCell strong>
-                          {formatCurrency(
-                            payment.amount
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          {statusBadge(
-                            payment.status
-                          )}
-                        </TableCell>
-
-                        <TableCell>
-                          <button
-                            onClick={() =>
-                              handleDeletePayment(
-                                payment._id
-                              )
-                            }
-                            className="rounded-lg p-2 text-red-500 hover:bg-red-50"
-                            title="Delete"
-                          >
-                            <Trash2
-                              size={16}
-                            />
-                          </button>
-                        </TableCell>
-                      </tr>
-                    )
-                  )
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================
-          PRODUCT MODAL
-      ===================================================== */}
-
-      {showProductForm && (
-        <Modal
-          title="Add Product"
-          onClose={() =>
-            setShowProductForm(false)
-          }
-        >
-          <form
-            onSubmit={handleCreateProduct}
-            className="space-y-4"
-          >
-            <FormField
-              label="Product Name"
-              name="name"
-              value={productForm.name}
-              onChange={handleProductChange}
-              required
-            />
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField
-                label="Category"
-                name="category"
-                value={productForm.category}
-                onChange={handleProductChange}
-              />
-
-              <FormField
-                label="SKU"
-                name="sku"
-                value={productForm.sku}
-                onChange={handleProductChange}
-              />
-
-              <FormField
-                label="Unit"
-                name="unit"
-                value={productForm.unit}
-                onChange={handleProductChange}
-                placeholder="kg, litre, piece..."
-              />
-
-              <FormField
-                label="Selling Price"
-                name="sellingPrice"
-                type="number"
-                min="0"
-                value={
-                  productForm.sellingPrice
-                }
-                onChange={handleProductChange}
-                required
-              />
-
-              <FormField
-                label="Stock Quantity"
-                name="stockQuantity"
-                type="number"
-                min="0"
-                value={
-                  productForm.stockQuantity
-                }
-                onChange={handleProductChange}
-              />
-
-              <SelectField
-                label="Status"
-                name="status"
-                value={productForm.status}
-                onChange={handleProductChange}
-                options={[
-                  ["active", "Active"],
-                  ["inactive", "Inactive"],
-                ]}
-              />
-            </div>
-
-            <ModalActions
-              onCancel={() =>
-                setShowProductForm(false)
-              }
-              submitting={submitting}
-            />
-          </form>
-        </Modal>
-      )}
-
-      {/* =====================================================
-          CUSTOMER MODAL
-      ===================================================== */}
-
-      {showCustomerForm && (
-        <Modal
-          title="Add Customer"
-          onClose={() =>
-            setShowCustomerForm(false)
-          }
-        >
-          <form
-            onSubmit={handleCreateCustomer}
-            className="space-y-4"
-          >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormField
-                label="Customer Code"
-                name="customerCode"
-                value={
-                  customerForm.customerCode
-                }
-                onChange={
-                  handleCustomerChange
-                }
-                required
-              />
-
-              <FormField
-                label="Customer Name"
-                name="name"
-                value={customerForm.name}
-                onChange={
-                  handleCustomerChange
-                }
-                required
-              />
-
-              <FormField
-                label="Phone"
-                name="phone"
-                value={customerForm.phone}
-                onChange={
-                  handleCustomerChange
-                }
-              />
-
-              <FormField
-                label="Email"
-                name="email"
-                type="email"
-                value={customerForm.email}
-                onChange={
-                  handleCustomerChange
-                }
-              />
-
-              <FormField
-                label="Tax Number"
-                name="taxNumber"
-                value={customerForm.taxNumber}
-                onChange={
-                  handleCustomerChange
-                }
-              />
-
-              <SelectField
-                label="Customer Type"
-                name="customerType"
-                value={
-                  customerForm.customerType
-                }
-                onChange={
-                  handleCustomerChange
-                }
-                options={[
-                  [
-                    "individual",
-                    "Individual",
-                  ],
-                  [
-                    "business",
-                    "Business",
-                  ],
-                  [
-                    "institution",
-                    "Institution",
-                  ],
-                  ["other", "Other"],
-                ]}
-              />
-
-              <FormField
-                label="Credit Limit"
-                name="creditLimit"
-                type="number"
-                min="0"
-                value={
-                  customerForm.creditLimit
-                }
-                onChange={
-                  handleCustomerChange
-                }
-              />
-
-              <div className="sm:col-span-2">
-                <FormField
-                  label="Address"
-                  name="address"
-                  value={
-                    customerForm.address
-                  }
-                  onChange={
-                    handleCustomerChange
-                  }
-                />
-              </div>
-            </div>
-
-            <ModalActions
-              onCancel={() =>
-                setShowCustomerForm(false)
-              }
-              submitting={submitting}
-            />
-          </form>
-        </Modal>
-      )}
-
-      {/* =====================================================
-          SALE MODAL
-      ===================================================== */}
-
-      {showSaleForm && (
-        <Modal
-          title="Create Sale"
-          wide
-          onClose={() =>
-            setShowSaleForm(false)
-          }
-        >
-          <form
-            onSubmit={handleCreateSale}
-            className="space-y-5"
-          >
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <FormField
-                label="Invoice Number"
-                name="invoiceNumber"
-                value={
-                  saleForm.invoiceNumber
-                }
-                onChange={handleSaleChange}
-                placeholder="INV-0001"
-                required
-              />
-
-              <SelectField
-                label="Customer"
-                name="customer"
-                value={saleForm.customer}
-                onChange={handleSaleChange}
-                options={[
-                  ["", "Select customer"],
-                  ...customers.map(
-                    (customer) => [
-                      customer._id,
-                      `${customer.customerCode} - ${customer.name}`,
-                    ]
-                  ),
-                ]}
-                required
-              />
-
-              <FormField
-                label="Sale Date"
-                name="saleDate"
-                type="date"
-                value={saleForm.saleDate}
-                onChange={handleSaleChange}
-              />
-            </div>
-
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="font-semibold text-slate-900">
-                  Sale Items
-                </h3>
-
-                <button
-                  type="button"
-                  onClick={addSaleItem}
-                  className="inline-flex items-center gap-2 rounded-lg bg-primary-50 px-3 py-2 text-sm font-medium text-primary-700 hover:bg-primary-100"
-                >
-                  <Plus size={16} />
-                  Add Item
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {saleForm.items.map(
-                  (item, index) => (
-                    <div
-                      key={index}
-                      className="rounded-lg border border-slate-200 bg-slate-50 p-4"
-                    >
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
-                        <div className="md:col-span-2">
-                          <label className="form-label">
-                            Product
-                          </label>
-
-                          <select
-                            className="form-input"
-                            value={
-                              item.product
-                            }
-                            onChange={(e) =>
-                              handleSaleItemChange(
-                                index,
-                                "product",
-                                e.target.value
-                              )
-                            }
-                            required
-                          >
-                            <option value="">
-                              Select product
-                            </option>
-
-                            {products
-                              .filter(
-                                (product) =>
-                                  product.status ===
-                                  "active"
-                              )
-                              .map(
-                                (product) => (
-                                  <option
-                                    key={
-                                      product._id
-                                    }
-                                    value={
-                                      product._id
-                                    }
-                                  >
-                                    {product.name}
-                                  </option>
-                                )
-                              )}
-                          </select>
-                        </div>
-
-                        <FormField
-                          label="Quantity"
-                          type="number"
-                          min="0.01"
-                          step="0.01"
-                          value={
-                            item.quantity
-                          }
-                          onChange={(e) =>
-                            handleSaleItemChange(
-                              index,
-                              "quantity",
-                              e.target.value
-                            )
-                          }
-                        />
-
-                        <FormField
-                          label="Unit Price"
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={
-                            item.unitPrice
-                          }
-                          onChange={(e) =>
-                            handleSaleItemChange(
-                              index,
-                              "unitPrice",
-                              e.target.value
-                            )
-                          }
-                        />
-
-                        <div className="flex items-end">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              removeSaleItem(
-                                index
-                              )
-                            }
-                            disabled={
-                              saleForm.items
-                                .length ===
-                              1
-                            }
-                            className="w-full rounded-lg border border-red-200 px-3 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 text-right text-sm font-semibold text-slate-700">
-                        Item Total:{" "}
-                        {formatCurrency(
-                          Math.max(
-                            (Number(
-                              item.quantity
-                            ) || 0) *
-                              (Number(
-                                item.unitPrice
-                              ) || 0) -
-                              (Number(
-                                item.discount
-                              ) || 0) +
-                              (Number(
-                                item.tax
-                              ) || 0),
-                            0
-                          )
-                        )}
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-              <FormField
-                label="Discount"
-                name="discount"
-                type="number"
-                min="0"
-                step="0.01"
-                value={saleForm.discount}
-                onChange={handleSaleChange}
-              />
-
-              <FormField
-                label="Tax"
-                name="tax"
-                type="number"
-                min="0"
-                step="0.01"
-                value={saleForm.tax}
-                onChange={handleSaleChange}
-              />
-
-              <FormField
-                label="Amount Paid"
-                name="amountPaid"
-                type="number"
-                min="0"
-                step="0.01"
-                value={saleForm.amountPaid}
-                onChange={handleSaleChange}
-              />
-
-              <SelectField
-                label="Payment Method"
-                name="paymentMethod"
-                value={
-                  saleForm.paymentMethod
-                }
-                onChange={handleSaleChange}
-                options={[
-                  ["cash", "Cash"],
-                  ["mpesa", "M-Pesa"],
-                  ["bank", "Bank"],
-                  ["cheque", "Cheque"],
-                  ["credit", "Credit"],
-                  ["other", "Other"],
-                ]}
-              />
-            </div>
-
-            <div className="rounded-xl bg-slate-900 p-5 text-white">
-              <div className="flex items-center justify-between text-sm">
-                <span>Subtotal</span>
-
-                <span>
-                  {formatCurrency(
-                    saleSubtotal
-                  )}
-                </span>
-              </div>
-
-              <div className="mt-2 flex items-center justify-between text-sm">
-                <span>Discount</span>
-
-                <span>
-                  {formatCurrency(
-                    saleForm.discount
-                  )}
-                </span>
-              </div>
-
-              <div className="mt-2 flex items-center justify-between text-sm">
-                <span>Tax</span>
-
-                <span>
-                  {formatCurrency(
-                    saleForm.tax
-                  )}
-                </span>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between border-t border-white/20 pt-4">
-                <span className="font-semibold">
-                  Total
-                </span>
-
-                <span className="text-xl font-bold">
-                  {formatCurrency(
-                    saleTotal
-                  )}
-                </span>
-              </div>
-            </div>
-
-            <FormField
-              label="Notes"
-              name="notes"
-              value={saleForm.notes}
-              onChange={handleSaleChange}
-              placeholder="Optional notes"
-            />
-
-            <ModalActions
-              onCancel={() =>
-                setShowSaleForm(false)
-              }
-              submitting={submitting}
-              submitText="Create Sale"
-            />
-          </form>
-        </Modal>
-      )}
-
-      {/* =====================================================
-          PAYMENT MODAL
-      ===================================================== */}
-
-      {showPaymentForm && (
-        <Modal
-          title="Record Sale Payment"
-          onClose={() =>
-            setShowPaymentForm(false)
-          }
-        >
-          <form
-            onSubmit={handleCreatePayment}
-            className="space-y-4"
-          >
-            <SelectField
-              label="Sale"
-              name="sale"
-              value={paymentForm.sale}
-              onChange={handlePaymentChange}
-              options={[
-                ["", "Select sale"],
-                ...sales.map((sale) => [
-                  sale._id,
-                  `${sale.invoiceNumber} - ${formatCurrency(
-                    sale.totalAmount
-                  )}`,
-                ]),
-              ]}
-              required
-            />
-
-            <FormField
-              label="Amount"
-              name="amount"
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={paymentForm.amount}
-              onChange={handlePaymentChange}
-              required
-            />
-
-            <FormField
-              label="Payment Date"
-              name="paymentDate"
-              type="date"
-              value={paymentForm.paymentDate}
-              onChange={handlePaymentChange}
-            />
-
-            <SelectField
-              label="Payment Method"
-              name="paymentMethod"
-              value={
-                paymentForm.paymentMethod
-              }
-              onChange={handlePaymentChange}
-              options={[
-                ["cash", "Cash"],
-                ["mpesa", "M-Pesa"],
-                ["bank", "Bank"],
-                ["cheque", "Cheque"],
-                ["other", "Other"],
-              ]}
-            />
-
-            <FormField
-              label="Reference"
-              name="reference"
-              value={
-                paymentForm.reference
-              }
-              onChange={handlePaymentChange}
-              placeholder="M-Pesa / bank / receipt reference"
-              required
-            />
-
-            <FormField
-              label="Notes"
-              name="notes"
-              value={paymentForm.notes}
-              onChange={handlePaymentChange}
-            />
-
-            <ModalActions
-              onCancel={() =>
-                setShowPaymentForm(false)
-              }
-              submitting={submitting}
-              submitText="Record Payment"
-            />
-          </form>
-        </Modal>
-      )}
-    </div>
-  );
+      { name: "cashReturned", label: "Cash handed in (KES)", type: "number", required: true },
+      { name: "mpesaReturned", label: "M-Pesa received (KES)", type: "number" },
+      { name: "notes", label: "Notes", type: "textarea" },
+    ],
+    initial: (r) => ({ items: r.items.map((i) => ({ itemId: i.id, product: i.product?.name, loaded: i.quantityDispatched, unitPrice: i.unitPrice, quantityReturned: "", quantityDamaged: "" })) }),
+    toPayload: (v) => ({ cashReturned: v.cashReturned, mpesaReturned: v.mpesaReturned || 0, notes: v.notes, items: v.items.map((i) => ({ itemId: i.itemId, quantityReturned: blankToZero(i.quantityReturned), quantityDamaged: blankToZero(i.quantityDamaged) })) }),
+    success: (d) => (d.variance < 0 ? `Reconciled. The crew is short by ${money(-d.variance)}.` : "Reconciled and returned stock added back"),
+  }],
+  toolbar: (ctx) => ctx.can("dispatches", "write") && (
+    <ActionButton label="Load vehicle" icon={Truck} variant="primary" path="/sales/dispatches" modalSize="lg" onDone={(r) => ctx.notify(r?.message)}
+      fields={[
+        { name: "date", label: "Date", type: "date", required: true },
+        { name: "vehicleId", label: "Vehicle", type: "select", ref: refs.vehicles, required: true, onSelect: (v) => (v ? { driverName: v.driverName, salesPersonName: v.salesPersonName } : {}) },
+        { name: "driverName", label: "Driver today", help: "Change if a different person is driving today" },
+        { name: "salesPersonName", label: "Sales person today" },
+        {
+          name: "items", label: "Products loaded", type: "items", fixedRows: true,
+          columns: [{ name: "product", label: "Product", type: "display" }, { name: "onHand", label: "In store", type: "display", width: 110 }, { name: "quantityDispatched", label: "Load", type: "number", width: 140 }],
+        },
+        { name: "notes", label: "Notes", type: "textarea" },
+      ]}
+      initial={async () => {
+        const stock = await get("/stock/sales");
+        return { date: today(), items: stock.map((p) => ({ productId: p.productId, product: `${p.name} (${p.unit})`, onHand: number(p.onHand), quantityDispatched: "" })) };
+      }}
+      toPayload={(v) => ({ ...v, items: v.items.filter((i) => i.quantityDispatched !== "" && Number(i.quantityDispatched) > 0).map((i) => ({ productId: i.productId, quantityDispatched: i.quantityDispatched })) })} />
+  ),
 };
 
-/*
-|--------------------------------------------------------------------------
-| COMPONENTS
-|--------------------------------------------------------------------------
-*/
-
-const SummaryCard = ({
-  title,
-  value,
-  icon: Icon,
-}) => {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-slate-500">
-            {title}
-          </p>
-
-          <p className="mt-2 text-2xl font-bold text-slate-900">
-            {value}
-          </p>
-        </div>
-
-        <div className="rounded-lg bg-primary-50 p-3 text-primary-600">
-          <Icon size={22} />
-        </div>
-      </div>
-    </div>
-  );
+const damages = {
+  resource: "damages",
+  endpoint: "/sales/damages",
+  title: "Damages and customer replacements",
+  description: "Damaged stock is written off; replacements are products given to a customer in place of spoilt ones. Both reduce Sales stock.",
+  singular: "Record",
+  createLabel: "Record damage / replacement",
+  editFields: false,
+  deletable: false,
+  filters: [{ name: "recordType", label: "Type", options: "damageTypes" }, { type: "dateRange" }],
+  columns: [
+    { key: "recordNumber", label: "Record" },
+    { key: "date", label: "Date", type: "date" },
+    { key: "recordType", label: "Type", type: "option:damageTypes" },
+    { key: "product", label: "Product", render: (r) => r.product?.name },
+    { key: "quantity", label: "Quantity", type: "number" },
+    { key: "customer", label: "Customer", render: (r) => r.customer?.name || r.customerName || "" },
+    { key: "reason", label: "Reason" },
+    { key: "value", label: "Value", type: "money" },
+  ],
+  createFields: [
+    { name: "recordType", label: "Type", type: "select", options: "damageTypes", required: true },
+    { name: "date", label: "Date", type: "date", required: true },
+    { name: "productId", label: "Product", type: "select", ref: refs.products, required: true },
+    { name: "quantity", label: "Quantity", type: "number", required: true },
+    { name: "customerId", label: "Customer", type: "select", ref: refs.customers, placeholder: "Not registered", showIf: (v) => v.recordType === "replacement" },
+    { name: "customerName", label: "Or customer name", showIf: (v) => v.recordType === "replacement" && !v.customerId },
+    { name: "reason", label: "Reason", type: "textarea", required: true },
+  ],
+  createInitial: () => ({ date: today(), recordType: "damage" }),
 };
 
-const SectionHeader = ({
-  title,
-  buttonText,
-  onClick,
-}) => {
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <h2 className="text-lg font-semibold text-slate-900">
-        {title}
-      </h2>
-
-      <button
-        onClick={onClick}
-        className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-primary-700"
-      >
-        <Plus size={17} />
-        {buttonText}
-      </button>
-    </div>
-  );
+const customers = {
+  resource: "customers",
+  endpoint: "/sales/customers",
+  title: "Customers",
+  singular: "Customer",
+  createLabel: "Add customer",
+  filters: [{ type: "search", placeholder: "Name, phone, location" }, { name: "customerType", label: "Type", options: "customerTypes" }],
+  columns: [
+    { key: "name", label: "Name" },
+    { key: "phone", label: "Phone" },
+    { key: "customerType", label: "Type", type: "option:customerTypes" },
+    { key: "location", label: "Location" },
+  ],
+  createFields: [
+    { name: "name", label: "Name", required: true },
+    { name: "phone", label: "Phone", type: "tel" },
+    { name: "customerType", label: "Type", type: "select", options: "customerTypes" },
+    { name: "location", label: "Location" },
+  ],
+  createInitial: () => ({ customerType: "individual" }),
 };
 
-const SearchBox = ({
-  value,
-  onChange,
-  placeholder,
-}) => {
-  return (
-    <div className="relative">
-      <Search
-        size={18}
-        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-      />
-
-      <input
-        className="form-input pl-10"
-        value={value}
-        onChange={(e) =>
-          onChange(e.target.value)
-        }
-        placeholder={placeholder}
-      />
-    </div>
-  );
+const products = {
+  resource: "products",
+  endpoint: "/sales/products",
+  title: "Products and prices",
+  description: "One selling price per product, used for local sales and vehicles.",
+  singular: "Product",
+  createLabel: "Add product",
+  deletable: false,
+  columns: [
+    { key: "code", label: "Code" },
+    { key: "name", label: "Product" },
+    { key: "unit", label: "Unit" },
+    { key: "unitPrice", label: "Price", type: "money" },
+    { key: "isActive", label: "On sale", type: "bool" },
+  ],
+  createFields: [
+    { name: "code", label: "Code", required: true, help: "Short code, e.g. GHEE" },
+    { name: "name", label: "Name", required: true },
+    { name: "unit", label: "Unit", required: true, placeholder: "litres" },
+    { name: "unitPrice", label: "Price (KES)", type: "number", required: true },
+  ],
+  editFields: [
+    { name: "name", label: "Name", required: true },
+    { name: "unit", label: "Unit", required: true },
+    { name: "unitPrice", label: "Price (KES)", type: "number", required: true },
+    { name: "isActive", label: "On sale", type: "checkbox", checkboxLabel: "Available for sale" },
+  ],
+  createInitial: () => ({ unit: "litres" }),
 };
 
-const TableHeader = ({ children }) => {
-  return (
-    <th className="whitespace-nowrap px-5 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-      {children}
-    </th>
-  );
-};
-
-const TableCell = ({
-  children,
-  strong = false,
-}) => {
-  return (
-    <td
-      className={`whitespace-nowrap px-5 py-4 ${
-        strong
-          ? "font-semibold text-slate-900"
-          : "text-slate-600"
-      }`}
-    >
-      {children}
-    </td>
-  );
-};
-
-const EmptyState = ({ text }) => {
-  return (
-    <div className="rounded-lg bg-slate-50 p-8 text-center text-sm text-slate-500">
-      {text}
-    </div>
-  );
-};
-
-const FormField = ({
-  label,
-  name,
-  value,
-  onChange,
-  type = "text",
-  placeholder,
-  required = false,
-  min,
-  step,
-}) => {
-  return (
-    <div>
-      {label && (
-        <label className="form-label">
-          {label}
-        </label>
-      )}
-
-      <input
-        className="form-input"
-        name={name}
-        type={type}
-        value={value ?? ""}
-        onChange={onChange}
-        placeholder={placeholder}
-        required={required}
-        min={min}
-        step={step}
-      />
-    </div>
-  );
-};
-
-const SelectField = ({
-  label,
-  name,
-  value,
-  onChange,
-  options,
-  required = false,
-}) => {
-  return (
-    <div>
-      <label className="form-label">
-        {label}
-      </label>
-
-      <select
-        className="form-input"
-        name={name}
-        value={value}
-        onChange={onChange}
-        required={required}
-      >
-        {options.map(
-          ([optionValue, optionLabel]) => (
-            <option
-              key={optionValue}
-              value={optionValue}
-            >
-              {optionLabel}
-            </option>
-          )
-        )}
-      </select>
-    </div>
-  );
-};
-
-const Modal = ({
-  title,
-  children,
-  onClose,
-  wide = false,
-}) => {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div
-        className={`max-h-[90vh] w-full overflow-y-auto rounded-2xl bg-white shadow-2xl ${
-          wide
-            ? "max-w-5xl"
-            : "max-w-2xl"
-        }`}
-      >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">
-            {title}
-          </h2>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        <div className="p-6">
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const ModalActions = ({
-  onCancel,
-  submitting,
-  submitText = "Save",
-}) => {
-  return (
-    <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
-      <button
-        type="button"
-        onClick={onCancel}
-        className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-      >
-        Cancel
-      </button>
-
-      <button
-        type="submit"
-        disabled={submitting}
-        className="rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {submitting
-          ? "Saving..."
-          : submitText}
-      </button>
-    </div>
-  );
-};
+const SalesPage = () => (
+  <ModulePage
+    title="Sales"
+    description="Stock received from MVA, local sales, vehicles to town, evening returns, damages and replacements."
+    actions={null}
+    tabs={[
+      { key: "sales", label: "Local sales", show: (c) => c.can("sales"), render: () => <ResourcePage config={sales} header={() => <SalesSummary />} /> },
+      { key: "vehicles-out", label: "Vehicle dispatch", show: (c) => c.can("dispatches"), render: () => <ResourcePage config={dispatches} /> },
+      { key: "received", label: "From MVA", show: (c) => c.can("productTransfers", "receive"), render: () => <ResourcePage config={received} /> },
+      { key: "damages", label: "Damages & replacements", show: (c) => c.can("damages"), render: () => <ResourcePage config={damages} /> },
+      { key: "stock", label: "Stock", show: (c) => c.can("salesStock"), render: () => <StockPanel location="sales" /> },
+      { key: "vehicles", label: "Vehicles", show: (c) => c.can("vehicles"), render: () => <ResourcePage config={vehicles} /> },
+      { key: "customers", label: "Customers", show: (c) => c.can("customers"), render: () => <ResourcePage config={customers} /> },
+      { key: "products", label: "Prices", show: (c) => c.can("products"), render: () => <ResourcePage config={products} /> },
+    ]}
+  />
+);
 
 export default SalesPage;

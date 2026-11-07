@@ -1,254 +1,53 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-
+import DashboardLayout from "../layouts/DashboardLayout";
 import Login from "../pages/auth/Login";
 import VerifyAccountPage from "../pages/auth/VerifyAccountPage";
-import ModuleDashboard from "../pages/dashboard/ModuleDashboard";
-
-import DashboardLayout from "../layouts/DashboardLayout";
+import ChangePasswordPage from "../pages/auth/ChangePasswordPage";
+import Dashboard from "../pages/Dashboard";
 import ProtectedRoute from "./ProtectedRoute";
+import { Spinner } from "../components/ui/ui";
 
-import FarmersPage from "../modules/farmers/FarmersPage";
-import LivestockPage from "../modules/livestock/LivestockPage";
-import DairyPage from "../modules/dairy/DairyPage";
-import AgriculturePage from "../modules/agriculture/AgriculturePage";
-import AnimalFeedsPage from "../modules/animal-feeds/AnimalFeedsPage";
+// Department screens load on demand to keep the first load small.
+const HRPage = lazy(() => import("../modules/hr/HRPage"));
+const LivestockPage = lazy(() => import("../modules/livestock/LivestockPage"));
+const MvaPage = lazy(() => import("../modules/mva/MvaPage"));
+const SalesPage = lazy(() => import("../modules/sales/SalesPage"));
+const StoresPage = lazy(() => import("../modules/stores/StoresPage"));
+const CropsPage = lazy(() => import("../modules/crops/CropsPage"));
+const AccountsPage = lazy(() => import("../modules/accounts/AccountsPage"));
+const RequisitionsPage = lazy(() => import("../modules/requisitions/RequisitionsPage"));
+const ReportsPage = lazy(() => import("../modules/reports/ReportsPage"));
+const UsersPage = lazy(() => import("../modules/users/UsersPage"));
 
-// HMIS
-import HMISPage from "../modules/hmis/HMISPage";
-import PatientsPage from "../modules/hmis/PatientsPage";
-import MedicalVisitsPage from "../modules/hmis/MedicalVisitsPage";
-import MedicalLabPage from "../modules/hmis/MedicalLabPage";
-import PrescriptionsPage from "../modules/hmis/PrescriptionsPage";
-import MedicalBillingPage from "../modules/hmis/MedicalBillingPage";
+const AppRoutes = () => (
+  <Routes>
+    <Route path="/login" element={<Login />} />
+    <Route path="/verify-account" element={<VerifyAccountPage />} />
 
-// Procurement
-import ProcurementPage from "../modules/procurement/ProcurementPage";
-
-// Inventory
-import InventoryPage from "../modules/inventory/InventoryPage";
-import GoodsReceivingPage from "../modules/inventory/GoodsReceivingPage";
-
-// Finance
-import FinancePage from "../modules/finance/FinancePage";
-
-// HR
-import HRPage from "../modules/hr/HRPage";
-
-// Rentals
-import RentalsPage from "../modules/rentals/RentalsPage";
-
-// Sales
-import SalesPage from "../modules/sales/SalesPage";
-import UserManagementPage from "../modules/users/UserManagementPage";
-import ReportsPage from "../modules/reports/ReportsPage";
-import WorkflowInboxPage from "../modules/workflows/WorkflowInboxPage";
-
-const AppRoutes = () => {
-  return (
-    <Routes>
-      {/* =====================================================
-          PUBLIC
-      ===================================================== */}
-
-      <Route
-        path="/login"
-        element={<Login />}
-      />
-
-      <Route
-        path="/verify-account"
-        element={<VerifyAccountPage />}
-      />
-
-      {/* =====================================================
-          PROTECTED ERP
-      ===================================================== */}
-
-      <Route element={<ProtectedRoute />}>
-        <Route element={<DashboardLayout />}>
-
-          {/* =================================================
-              DASHBOARD
-          ================================================= */}
-
-          <Route
-            path="/dashboard"
-            element={<ModuleDashboard />}
-          />
-
-          <Route path="/workflows" element={<WorkflowInboxPage />} />
-
-          {/* =================================================
-              FARMERS
-          ================================================= */}
-
-          <Route
-            path="/farmers"
-            element={<FarmersPage />}
-          />
-
-          {/* =================================================
-              LIVESTOCK
-          ================================================= */}
-
-          <Route
-            path="/livestock"
-            element={<LivestockPage />}
-          />
-
-          <Route
-            path="/animal-feeds"
-            element={<AnimalFeedsPage />}
-          />
-
-          {/* =================================================
-              DAIRY
-          ================================================= */}
-
-          <Route
-            path="/dairy"
-            element={<DairyPage />}
-          />
-
-          {/* =================================================
-              AGRICULTURE
-          ================================================= */}
-
-          <Route
-            path="/agriculture"
-            element={<AgriculturePage />}
-          />
-
-          {/* =================================================
-              HMIS / MEDICAL CENTRE
-          ================================================= */}
-
-          <Route
-            path="/hmis"
-            element={<HMISPage />}
-          />
-          <Route path="/hmis/billing" element={<MedicalBillingPage />} />
-
-          {/* ---------------- PATIENTS ---------------- */}
-
-          <Route
-            path="/hmis/patients"
-            element={<PatientsPage />}
-          />
-
-          {/* ---------------- MEDICAL VISITS ---------------- */}
-
-          <Route
-            path="/hmis/visits"
-            element={<MedicalVisitsPage />}
-          />
-
-          {/* ---------------- MEDICAL LABORATORY ---------------- */}
-
-          <Route
-            path="/hmis/laboratory"
-            element={<MedicalLabPage />}
-          />
-
-          {/* ---------------- PRESCRIPTIONS ---------------- */}
-
-          <Route
-            path="/hmis/prescriptions"
-            element={<PrescriptionsPage />}
-          />
-
-          {/* =================================================
-              PROCUREMENT
-          ================================================= */}
-
-          <Route
-            path="/procurement"
-            element={<ProcurementPage />}
-          />
-
-          {/* =================================================
-              INVENTORY
-          ================================================= */}
-
-          <Route
-            path="/inventory"
-            element={<InventoryPage />}
-          />
-          <Route path="/inventory/receiving" element={<GoodsReceivingPage />} />
-
-          {/* =================================================
-              FINANCE
-          ================================================= */}
-
-          <Route
-            path="/finance"
-            element={<FinancePage />}
-          />
-
-          {/* =================================================
-              HR
-          ================================================= */}
-
-          <Route
-            path="/hr"
-            element={<HRPage />}
-          />
-
-          {/* =================================================
-              RENTALS
-          ================================================= */}
-
-          <Route
-            path="/rentals"
-            element={<RentalsPage />}
-          />
-
-          {/* =================================================
-              SALES
-          ================================================= */}
-
-          <Route
-            path="/sales"
-            element={<SalesPage />}
-          />
-
-          <Route
-            path="/reports"
-            element={<ReportsPage />}
-          />
-
-          {/* =================================================
-              SETTINGS
-          ================================================= */}
-
-          <Route
-            path="/settings"
-            element={<Navigate to="/settings/users" replace />}
-          />
-
-          <Route
-            path="/settings/users"
-            element={<UserManagementPage />}
-          />
-
-        </Route>
+    <Route element={<ProtectedRoute />}>
+      <Route path="/change-password" element={<ChangePasswordPage />} />
+      <Route element={<DashboardLayout />}>
+        <Route path="/dashboard" element={<Dashboard />} />
+        {[
+          ["/hr", HRPage],
+          ["/livestock", LivestockPage],
+          ["/mva", MvaPage],
+          ["/sales", SalesPage],
+          ["/stores", StoresPage],
+          ["/crops", CropsPage],
+          ["/accounts", AccountsPage],
+          ["/requisitions", RequisitionsPage],
+          ["/reports", ReportsPage],
+          ["/users", UsersPage],
+        ].map(([path, Page]) => (
+          <Route key={path} path={path} element={<Suspense fallback={<Spinner />}><Page /></Suspense>} />
+        ))}
       </Route>
+    </Route>
 
-      {/* =====================================================
-          DEFAULT ROUTE
-      ===================================================== */}
-
-      <Route
-        path="*"
-        element={
-          <Navigate
-            to="/dashboard"
-            replace
-          />
-        }
-      />
-    </Routes>
-  );
-};
+    <Route path="*" element={<Navigate to="/dashboard" replace />} />
+  </Routes>
+);
 
 export default AppRoutes;
