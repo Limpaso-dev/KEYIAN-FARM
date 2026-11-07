@@ -5,3 +5,8 @@
 !**/.env.example
 node_modules/
 dist/
+# AI coding tool settings
+.agents/
+.claude/
+.windsurf/
+skills-lock.json
