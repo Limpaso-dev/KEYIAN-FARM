@@ -5,7 +5,7 @@ import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
 import { Card, StatCard } from "../../components/ui/ui";
 import { get } from "../../lib/api";
-import { daysAgo, inputDate, number, today } from "../../lib/format";
+import { daysAgo, inputDate, nairobiHour, number, today } from "../../lib/format";
 import { refs } from "../../lib/refs";
 import { useFetch } from "../../lib/useFetch";
 
@@ -205,7 +205,7 @@ const milkRecords = {
         const cows = await get("/livestock/animals", { status: "active", sex: "female" });
         return {
           date: today(),
-          session: new Date().getHours() < 11 ? "morning" : new Date().getHours() < 15 ? "midday" : "evening",
+          session: nairobiHour() < 11 ? "morning" : nairobiHour() < 15 ? "midday" : "evening",
           records: cows.map((c) => ({ animalId: c.id, cow: tag(c), lactation: c.lactationCount, litres: "" })),
         };
       }}

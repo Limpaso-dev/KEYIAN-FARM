@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { MailCheck } from "lucide-react";
 import { Alert, Button, FieldWrap, Input } from "../../components/ui/ui";
 import api, { errorMessage } from "../../lib/api";
+import { showError } from "../../lib/toast";
 
 // Used when an administrator changes a user's email address: the user
 // enters the six-digit code sent to the new address.
@@ -20,7 +21,7 @@ const VerifyAccountPage = () => {
       const { data } = await api.post("/auth/verify-email", { email, code });
       setMessage({ tone: "success", text: data.data.message });
     } catch (err) {
-      setMessage({ tone: "error", text: errorMessage(err) });
+      showError(errorMessage(err), "Could not verify");
     } finally {
       setBusy("");
     }
@@ -32,14 +33,14 @@ const VerifyAccountPage = () => {
       const { data } = await api.post("/auth/resend-verification", { email });
       setMessage({ tone: "info", text: data.data.message });
     } catch (err) {
-      setMessage({ tone: "error", text: errorMessage(err) });
+      showError(errorMessage(err), "Could not send a new code");
     } finally {
       setBusy("");
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f3f7f1] p-4">
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
       <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div className="mb-6 flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-100 text-primary-700"><MailCheck size={20} /></span>

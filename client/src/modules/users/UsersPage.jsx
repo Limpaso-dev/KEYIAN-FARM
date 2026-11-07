@@ -1,4 +1,4 @@
-import { KeyRound } from "lucide-react";
+import { KeyRound, Users } from "lucide-react";
 import { ResourcePage } from "../../components/resource/ResourcePage";
 import { Alert, PageHeader } from "../../components/ui/ui";
 import { useAuth } from "../../context/useAuth";
@@ -80,7 +80,7 @@ const UsersPage = () => {
   if (!permissions?.manageUsers) return <Alert tone="error">Only system administrators can manage user accounts.</Alert>;
   return (
     <div>
-      <PageHeader title="User accounts" description="Create a login for each person, choose their department and whether they are the Head or an Officer. New users get a temporary password." />
+      <PageHeader icon={Users} eyebrow="Administration" title="User accounts" description="Create a login for each person, choose their department and whether they are the Head or an Officer. New users get a temporary password." />
       <ResourcePage config={config} />
     </div>
   );

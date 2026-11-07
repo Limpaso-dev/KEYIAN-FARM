@@ -5,7 +5,7 @@ import { ResourcePage } from "../../components/resource/ResourcePage";
 import { StockPanel } from "../../components/resource/StockPanel";
 import { Card, StatCard } from "../../components/ui/ui";
 import { get } from "../../lib/api";
-import { fullName, money, number, today } from "../../lib/format";
+import { fullName, money, number, nairobiHour, today } from "../../lib/format";
 import { useFetch } from "../../lib/useFetch";
 import { milkTransfers } from "../livestock/milkTransfers";
 import { productLines, productTransfers } from "./productTransfers";
@@ -120,7 +120,7 @@ const deliveries = {
       ]}
       initial={async () => {
         const list = await get("/mva/milk-suppliers", { status: "active" });
-        return { date: today(), session: new Date().getHours() < 12 ? "morning" : "evening", deliveries: list.map((s) => ({ supplierId: s.id, farmer: farmer(s), litres: "" })) };
+        return { date: today(), session: nairobiHour() < 12 ? "morning" : "evening", deliveries: list.map((s) => ({ supplierId: s.id, farmer: farmer(s), litres: "" })) };
       }}
       toPayload={(v) => ({ date: v.date, session: v.session, deliveries: v.deliveries.filter((d) => d.litres !== "" && Number(d.litres) > 0).map((d) => ({ supplierId: d.supplierId, litres: d.litres })) })} />
   ),

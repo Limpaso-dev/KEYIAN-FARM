@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import authContext from "./AuthContextStore";
 import api, { get, TOKEN_KEY } from "../lib/api";
+import { clearFetchCache } from "../lib/useFetch";
 
 export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null); // { user, permissions }
@@ -10,6 +11,7 @@ export const AuthProvider = ({ children }) => {
   const clear = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem("keiyian_user");
+    clearFetchCache();
     setSession(null);
   }, []);
 

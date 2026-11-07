@@ -1,4 +1,4 @@
-import { CheckCircle2, CornerUpLeft, XCircle } from "lucide-react";
+import { CheckCircle2, ClipboardList, CornerUpLeft, XCircle } from "lucide-react";
 import { ResourcePage } from "../../components/resource/ResourcePage";
 import { Alert, PageHeader } from "../../components/ui/ui";
 import { useAuth } from "../../context/useAuth";
@@ -111,7 +111,7 @@ const RequisitionsPage = () => {
   const { user, permissions } = useAuth();
   return (
     <div>
-      <PageHeader title="Requisitions" description="Departments request what they need. The head of Accounts or the General Manager approves, returns or rejects. Stores or Accounts then fulfils it." />
+      <PageHeader icon={ClipboardList} eyebrow="Workflow" title="Requisitions" description="Departments request what they need. The head of Accounts or the General Manager approves, returns or rejects. Stores or Accounts then fulfils it." />
       {permissions?.requisitions?.decide && <Alert tone="info" className="mb-4">You can approve requisitions. You cannot decide on a requisition you raised yourself.</Alert>}
       <ResourcePage config={config(user, permissions)} />
     </div>

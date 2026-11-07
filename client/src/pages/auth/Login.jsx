@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../context/useAuth";
+import { errorMessage } from "../../lib/api";
+import { dismissError, showError } from "../../lib/toast";
 import landingImage from "../../assets/keiyian-landing.jpg";
 
 const Login = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { login, isAuthenticated, user } = useAuth();
-  const from = location.state?.from?.pathname;
-  const homePath = user?.mustChangePassword ? "/change-password" : from && from !== "/login" ? from : "/dashboard";
+  // Every sign-in starts on the dashboard, whoever was signed in before and
+  // whichever page they were on.
+  const homePath = user?.mustChangePassword ? "/change-password" : "/dashboard";
 
   const [formData, setFormData] = useState({
     email: "",
@@ -19,7 +21,6 @@ const Login = () => {
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
   // If already logged in
   if (isAuthenticated) {
@@ -38,34 +39,32 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    setError("");
+    dismissError();
     setLoading(true);
 
     try {
       const session = await login(formData);
-
-      navigate(session.user?.mustChangePassword ? "/change-password" : from && from !== "/login" ? from : "/dashboard", {
-        replace: true,
-      });
+      // Leave nothing behind in the form for the next person at this screen.
+      setFormData({ email: "", password: "" });
+      setShowPassword(false);
+      navigate(session.user?.mustChangePassword ? "/change-password" : "/dashboard", { replace: true });
     } catch (error) {
-      setError(
-        error.response?.data?.message ||
-          "Unable to log in. Please check your credentials."
-      );
+      setFormData((previous) => ({ ...previous, password: "" }));
+      showError(errorMessage(error, "Unable to sign in. Please check your email and password."), "Sign-in failed");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#f3f7f1] text-[#19271f] lg:grid lg:min-h-screen lg:grid-cols-[minmax(0,1.12fr)_minmax(430px,0.88fr)]">
+    <div className="min-h-screen bg-slate-50 text-slate-900 lg:grid lg:min-h-screen lg:grid-cols-[minmax(0,1.12fr)_minmax(430px,0.88fr)]">
       <section className="relative isolate flex min-h-[350px] flex-col justify-between overflow-hidden bg-emerald-950 px-6 py-7 text-white sm:px-10 sm:py-9 lg:min-h-screen lg:px-14 lg:py-12">
         <img
           src={landingImage}
           alt="Green agricultural fields beneath an open sky"
           className="absolute inset-0 -z-20 h-full w-full object-cover object-center"
         />
-        <div className="absolute inset-0 -z-10 bg-[#10251b]/45" />
+        <div className="absolute inset-0 -z-10 bg-sidebar/45" />
 
         <div className="flex w-full flex-col items-center gap-3">
           <img
@@ -88,11 +87,11 @@ const Login = () => {
         </div>
 
         <div className="mt-10 hidden border-t border-white/25 pt-5 text-xs text-white/70 lg:block">
-          Keiyian ERP
+          Nuru ya Jamii
         </div>
       </section>
 
-      <main className="flex min-h-[calc(100svh-350px)] flex-col border-t-4 border-primary-300 bg-[#f8faf6] px-6 py-10 sm:px-10 lg:min-h-screen lg:border-l lg:border-t-0 lg:border-slate-200 lg:px-14 lg:py-12">
+      <main className="flex min-h-[calc(100svh-350px)] flex-col border-t-4 border-primary-300 bg-slate-50 px-6 py-10 sm:px-10 lg:min-h-screen lg:border-l lg:border-t-0 lg:border-slate-200 lg:px-14 lg:py-12">
         <div className="mx-auto flex w-full max-w-[390px] flex-1 flex-col justify-center py-4">
           <div className="mb-8">
             <div className="mb-4 flex items-center gap-3">
@@ -101,7 +100,7 @@ const Login = () => {
                 Staff access
               </p>
             </div>
-            <h2 className="text-3xl font-semibold text-[#19271f] sm:text-4xl">
+            <h2 className="text-3xl font-semibold text-slate-900 sm:text-4xl">
               Welcome back.
             </h2>
             <p className="mt-3 text-sm leading-6 text-slate-600">
@@ -109,13 +108,7 @@ const Login = () => {
             </p>
           </div>
 
-          {error && (
-            <div role="alert" className="mb-6 rounded-md border border-red-200 border-l-2 border-l-red-600 bg-red-50 px-4 py-3 text-sm text-red-800">
-              <p>{error}</p>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5" autoComplete="off">
             <div>
               <label htmlFor="email" className="mb-2 block text-[13px] font-semibold text-slate-700">
                 Email address
@@ -129,7 +122,7 @@ const Login = () => {
                   value={formData.email}
                   onChange={handleChange}
                   placeholder="Enter your email address"
-                  autoComplete="email"
+                  autoComplete="off"
                   required
                   className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-600 focus:ring-2 focus:ring-primary-400/20"
                 />
@@ -149,7 +142,7 @@ const Login = () => {
                   value={formData.password}
                   onChange={handleChange}
                   placeholder="Enter your password"
-                  autoComplete="current-password"
+                  autoComplete="off"
                   required
                   className="w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-primary-600 focus:ring-2 focus:ring-primary-400/20"
                 />
@@ -175,7 +168,7 @@ const Login = () => {
         </div>
 
         <footer className="mx-auto mt-6 w-full max-w-[390px] border-t border-slate-200 pt-4 text-center">
-          <p className="text-[11px] text-slate-500">Keiyian ERP</p>
+          <p className="text-[11px] text-slate-500">Keiyian Farmers Cooperative Society Ltd</p>
           <p className="mt-1.5 text-xs text-slate-500">
             Developed &amp; Managed by{" "}
             <a

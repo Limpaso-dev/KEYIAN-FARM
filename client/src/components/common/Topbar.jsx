@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, Menu, X } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { ArrowLeft, Bell, CheckCheck, ChevronDown, ChevronRight, ClipboardList, KeyRound, LogOut, Menu, Search } from "lucide-react";
 import { useAuth } from "../../context/useAuth";
 import { get } from "../../lib/api";
 import { dateTime, money } from "../../lib/format";
+import { findNavItem, NAV_GROUPS } from "../../navigation";
+import { cx } from "../../lib/cx";
+import { Kbd } from "../ui/ui";
 
 /** Requisitions needing this user's attention. */
 const useNotifications = (user, permissions) => {
@@ -38,16 +41,12 @@ const useNotifications = (user, permissions) => {
   return { items, failed, refresh };
 };
 
-const Topbar = ({ onMenuClick = () => {} }) => {
-  const { user, permissions, label } = useAuth();
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const panel = useRef(null);
-  const { items, failed, refresh } = useNotifications(user, permissions);
-
+/** Closes a popover on outside click or Escape. */
+const useDismiss = (open, setOpen) => {
+  const ref = useRef(null);
   useEffect(() => {
     if (!open) return undefined;
-    const close = (event) => !panel.current?.contains(event.target) && setOpen(false);
+    const close = (event) => !ref.current?.contains(event.target) && setOpen(false);
     const esc = (event) => event.key === "Escape" && setOpen(false);
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", esc);
@@ -55,59 +54,158 @@ const Topbar = ({ onMenuClick = () => {} }) => {
       document.removeEventListener("mousedown", close);
       document.removeEventListener("keydown", esc);
     };
-  }, [open]);
+  }, [open, setOpen]);
+  return ref;
+};
 
+const initials = (name = "") => name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("") || "U";
+
+/**
+ * Back to the previous page of this sign-in session. History from before the
+ * session started (another account, the login screen) is never stepped into;
+ * then it goes to the dashboard instead.
+ */
+const BackButton = ({ sessionStart = 0 }) => {
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  if (pathname === "/dashboard") return null;
+  const index = window.history.state?.idx ?? 0;
+  const goBack = () => (index > sessionStart ? navigate(-1) : navigate("/dashboard"));
   return (
-    <header className="fixed left-0 right-0 top-0 z-30 h-20 border-b border-[#dfe8dc] bg-[#f8faf6] lg:left-64">
-      <div className="flex h-full items-center justify-between gap-3 px-3 sm:px-6">
-        <button type="button" aria-label="Open navigation" onClick={onMenuClick} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"><Menu size={20} /></button>
-        <p className="hidden text-sm font-medium text-slate-600 sm:block">Keiyian Farmers Cooperative Society</p>
-
-        <div className="ml-auto flex items-center gap-5">
-          <div ref={panel} className="relative">
-            <button type="button" aria-label={`Notifications${items.length ? `, ${items.length} pending` : ""}`} aria-expanded={open} onClick={() => { setOpen((v) => !v); refresh(); }} className="relative rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
-              <Bell size={21} />
-              {items.length > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white">{items.length > 99 ? "99+" : items.length}</span>}
-            </button>
-            {open && (
-              <section className="absolute right-0 top-12 z-50 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl" aria-label="Notifications">
-                <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-                  <h2 className="text-sm font-semibold text-slate-900">Notifications</h2>
-                  <button type="button" aria-label="Close notifications" onClick={() => setOpen(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X size={17} /></button>
-                </div>
-                {items.length ? (
-                  <ul className="max-h-96 divide-y divide-slate-100 overflow-y-auto">
-                    {items.slice(0, 15).map((item) => (
-                      <li key={item.id}>
-                        <button type="button" onClick={() => { setOpen(false); navigate("/requisitions"); }} className="w-full px-4 py-3 text-left hover:bg-slate-50">
-                          <span className="block text-sm font-medium text-slate-800">{item.title}</span>
-                          <span className="mt-0.5 block truncate text-xs text-slate-500">{item.detail}</span>
-                          <span className="mt-1 flex justify-between text-xs text-slate-400"><span>{item.amount != null ? money(item.amount) : ""}</span><span>{dateTime(item.at)}</span></span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="px-4 py-8 text-center">
-                    <CheckCheck size={24} className="mx-auto text-emerald-500" />
-                    <p className="mt-2 text-sm font-medium text-slate-700">{failed ? "Could not load notifications" : "You're all caught up"}</p>
-                  </div>
-                )}
-              </section>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-100 font-semibold text-primary-700">{user?.name?.charAt(0)?.toUpperCase() || "U"}</div>
-            <div className="hidden md:block">
-              <p className="text-sm font-semibold text-slate-900">{user?.name}</p>
-              <p className="text-xs text-slate-500">{label("roles", user?.role)}{user?.department ? ` · ${label("departments", user.department)}` : ""}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
+    <button
+      type="button"
+      onClick={goBack}
+      aria-label="Go back to the previous page"
+      title="Back (Alt + Left arrow)"
+      className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white pl-2 pr-2 text-sm font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 sm:pr-3"
+    >
+      <ArrowLeft size={16} aria-hidden />
+      <span className="hidden sm:inline">Back</span>
+    </button>
   );
 };
+
+const Breadcrumbs = () => {
+  const { pathname } = useLocation();
+  const item = findNavItem(pathname);
+  const group = NAV_GROUPS.find((g) => g.key === item?.group);
+  if (!item) return null;
+  return (
+    <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
+      <span className="text-slate-400">{group?.label}</span>
+      <ChevronRight size={14} className="text-slate-300" aria-hidden />
+      <span className="truncate font-medium text-slate-800" aria-current="page">{item.label}</span>
+    </nav>
+  );
+};
+
+const Notifications = () => {
+  const { user, permissions } = useAuth();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const panel = useDismiss(open, setOpen);
+  const { items, failed, refresh } = useNotifications(user, permissions);
+  return (
+    <div ref={panel} className="relative">
+      <button
+        type="button"
+        aria-label={`Notifications${items.length ? `, ${items.length} pending` : ""}`}
+        aria-expanded={open}
+        onClick={() => { setOpen((v) => !v); refresh(); }}
+        className={cx("relative flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900", open && "bg-slate-100 text-slate-900")}
+      >
+        <Bell size={19} />
+        {items.length > 0 && <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold text-white ring-2 ring-white">{items.length > 99 ? "99+" : items.length}</span>}
+      </button>
+      {open && (
+        <section className="absolute right-0 top-11 z-50 w-[min(24rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-overlay animate-slide-down" aria-label="Notifications">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <h2 className="text-sm font-semibold text-slate-900">Notifications</h2>
+            {items.length > 0 && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-xs font-medium text-rose-700">{items.length} pending</span>}
+          </div>
+          {items.length ? (
+            <ul className="scrollbar-thin max-h-96 divide-y divide-slate-100 overflow-y-auto">
+              {items.slice(0, 15).map((item) => (
+                <li key={item.id}>
+                  <button type="button" onClick={() => { setOpen(false); navigate("/requisitions"); }} className="flex w-full gap-3 px-4 py-3 text-left transition hover:bg-slate-50">
+                    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700"><ClipboardList size={15} /></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-slate-800">{item.title}</span>
+                      <span className="mt-0.5 block truncate text-xs text-slate-500">{item.detail}</span>
+                      <span className="mt-1 flex justify-between text-xs text-slate-400"><span className="font-medium text-slate-600">{item.amount != null ? money(item.amount) : ""}</span><span>{dateTime(item.at)}</span></span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="px-4 py-10 text-center">
+              <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><CheckCheck size={20} /></span>
+              <p className="mt-3 text-sm font-medium text-slate-700">{failed ? "Could not load notifications" : "You're all caught up"}</p>
+              <p className="mt-0.5 text-xs text-slate-500">Requisitions that need you will appear here.</p>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+};
+
+const UserMenu = () => {
+  const { user, label, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const menu = useDismiss(open, setOpen);
+  const role = `${label("roles", user?.role)}${user?.department ? ` · ${label("departments", user.department)}` : ""}`;
+  return (
+    <div ref={menu} className="relative">
+      <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)} className={cx("flex items-center gap-2.5 rounded-lg py-1 pl-1 pr-2 transition hover:bg-slate-100", open && "bg-slate-100")}>
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-700 text-xs font-semibold text-white">{initials(user?.name)}</span>
+        <span className="hidden max-w-[11rem] text-left leading-tight lg:block">
+          <span className="block truncate text-sm font-semibold text-slate-900">{user?.name}</span>
+          <span className="block truncate text-xs text-slate-500">{role}</span>
+        </span>
+        <ChevronDown size={15} className="hidden text-slate-400 lg:block" aria-hidden />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-11 z-50 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-overlay animate-slide-down">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <p className="truncate text-sm font-semibold text-slate-900">{user?.name}</p>
+            <p className="truncate text-xs text-slate-500">{user?.email}</p>
+            <p className="mt-1.5 inline-flex rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-800">{role}</p>
+          </div>
+          <div className="p-1.5">
+            <Link role="menuitem" to="/change-password" onClick={() => setOpen(false)} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-slate-700 hover:bg-slate-100 hover:text-slate-900">
+              <KeyRound size={16} className="text-slate-400" /> Change password
+            </Link>
+            <button role="menuitem" type="button" onClick={() => { setOpen(false); logout(); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-rose-700 hover:bg-rose-50">
+              <LogOut size={16} /> Sign out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const Topbar = ({ onMenuClick = () => {}, onSearch = () => {}, collapsed = false, sessionStart = 0 }) => (
+  <header className={cx("fixed right-0 top-0 z-20 h-16 border-b border-slate-200 bg-white/85 backdrop-blur-md transition-[left] duration-200 ease-out left-0", collapsed ? "lg:left-[76px]" : "lg:left-64")}>
+    <div className="flex h-full items-center gap-3 px-3 sm:px-6">
+      <button type="button" aria-label="Open navigation" onClick={onMenuClick} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 lg:hidden"><Menu size={20} /></button>
+      <BackButton sessionStart={sessionStart} />
+      <Breadcrumbs />
+
+      <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+        <button type="button" onClick={onSearch} aria-label="Go to a page (Ctrl+K)" className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-sm text-slate-500 transition hover:border-slate-300 hover:bg-white sm:w-56 lg:w-64">
+          <Search size={16} aria-hidden />
+          <span className="hidden flex-1 text-left sm:block">Go to...</span>
+          <span className="hidden sm:flex"><Kbd>Ctrl K</Kbd></span>
+        </button>
+        <Notifications />
+        <span className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" aria-hidden />
+        <UserMenu />
+      </div>
+    </div>
+  </header>
+);
 
 export default Topbar;

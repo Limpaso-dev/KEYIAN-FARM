@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { FileDown, FileSpreadsheet, Printer } from "lucide-react";
+import { FileBarChart2, FileDown, FileSpreadsheet, Printer } from "lucide-react";
 import { Alert, Button, Card, Input, PageHeader, Select, Spinner, StatCard } from "../../components/ui/ui";
 import { useAuth } from "../../context/useAuth";
 import { download, errorMessage } from "../../lib/api";
+import { showError } from "../../lib/toast";
 import { date, money, number, today } from "../../lib/format";
 import { useFetch } from "../../lib/useFetch";
 
@@ -17,24 +18,24 @@ const numeric = (type) => ["money", "number"].includes(type);
 
 export const ReportView = ({ report }) => (
   <div className="space-y-4">
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       {report.summary.map((s) => <StatCard key={s.label} label={s.label} value={s.type === "money" ? money(s.value) : number(s.value)} />)}
     </div>
     {report.sections.map((section) => (
       <Card key={section.title} className="overflow-hidden">
-        <h3 className="border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-900">{section.title}</h3>
-        {section.rows.length === 0 ? <p className="px-4 py-3 text-sm text-slate-500">No records for this day.</p> : (
-          <div className="overflow-x-auto">
+        <h3 className="border-b border-slate-100 px-5 py-3.5 text-[15px] font-semibold text-slate-900">{section.title}</h3>
+        {section.rows.length === 0 ? <p className="px-5 py-4 text-sm text-slate-400">No records for this day.</p> : (
+          <div className="scrollbar-thin overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
-                <tr>{section.columns.map((c) => <th key={c.key} className={`px-3 py-2 ${numeric(c.type) ? "text-right" : ""}`}>{c.label}</th>)}</tr>
+              <thead className="border-b border-slate-200 bg-slate-50/80 text-left text-xs font-semibold text-slate-500">
+                <tr>{section.columns.map((c) => <th key={c.key} className={`whitespace-nowrap px-5 py-2.5 ${numeric(c.type) ? "text-right" : ""}`}>{c.label}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {section.rows.map((row, i) => <tr key={i}>{section.columns.map((c) => <td key={c.key} className={`px-3 py-2 ${numeric(c.type) ? "text-right tabular-nums" : ""}`}>{cell(row[c.key], c.type)}</td>)}</tr>)}
+                {section.rows.map((row, i) => <tr key={i} className="hover:bg-slate-50">{section.columns.map((c) => <td key={c.key} className={`px-5 py-3 text-slate-700 ${numeric(c.type) ? "text-right tabular-nums" : ""}`}>{cell(row[c.key], c.type)}</td>)}</tr>)}
               </tbody>
               {section.totals && (
-                <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold">
-                  <tr>{section.columns.map((c, i) => <td key={c.key} className={`px-3 py-2 ${numeric(c.type) ? "text-right tabular-nums" : ""}`}>{i === 0 ? "Total" : section.totals[c.key] != null ? cell(section.totals[c.key], c.type) : ""}</td>)}</tr>
+                <tfoot className="border-t border-slate-200 bg-slate-50 font-semibold text-slate-900">
+                  <tr>{section.columns.map((c, i) => <td key={c.key} className={`px-5 py-3 ${numeric(c.type) ? "text-right tabular-nums" : ""}`}>{i === 0 ? "Total" : section.totals[c.key] != null ? cell(section.totals[c.key], c.type) : ""}</td>)}</tr>
                 </tfoot>
               )}
             </table>
@@ -55,7 +56,6 @@ const ReportsPage = () => {
   );
   const [day, setDay] = useState(today());
   const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
   const { data, loading, error: loadError } = useFetch(department ? "/reports/daily" : null, { department, date: day });
 
   const options = [
@@ -65,11 +65,10 @@ const ReportsPage = () => {
 
   const get = async (format) => {
     setBusy(format);
-    setError("");
     try {
       await download("/reports/daily", { department, date: day, format }, `keiyian-${department}-eod-${day}.${format}`);
     } catch (err) {
-      setError(errorMessage(err, "The report could not be downloaded"));
+      showError(errorMessage(err, "The report could not be downloaded. Please try again."), "Download failed");
     } finally {
       setBusy("");
     }
@@ -77,14 +76,14 @@ const ReportsPage = () => {
 
   return (
     <div>
-      <PageHeader title="End of day reports" description="Each department's day: what came in, what went out and the closing position. Download as PDF to print or CSV for Excel." />
-      <Card className="mb-4 p-4">
+      <PageHeader icon={FileBarChart2} eyebrow="Workflow" title="End-of-day reports" description="Each department's day: what came in, what went out and the closing position. Download as PDF to print or CSV for Excel." />
+      <Card className="mb-6 p-4 sm:p-5">
         <div className="flex flex-wrap items-end gap-3">
-          <label className="min-w-[220px] text-xs font-medium text-slate-600">Department
-            <Select className="mt-1" options={options} placeholder="Choose..." value={department} onChange={(e) => setDepartment(e.target.value)} />
+          <label className="block min-w-[220px] text-xs font-medium text-slate-500">Department
+            <Select className="mt-1 block" options={options} placeholder="Choose..." value={department} onChange={(e) => setDepartment(e.target.value)} />
           </label>
-          <label className="text-xs font-medium text-slate-600">Date
-            <Input type="date" className="mt-1" max={today()} value={day} onChange={(e) => setDay(e.target.value)} />
+          <label className="block text-xs font-medium text-slate-500">Date
+            <Input type="date" className="mt-1 block" max={today()} value={day} onChange={(e) => setDay(e.target.value)} />
           </label>
           <div className="flex flex-wrap gap-2">
             <Button icon={FileDown} loading={busy === "pdf"} disabled={!department} onClick={() => get("pdf")}>Download PDF</Button>
@@ -93,12 +92,12 @@ const ReportsPage = () => {
           </div>
         </div>
       </Card>
-      <Alert tone="error" className="mb-4">{error || loadError}</Alert>
+      <Alert tone="error" className="mb-4">{loadError}</Alert>
       {!allowed.length && <Alert tone="info">Your account does not have access to any department reports.</Alert>}
       {loading && <Spinner label="Building report..." />}
       {!loading && data?.reports?.map((report) => (
         <section key={report.department} className="mb-8">
-          <h2 className="mb-3 text-lg font-semibold text-slate-900">{label("departments", report.department)} <span className="text-sm font-normal text-slate-500">- {date(`${data.date}T00:00:00Z`)}</span></h2>
+          <h2 className="mb-4 flex items-baseline gap-2 text-lg font-semibold tracking-tight text-slate-900">{label("departments", report.department)} <span className="text-sm font-normal text-slate-500">{date(`${data.date}T00:00:00Z`)}</span></h2>
           <ReportView report={report} />
         </section>
       ))}
