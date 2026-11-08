@@ -33,7 +33,7 @@ export const navigation = [
   { label: "Crops", path: "/crops", icon: Sprout, group: "departments", department: "crops", hint: "Sugarcane, tea, coffee", visible: (a) => any(a, ["cropFarms"]) },
   { label: "Accounts", path: "/accounts", icon: Wallet, group: "departments", department: "accounts", hint: "Income, expenses, payments", visible: (a) => any(a, ["transactions", "accounts"]) },
   { label: "Requisitions", path: "/requisitions", icon: ClipboardList, group: "workflow", hint: "Request and approve", visible: (a) => Boolean(a.permissions?.requisitions?.raise || a.permissions?.requisitions?.seeAll || a.permissions?.requisitions?.fulfil) },
-  { label: "Reports", path: "/reports", icon: FileBarChart2, group: "workflow", hint: "End of day PDF / CSV", visible: (a) => Boolean(a.permissions?.reports?.length) },
+  { label: "Reports", path: "/reports", icon: FileBarChart2, group: "workflow", hint: "Daily to annual reports, PDF / CSV", visible: (a) => Boolean(a.permissions?.reports?.length) },
   { label: "User accounts", path: "/users", icon: Users, group: "admin", hint: "Create and manage logins", visible: (a) => Boolean(a.permissions?.manageUsers) },
 ];
 

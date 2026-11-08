@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Ban } from "lucide-react";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
-import { Card, Input, StatCard } from "../../components/ui/ui";
+import { Card, Input } from "../../components/ui/ui";
+import { ReportTable } from "../../components/reports/ReportDocument";
+import { SystemNote } from "../../components/ui/KeyFigures";
 import { useAuth } from "../../context/useAuth";
 import { daysAgo, fullName, money, number, today } from "../../lib/format";
 import { refs } from "../../lib/refs";
@@ -21,31 +23,45 @@ const CategorySummary = () => {
   const rows = data?.rows || [];
   const list = (type) => rows.filter((r) => r.type === type).sort((a, b) => b.amount - a.amount);
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-        <h2 className="text-sm font-semibold text-slate-900">Summary for the period</h2>
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 px-5 py-4">
+        <h2 className="text-[15px] font-semibold text-slate-900">Summary for the period</h2>
         <div className="flex gap-2">
           <label className="text-xs text-slate-500">From<Input type="date" className="mt-1" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} /></label>
           <label className="text-xs text-slate-500">To<Input type="date" className="mt-1" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></label>
         </div>
       </div>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <StatCard label="Income" value={money(data?.income)} />
-        <StatCard label="Expenses" value={money(data?.expenses)} />
-        <StatCard label="Net" value={money(data?.net)} tone={data?.net < 0 ? "warn" : "default"} />
+      {/* An income and expenditure statement: rows and columns, totals, then the net. */}
+      <div className="space-y-6 px-5 py-5">
+        <div className="grid gap-6 lg:grid-cols-2">
+          {[["income", "Income by category", "incomeCategories", "Total income", data?.income], ["expense", "Expenses by category", "expenseCategories", "Total expenses", data?.expenses]].map(([type, title, options, totalLabel, total]) => (
+            <ReportTable
+              key={type}
+              emptyText="Nothing recorded"
+              section={{
+                title,
+                columns: [{ key: "category", label: "Category" }, { key: "amount", label: "Amount (KES)", type: "money" }],
+                rows: list(type).map((r) => ({ category: label(options, r.category), amount: r.amount })),
+                totals: { amount: total ?? 0 },
+                totalLabel,
+              }}
+            />
+          ))}
+        </div>
+        <ReportTable
+          narrow
+          section={{
+            title: "Net for the period",
+            columns: [{ key: "item", label: "Item" }, { key: "amount", label: "Amount (KES)", type: "money" }],
+            rows: [{ item: "Total income", amount: data?.income ?? 0 }, { item: "Less total expenses", amount: data?.expenses ?? 0 }],
+            totals: { amount: data?.net ?? 0 },
+            totalLabel: "Net (income less expenses)",
+          }}
+        />
       </div>
-      <div className="mt-4 grid gap-6 md:grid-cols-2">
-        {[["income", "Income by category", "incomeCategories"], ["expense", "Expenses by category", "expenseCategories"]].map(([type, title, options]) => (
-          <div key={type}>
-            <h3 className="mb-1 text-xs font-semibold uppercase text-slate-500">{title}</h3>
-            {list(type).length ? (
-              <ul className="divide-y divide-slate-100 text-sm">
-                {list(type).map((r) => <li key={r.category} className="flex justify-between py-1.5"><span>{label(options, r.category)}</span><span className="tabular-nums">{money(r.amount)}</span></li>)}
-              </ul>
-            ) : <p className="py-2 text-sm text-slate-500">Nothing recorded</p>}
-          </div>
-        ))}
-      </div>
+      <footer className="border-t border-slate-200 bg-slate-50/70 px-5 py-3">
+        <SystemNote />
+      </footer>
     </Card>
   );
 };

@@ -3,7 +3,8 @@ import { milkTransfers as transfers } from "./milkTransfers";
 import { ActionButton } from "../../components/resource/ActionButton";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
-import { Card, StatCard } from "../../components/ui/ui";
+import { Card } from "../../components/ui/ui";
+import { KeyFigures } from "../../components/ui/KeyFigures";
 import { get } from "../../lib/api";
 import { daysAgo, inputDate, nairobiHour, number, today } from "../../lib/format";
 import { refs } from "../../lib/refs";
@@ -172,13 +173,16 @@ const MilkTotals = () => {
   const litres = todayRows.reduce((s, r) => s + r.litres, 0);
   const sent = todayRows.reduce((s, r) => s + r.sentToMva, 0);
   return (
-    <Card className="p-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Milk today" value={`${number(litres)} L`} />
-        <StatCard label="Sent to MVA today" value={`${number(sent)} L`} />
-        <StatCard label="Not yet sent" value={`${number(litres - sent)} L`} tone={litres - sent > 0 ? "warn" : "default"} />
-        <StatCard label="Last 7 days" value={`${number(rows.reduce((s, r) => s + r.litres, 0))} L`} />
-      </div>
+    <Card className="overflow-hidden">
+      <KeyFigures
+        bare
+        items={[
+          { label: "Milk today", value: `${number(litres)} L` },
+          { label: "Sent to MVA today", value: `${number(sent)} L` },
+          { label: "Not yet sent", value: `${number(litres - sent)} L`, tone: litres - sent > 0 ? "warn" : undefined },
+          { label: "Last 7 days", value: `${number(rows.reduce((s, r) => s + r.litres, 0))} L` },
+        ]}
+      />
     </Card>
   );
 };

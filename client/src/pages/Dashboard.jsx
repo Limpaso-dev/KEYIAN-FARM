@@ -198,7 +198,7 @@ const DepartmentsToday = ({ cards, className, hide = [] }) => {
     <Panel
       className={className}
       title={cards.length > 1 ? "Departments today" : metrics.length < card.summary.length ? `More from ${nav?.label || card.title} today` : `${nav?.label || card.title} today`}
-      description="Headline figures from the end-of-day report"
+      description="Headline figures from today's department reports"
       footer={(
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-100 px-5 py-3 text-sm">
           {nav && <Link to={nav.path} className="inline-flex items-center gap-1 font-medium text-primary-700 hover:text-primary-900 hover:underline">Open {nav.label} <ArrowRight size={14} aria-hidden /></Link>}
@@ -344,7 +344,7 @@ const Dashboard = () => {
         </div>
         {permissions?.reports?.length > 0 && (
           <Link to="/reports" className="inline-flex h-9 items-center gap-2 self-start rounded-lg border border-slate-300 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-400 hover:bg-slate-50 hover:text-slate-900 sm:self-auto">
-            <FileBarChart2 size={16} aria-hidden /> End-of-day reports
+            <FileBarChart2 size={16} aria-hidden /> Reports
           </Link>
         )}
       </header>

@@ -1,71 +1,20 @@
 import prisma from "../../config/prisma.js";
 import { optionLabel } from "../../config/catalog.js";
 import { badRequest, ok } from "../../lib/http.js";
+import { bucketsOf, dayText, isoDay, periodInfo, resolvePeriod, spanText } from "../../lib/periods.js";
 import { round2 } from "../../lib/validate.js";
-import { toCsv, toPdf } from "../reports/render.js";
+import { MOTTO, ORGANISATION, toCsv, toPdf } from "../reports/render.js";
 
-// Crop performance over a month, quarter, half year or year, laid out like
+// Crop performance for any reporting period (a day, a week, two weeks, a
+// month, a quarter, a half year, a year or a custom range), laid out like
 // the cooperative's paper reports: the tea farm report (daily kgs against
 // target), the end-year tea report (month by month, kgs to date, average per
 // day) and the cane status report (hectares, age, cycle, expected yield and
 // tonnage achieved).
 
-const ORGANISATION = "Keiyian Farmers Cooperative Society Ltd";
-const MOTTO = "Nuru ya Jamii";
-const SIGNATURES = ["Prepared by", "Checked by", "Confirmed by"];
-const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const SHORT = MONTHS.map((m) => m.slice(0, 3));
 const ACRES_PER_HECTARE = 2.471;
-const DAY_MS = 86400000;
-
-// period -> [periods in a year, months in each]
-const SPANS = { month: [12, 1], quarter: [4, 3], half: [2, 6], year: [1, 12] };
-
-const utc = (year, month, day = 1) => new Date(Date.UTC(year, month, day));
-const isoDay = (date) => date.toISOString().slice(0, 10);
 const sum = (rows, pick) => round2(rows.reduce((total, row) => total + (Number(pick(row)) || 0), 0));
 const col = (key, label, type, weight) => ({ key, label, ...(type ? { type } : {}), ...(weight ? { weight } : {}) });
-
-const periodName = (period, year, index, startMonth, months) => {
-  const span = `${SHORT[startMonth]} - ${SHORT[startMonth + months - 1]}`;
-  if (period === "month") return `${MONTHS[startMonth]} ${year}`;
-  if (period === "quarter") return `Q${index} ${year} (${span})`;
-  if (period === "half") return `${index === 1 ? "First" : "Second"} half ${year} (${span})`;
-  return `Year ${year}`;
-};
-
-/** The dates a report covers. `to` is exclusive. */
-export const periodRange = (period, year, index, { withPrevious = true } = {}) => {
-  const [count, months] = SPANS[period] || [];
-  if (!count) throw badRequest("Period must be month, quarter, half or year");
-  if (!Number.isInteger(year) || year < 2000 || year > 2100) throw badRequest("Choose a valid year");
-  const i = period === "year" ? 1 : index;
-  if (!Number.isInteger(i) || i < 1 || i > count) throw badRequest(`Choose a ${period} between 1 and ${count}`);
-  const startMonth = (i - 1) * months;
-  const from = utc(year, startMonth);
-  const to = utc(year, startMonth + months);
-  // Status and crop age are "as at" the end of the period, or today if the
-  // period is still running.
-  const todayStart = new Date(`${isoDay(new Date())}T00:00:00.000Z`);
-  const lastDay = new Date(to.getTime() - DAY_MS);
-  const range = {
-    period, year, index: i, months, startMonth, from, to, lastDay,
-    asAt: lastDay < todayStart ? lastDay : todayStart,
-    yearStart: utc(year, 0),
-    label: periodName(period, year, i, startMonth, months),
-    shortLabel: period === "month" ? `${SHORT[startMonth]} ${year}` : period === "year" ? String(year) : `${period === "quarter" ? "Q" : "H"}${i} ${year}`,
-  };
-  if (withPrevious) {
-    range.previous = i > 1 ? periodRange(period, year, i - 1, { withPrevious: false }) : periodRange(period, year - 1, count, { withPrevious: false });
-  }
-  return range;
-};
-
-/** Which period "now" falls in, used when none is chosen. */
-const currentIndex = (period, date = new Date()) => {
-  const [, months] = SPANS[period] || [1, 1];
-  return Math.floor(date.getUTCMonth() / months) + 1;
-};
 
 const kilograms = (h) => Number(h.quantity) * (h.unit === "tonnes" ? 1000 : 1);
 const tonnes = (h) => Number(h.quantity) / (h.unit === "kg" ? 1000 : 1);
@@ -102,12 +51,11 @@ const loadFarms = (crop, range) => prisma.cropFarm.findMany({
   orderBy: { farmNumber: "asc" },
 });
 
-/** Each month of the period with the harvests that fell in it. */
-const monthsOf = (range, harvests) => Array.from({ length: range.months }, (_, i) => {
-  const from = utc(range.year, range.startMonth + i);
-  const to = utc(range.year, range.startMonth + i + 1);
-  return { month: MONTHS[range.startMonth + i], from, to, harvests: harvests.filter(between(from, to)) };
-});
+/** "01 Jan – 31 May 2024": from 1 January to the end of the period (or today). */
+const yearToDateText = (range) => spanText(range.yearStart, range.asAt >= range.yearStart ? range.asAt : range.lastDay);
+// Running totals ("to date") count from 1 January, or from the start of a custom range.
+const cumulativeFrom = (range) => (range.period === "custom" ? range.from : range.yearStart);
+const earliestNeeded = (range) => [range.previous.from, range.yearStart, range.from].reduce((a, b) => (b < a ? b : a));
 
 const changeItem = (range, current, previous) => ({
   label: `Change vs ${range.previous.shortLabel}`,
@@ -119,8 +67,7 @@ const changeItem = (range, current, previous) => ({
 // Tea and coffee: plucking days against a daily target.
 // ---------------------------------------------------------------------
 const plucking = (crop) => async (range) => {
-  const earliest = range.previous.from < range.yearStart ? range.previous.from : range.yearStart;
-  const [farms, all] = await Promise.all([loadFarms(crop, range), loadHarvests(crop, earliest, range.to)]);
+  const [farms, all] = await Promise.all([loadFarms(crop, range), loadHarvests(crop, earliestNeeded(range), range.to)]);
   const current = all.filter(between(range.from, range.to));
   const previous = all.filter(between(range.previous.from, range.previous.to));
   const yearToDate = all.filter(between(range.yearStart, range.to));
@@ -158,13 +105,13 @@ const plucking = (crop) => async (range) => {
     ] : []),
     { label: "Plucking days", value: days.length },
     { label: "Average per plucking day (kg)", value: days.length ? round2(kgs / days.length) : 0 },
-    { label: `Kgs plucked Jan - ${SHORT[range.startMonth + range.months - 1]} ${range.year}`, value: sum(yearToDate, kilograms) },
+    { label: `Kgs plucked ${yearToDateText(range)}`, value: sum(yearToDate, kilograms) },
     changeItem(range, kgs, previousKgs),
     ...(value > 0 ? [{ label: "Value", value, type: "money" }] : []),
   ];
 
   const sections = [];
-  if (range.months === 1) {
+  if (range.bucket === "day") {
     sections.push({
       title: `Daily plucking - ${range.label}`,
       columns: [col("date", "Date", "date"), col("target", "Target (kg)", "number"), col("kgs", "Kgs plucked", "number"), col("variance", "Variance (kg)", "number"), ...(value > 0 ? [col("value", "Value", "money")] : [])],
@@ -172,13 +119,13 @@ const plucking = (crop) => async (range) => {
       ...(days.length ? { totals: { target: hasTarget ? target : null, kgs, variance: hasTarget ? variance : null, value } } : {}),
     });
   } else {
-    let toDate = sum(yearToDate.filter((h) => h.harvestDate < range.from), kilograms);
-    const rows = monthsOf(range, current).map((m) => {
+    let toDate = sum(all.filter(between(cumulativeFrom(range), range.from)), kilograms);
+    const rows = bucketsOf(range).map((m) => {
       const monthDays = days.filter((d) => d.date >= m.from && d.date < m.to);
       const monthKgs = sum(monthDays, (d) => d.kgs);
       toDate = round2(toDate + monthKgs);
       return {
-        month: m.month,
+        month: m.label,
         days: monthDays.length,
         target: monthDays.some((d) => d.target != null) ? sum(monthDays, (d) => d.target) : null,
         kgs: monthKgs,
@@ -219,13 +166,6 @@ const plucking = (crop) => async (range) => {
     heading: `${label} farm report - ${range.label}`,
     summary,
     sections,
-    chart: {
-      unit: "kg",
-      series: [{ key: "kgs", label: "Kgs plucked" }, ...(hasTarget ? [{ key: "target", label: "Target" }] : [])],
-      points: range.months === 1
-        ? days.map((d) => ({ key: isoDay(d.date), date: isoDay(d.date), values: { kgs: d.kgs, target: d.target } }))
-        : sections[0].rows.map((r) => ({ key: r.month, label: r.month.slice(0, 3), values: { kgs: r.kgs, target: r.target } })),
-    },
     counts: { farms: farms.length, records: current.length },
   };
 };
@@ -234,10 +174,9 @@ const plucking = (crop) => async (range) => {
 // Sugarcane: cane status as at the end of the period, plus tonnage cut.
 // ---------------------------------------------------------------------
 const sugarcane = async (range) => {
-  const earliest = range.previous.from < range.yearStart ? range.previous.from : range.yearStart;
   const [farms, all, lastCuts, laterCuts] = await Promise.all([
     loadFarms("sugarcane", range),
-    loadHarvests("sugarcane", earliest, range.to),
+    loadHarvests("sugarcane", earliestNeeded(range), range.to),
     prisma.cropHarvest.groupBy({ by: ["farmId"], where: { harvestDate: { lt: range.to }, farm: { cropType: "sugarcane" } }, _max: { harvestDate: true } }),
     prisma.cropHarvest.groupBy({ by: ["farmId"], where: { harvestDate: { gte: range.to }, farm: { cropType: "sugarcane" } }, _count: true }),
   ]);
@@ -282,7 +221,7 @@ const sugarcane = async (range) => {
 
   const sections = [
     {
-      title: `Cane status as at ${isoDay(range.asAt)}`,
+      title: `Cane status as at ${dayText(range.asAt)}`,
       columns: [
         col("sNo", "S.No.", "number", 0.6), col("farmNumber", "F.No.", null, 1.1), col("longFarmNumber", "Long F/No.", null, 1.4),
         col("hectares", "Hectares", "number"), col("acreage", "Acres", "number"), col("age", "Age (months)", "number"),
@@ -299,15 +238,16 @@ const sugarcane = async (range) => {
       ...(cut.length ? { totals: { tonnes: totalTonnes, value } } : {}),
     },
   ];
-  if (range.months > 1) {
-    let toDate = sum(yearToDate.filter((h) => h.harvestDate < range.from), tonnes);
+  if (range.bucket === "month") {
+    let toDate = sum(all.filter(between(cumulativeFrom(range), range.from)), tonnes);
     sections.push({
       title: `Monthly harvests - ${range.label}`,
       columns: [col("month", "Month"), col("farms", "Farms cut", "number"), col("tonnes", "Tonnes", "number"), col("value", "Value", "money"), col("toDate", "Tonnes to date", "number")],
-      rows: monthsOf(range, current).map((m) => {
-        const t = sum(m.harvests, tonnes);
+      rows: bucketsOf(range).map((m) => {
+        const inMonth = current.filter(between(m.from, m.to));
+        const t = sum(inMonth, tonnes);
         toDate = round2(toDate + t);
-        return { month: m.month, farms: new Set(m.harvests.map((h) => h.farmId)).size, tonnes: t, value: sum(m.harvests, (h) => h.amount), toDate };
+        return { month: m.label, farms: new Set(inMonth.map((h) => h.farmId)).size, tonnes: t, value: sum(inMonth, (h) => h.amount), toDate };
       }),
       totals: { tonnes: totalTonnes, value },
     });
@@ -322,14 +262,11 @@ const sugarcane = async (range) => {
       { label: "Expected yield (t)", value: sum(statusRows, (r) => r.expectedYield) },
       { label: "Tonnes harvested", value: totalTonnes },
       { label: "Average TCH achieved", value: cutHectares > 0 ? round2(totalTonnes / cutHectares) : 0 },
-      { label: `Tonnes Jan - ${SHORT[range.startMonth + range.months - 1]} ${range.year}`, value: sum(yearToDate, tonnes) },
+      { label: `Tonnes ${yearToDateText(range)}`, value: sum(yearToDate, tonnes) },
       changeItem(range, totalTonnes, sum(previous, tonnes)),
       ...(value > 0 ? [{ label: "Value", value, type: "money" }] : []),
     ],
     sections,
-    chart: range.months > 1
-      ? { unit: "t", series: [{ key: "tonnes", label: "Tonnes harvested" }], points: sections[2].rows.map((r) => ({ key: r.month, label: r.month.slice(0, 3), values: { tonnes: r.tonnes } })) }
-      : null,
     counts: { farms: farms.length, records: current.length },
   };
 };
@@ -350,7 +287,7 @@ const fodder = async (range) => {
     ],
     sections: [
       {
-        title: `Fodder status as at ${isoDay(range.asAt)}`,
+        title: `Fodder status as at ${dayText(range.asAt)}`,
         columns: [col("sNo", "S.No.", "number", 0.6), col("fodder", "Fodder"), col("farmNumber", "F.No."), col("acreage", "Acres", "number"), col("location", "Location"), col("status", "Status", null, 3)],
         rows,
         ...(rows.length ? { totals: { acreage: sum(rows, (r) => r.acreage) } } : {}),
@@ -361,7 +298,6 @@ const fodder = async (range) => {
         rows: current.map((h) => ({ date: h.harvestDate, fodder: h.farm.variety || h.farm.farmNumber, quantity: Number(h.quantity), unit: optionLabel("harvestUnits", h.unit), buyer: h.buyer || "", value: Number(h.amount || 0) })),
       },
     ],
-    chart: null,
     counts: { farms: farms.length, records: current.length },
   };
 };
@@ -369,18 +305,18 @@ const fodder = async (range) => {
 const BUILDERS = { tea: plucking("tea"), sugarcane, coffee: plucking("coffee"), fodder };
 export const CROP_ORDER = Object.keys(BUILDERS);
 
-/** GET /api/crops/reports?crop=tea|sugarcane|coffee|fodder|all&period=month&year=2024&index=5&format=json|pdf|csv */
+/**
+ * GET /api/crops/reports?crop=tea|sugarcane|coffee|fodder|all&period=month&date=2026-11-01&format=json|pdf|csv
+ * Periods as for department reports (see lib/periods.js); year and index
+ * may be given instead of a date for month, quarter, half and year.
+ */
 export const cropReport = async (req, res) => {
   const crop = String(req.query.crop || "tea");
   const crops = crop === "all" ? CROP_ORDER : [crop];
   if (crops.some((c) => !BUILDERS[c])) throw badRequest("Choose a crop");
   const format = String(req.query.format || "json");
   if (!["json", "csv", "pdf"].includes(format)) throw badRequest("Format must be json, csv or pdf");
-  const period = String(req.query.period || "month");
-  const now = new Date();
-  const year = req.query.year ? Number(req.query.year) : now.getUTCFullYear();
-  const index = req.query.index ? Number(req.query.index) : currentIndex(period, now);
-  const range = periodRange(period, year, index);
+  const range = resolvePeriod({ period: "month", ...req.query });
 
   let reports = [];
   for (const c of crops) reports.push({ crop: c, ...(await BUILDERS[c](range)) });
@@ -390,18 +326,9 @@ export const cropReport = async (req, res) => {
     if (active.length) reports = active;
   }
 
-  const slug = { month: `${year}-${String(range.index).padStart(2, "0")}`, quarter: `${year}-Q${range.index}`, half: `${year}-H${range.index}`, year: `${year}` }[period];
-  const fileBase = `keiyian-${crop === "all" ? "crops" : crop}-report-${slug}`;
-  const meta = {
-    organisation: ORGANISATION,
-    motto: MOTTO,
-    reportName: "Crop report",
-    periodText: range.label,
-    emptyText: "No records for this period.",
-    signatures: SIGNATURES,
-    signEachReport: true,
-    preparedBy: req.user.name,
-  };
+  const generatedAt = new Date().toISOString();
+  const meta = { organisation: ORGANISATION, motto: MOTTO, generatedBy: req.user.name, generatedAt };
+  const fileBase = `keiyian-${crop === "all" ? "crops" : crop}-report-${range.slug}`;
   if (format === "csv") {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${fileBase}.csv"`);
@@ -410,16 +337,13 @@ export const cropReport = async (req, res) => {
   if (format === "pdf") {
     const pdf = await toPdf(reports, meta);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `${req.query.inline === "true" ? "inline" : "attachment"}; filename="${fileBase}.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${fileBase}.pdf"`);
     return res.send(pdf);
   }
 
+  const thisYear = new Date().getUTCFullYear();
   const first = await prisma.cropHarvest.aggregate({ _min: { harvestDate: true } });
-  const firstYear = Math.min(first._min.harvestDate?.getUTCFullYear() ?? now.getUTCFullYear(), year);
-  const years = Array.from({ length: now.getUTCFullYear() - firstYear + 1 }, (_, i) => now.getUTCFullYear() - i);
-  return ok(res, {
-    period: { period, year, index: range.index, label: range.label, from: isoDay(range.from), to: isoDay(range.lastDay), asAt: isoDay(range.asAt), previous: range.previous.label },
-    years,
-    reports,
-  });
+  const firstYear = Math.min(first._min.harvestDate?.getUTCFullYear() ?? thisYear, range.from.getUTCFullYear());
+  const years = Array.from({ length: thisYear - firstYear + 1 }, (_, i) => thisYear - i);
+  return ok(res, { ...meta, period: periodInfo(range), years, reports });
 };

@@ -3,7 +3,8 @@ import { ActionButton } from "../../components/resource/ActionButton";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
 import { StockPanel } from "../../components/resource/StockPanel";
-import { Badge, Card, StatCard } from "../../components/ui/ui";
+import { Badge, Card } from "../../components/ui/ui";
+import { KeyFigures } from "../../components/ui/KeyFigures";
 import { get } from "../../lib/api";
 import { money, number, today } from "../../lib/format";
 import { refs } from "../../lib/refs";
@@ -27,13 +28,16 @@ const SalesSummary = () => {
   const { data: todaySales } = useFetch("/sales/sales", { from: today(), to: today() });
   const rows = todaySales || [];
   return (
-    <Card className="p-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Local sales today" value={money(rows.reduce((s, r) => s + r.totalAmount, 0))} />
-        <StatCard label="Collected today" value={money(rows.reduce((s, r) => s + r.amountPaid, 0))} />
-        <StatCard label="Credit outstanding" value={money(data?.creditOutstanding)} hint={`${data?.creditSales ?? 0} sale(s)`} tone={data?.creditOutstanding ? "warn" : "default"} />
-        <StatCard label="Vehicles on the road" value={data?.openDispatches ?? 0} />
-      </div>
+    <Card className="overflow-hidden">
+      <KeyFigures
+        bare
+        items={[
+          { label: "Local sales today", value: money(rows.reduce((s, r) => s + r.totalAmount, 0)) },
+          { label: "Collected today", value: money(rows.reduce((s, r) => s + r.amountPaid, 0)) },
+          { label: "Credit outstanding", value: money(data?.creditOutstanding), hint: `${data?.creditSales ?? 0} sale(s)`, tone: data?.creditOutstanding ? "warn" : undefined },
+          { label: "Vehicles on the road", value: data?.openDispatches ?? 0 },
+        ]}
+      />
     </Card>
   );
 };

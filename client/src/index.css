@@ -96,15 +96,93 @@
 }
 
 @media print {
-  aside,
-  header,
-  footer {
+  #root aside,
+  #root header,
+  #root footer {
     display: none !important;
   }
 
-  main {
+  #root main {
     margin: 0 !important;
     padding: 0 !important;
+  }
+}
+
+/* Reports: wide text columns (remarks, notes) keep a readable width on screen. */
+.report-wide-cell {
+  min-width: 18rem;
+}
+
+/*
+ * Printing a report prints only the report documents (rendered into
+ * .print-root by PrintArea) - not the sidebar, filters or anything else on
+ * the screen - on A4 landscape, each report starting on a new page.
+ */
+.print-root {
+  display: none;
+}
+
+@page report {
+  size: A4 landscape;
+  margin: 12mm 10mm;
+}
+
+@media print {
+  body:has(> .print-root) {
+    background: #fff !important;
+  }
+
+  body:has(> .print-root) > :not(.print-root) {
+    display: none !important;
+  }
+
+  .print-root {
+    display: block;
+    page: report;
+    color: #0f172a;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .print-root .report-document {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .print-root .report-document + .report-document {
+    break-before: page;
+  }
+
+  .print-root .report-header,
+  .print-root tr {
+    break-inside: avoid;
+  }
+
+  .print-root h3 {
+    break-after: avoid;
+  }
+
+  /* Column headings repeat on every page; the totals row prints once, at the end. */
+  .print-root tfoot {
+    display: table-row-group;
+  }
+
+  .print-root .overflow-x-auto {
+    overflow: visible;
+  }
+
+  .print-root .report-narrow {
+    max-width: 55%;
+  }
+
+  .print-root .report-wide-cell {
+    min-width: 0;
+  }
+
+  .print-root table {
+    font-size: 10.5px;
   }
 }
 

@@ -2,7 +2,9 @@ import { GitBranch } from "lucide-react";
 import { payroll } from "./payroll";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
-import { Card, Spinner, StatCard } from "../../components/ui/ui";
+import { Card, Spinner } from "../../components/ui/ui";
+import { ReportTable } from "../../components/reports/ReportDocument";
+import { SystemNote } from "../../components/ui/KeyFigures";
 import { date, fullName, inputDate, money, today } from "../../lib/format";
 import { refs } from "../../lib/refs";
 import { useFetch } from "../../lib/useFetch";
@@ -128,26 +130,44 @@ const DisciplinarySummary = () => {
   if (loading) return <Spinner />;
   if (!data) return null;
   return (
-    <Card className="p-4">
-      <h2 className="mb-3 text-sm font-semibold text-slate-900">Disciplinary summary</h2>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Total cases" value={data.totals.totalCases} />
-        <StatCard label="Letters served" value={data.totals.lettersServed} />
-        <StatCard label="Dismissals" value={data.totals.dismissals} />
-        <StatCard label="Open cases" value={data.totals.openCases} tone={data.totals.openCases ? "warn" : "default"} />
+    <Card className="overflow-hidden">
+      <h2 className="border-b border-slate-200 px-5 py-4 text-[15px] font-semibold text-slate-900">Disciplinary summary</h2>
+      <div className="space-y-6 px-5 py-5">
+        <ReportTable
+          narrow
+          section={{
+            title: "Summary",
+            columns: [{ key: "item", label: "Item" }, { key: "count", label: "Count", type: "number" }],
+            rows: [
+              { item: "Total cases", count: data.totals.totalCases },
+              { item: "Letters served", count: data.totals.lettersServed },
+              { item: "Dismissals", count: data.totals.dismissals },
+              { item: "Open cases", count: data.totals.openCases },
+            ],
+          }}
+        />
+        {data.rows.length > 0 && (
+          <ReportTable
+            section={{
+              title: "Cases by staff member",
+              columns: [
+                { key: "staff", label: "Staff" },
+                { key: "totalCases", label: "Cases", type: "number" },
+                { key: "lettersServed", label: "Letters", type: "number" },
+                { key: "warnings", label: "Warnings", type: "number" },
+                { key: "suspensions", label: "Suspensions", type: "number" },
+                { key: "dismissals", label: "Dismissals", type: "number" },
+                { key: "lastIncident", label: "Last incident", type: "date" },
+              ],
+              rows: data.rows.map((r) => ({ ...r, staff: `${r.employee.staffNumber} - ${fullName(r.employee)}` })),
+              totals: Object.fromEntries(["totalCases", "lettersServed", "warnings", "suspensions", "dismissals"].map((key) => [key, data.rows.reduce((t, r) => t + (r[key] || 0), 0)])),
+            }}
+          />
+        )}
       </div>
-      {data.rows.length > 0 && (
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-left text-xs uppercase text-slate-500"><tr><th className="py-2">Staff</th><th className="text-right">Cases</th><th className="text-right">Letters</th><th className="text-right">Warnings</th><th className="text-right">Suspensions</th><th className="text-right">Dismissals</th><th className="text-right">Last incident</th></tr></thead>
-            <tbody className="divide-y divide-slate-100">
-              {data.rows.map((r) => (
-                <tr key={r.employee.id}><td className="py-2">{r.employee.staffNumber} - {fullName(r.employee)}</td><td className="text-right">{r.totalCases}</td><td className="text-right">{r.lettersServed}</td><td className="text-right">{r.warnings}</td><td className="text-right">{r.suspensions}</td><td className="text-right">{r.dismissals}</td><td className="text-right">{date(r.lastIncident)}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <footer className="border-t border-slate-200 bg-slate-50/70 px-5 py-3">
+        <SystemNote />
+      </footer>
     </Card>
   );
 };

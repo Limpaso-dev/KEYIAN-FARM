@@ -5,7 +5,8 @@ import { refs } from "../../lib/refs";
 import { useFetch } from "../../lib/useFetch";
 import { ActionButton } from "./ActionButton";
 import { ResourcePage } from "./ResourcePage";
-import { Alert, Card, Spinner, StatCard } from "../ui/ui";
+import { Alert, Card, Spinner } from "../ui/ui";
+import { KeyFigures } from "../ui/KeyFigures";
 
 const MOVEMENT_LABELS = {
   livestock_transfer: "From Livestock",
@@ -69,11 +70,14 @@ export const StockPanel = ({ location }) => {
         </div>
         <Alert tone="error">{error}</Alert>
         {loading && !data ? <Spinner /> : (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            {(data || []).map((p) => (
-              <StatCard key={p.productId} label={p.name} value={`${number(p.onHand)} ${p.unit}`} hint={location === "sales" ? `${money(p.unitPrice)} each` : undefined} tone={p.onHand < 0 ? "warn" : "default"} />
-            ))}
-          </div>
+          <KeyFigures
+            items={(data || []).map((p) => ({
+              label: p.name,
+              value: `${number(p.onHand)} ${p.unit}`,
+              hint: location === "sales" ? `${money(p.unitPrice)} each` : undefined,
+              tone: p.onHand < 0 ? "bad" : undefined,
+            }))}
+          />
         )}
       </Card>
       <ResourcePage config={movements} />

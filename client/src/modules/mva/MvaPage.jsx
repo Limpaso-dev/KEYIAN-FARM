@@ -3,7 +3,8 @@ import { ActionButton } from "../../components/resource/ActionButton";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
 import { StockPanel } from "../../components/resource/StockPanel";
-import { Card, StatCard } from "../../components/ui/ui";
+import { Card } from "../../components/ui/ui";
+import { KeyFigures } from "../../components/ui/KeyFigures";
 import { get } from "../../lib/api";
 import { fullName, money, number, nairobiHour, today } from "../../lib/format";
 import { useFetch } from "../../lib/useFetch";
@@ -72,13 +73,16 @@ const DeliveryTotals = () => {
   const { data: price } = useFetch("/mva/milk-prices/current");
   const rows = data || [];
   return (
-    <Card className="p-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatCard label="Farmer milk today" value={`${number(rows.reduce((s, r) => s + r.litres, 0))} L`} />
-        <StatCard label="Farmers delivered" value={new Set(rows.map((r) => r.supplierId)).size} />
-        <StatCard label="Value today" value={money(rows.reduce((s, r) => s + r.amount, 0))} />
-        <StatCard label="Current price" value={price ? `${money(price.pricePerLitre)}/L` : "Not set"} tone={price ? "default" : "warn"} />
-      </div>
+    <Card className="overflow-hidden">
+      <KeyFigures
+        bare
+        items={[
+          { label: "Farmer milk today", value: `${number(rows.reduce((s, r) => s + r.litres, 0))} L` },
+          { label: "Farmers delivered", value: new Set(rows.map((r) => r.supplierId)).size },
+          { label: "Value today", value: money(rows.reduce((s, r) => s + r.amount, 0)) },
+          { label: "Current price", value: price ? `${money(price.pricePerLitre)}/L` : "Not set", tone: price ? undefined : "warn" },
+        ]}
+      />
     </Card>
   );
 };
