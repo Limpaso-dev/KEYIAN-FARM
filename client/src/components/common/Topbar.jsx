@@ -4,7 +4,7 @@ import { ArrowLeft, Bell, CheckCheck, ChevronDown, ChevronRight, ClipboardList, 
 import { useAuth } from "../../context/useAuth";
 import { get } from "../../lib/api";
 import { dateTime, money } from "../../lib/format";
-import { findNavItem, NAV_GROUPS } from "../../navigation";
+import { currentSection, findNavItem, NAV_GROUPS } from "../../navigation";
 import { cx } from "../../lib/cx";
 import { Kbd } from "../ui/ui";
 
@@ -85,16 +85,28 @@ const BackButton = ({ sessionStart = 0 }) => {
   );
 };
 
+/** Departments › Milk Value Addition › Processing */
 const Breadcrumbs = () => {
-  const { pathname } = useLocation();
+  const auth = useAuth();
+  const { pathname, search } = useLocation();
   const item = findNavItem(pathname);
   const group = NAV_GROUPS.find((g) => g.key === item?.group);
   if (!item) return null;
+  const section = currentSection(item, auth, search);
+  const chevron = <ChevronRight size={14} className="shrink-0 text-slate-300" aria-hidden />;
   return (
     <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-1.5 text-sm md:flex">
-      <span className="text-slate-400">{group?.label}</span>
-      <ChevronRight size={14} className="text-slate-300" aria-hidden />
-      <span className="truncate font-medium text-slate-800" aria-current="page">{item.label}</span>
+      <span className="shrink-0 text-slate-400">{group?.label}</span>
+      {chevron}
+      {section ? (
+        <>
+          <span className="truncate text-slate-500">{item.label}</span>
+          {chevron}
+          <span className="truncate font-medium text-slate-800" aria-current="page">{section.label}</span>
+        </>
+      ) : (
+        <span className="truncate font-medium text-slate-800" aria-current="page">{item.label}</span>
+      )}
     </nav>
   );
 };

@@ -7,6 +7,9 @@ import { round2 } from "./validate.js";
 
 export const LOCATIONS = ["mva", "sales"];
 
+/** What is left on a vehicle for one product of a trip. */
+export const stillOnVehicle = (item) => round2(Number(item.quantityDispatched) - Number(item.quantityReturned) - Number(item.quantityDamaged) - Number(item.quantityReplaced));
+
 const lock = (tx, productId, location) =>
   tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${productId}:${location}`}))`;
 
@@ -46,7 +49,10 @@ export const productByCode = async (tx, code) => {
   return product;
 };
 
-/** Stock on hand for every product at a location. */
+/**
+ * Stock on hand at a location. Products no longer sold are left out once
+ * their stock is gone. For Sales, onVehicles is what is out on open trips.
+ */
 export const stockSummary = async (tx, location, { upTo } = {}) => {
   const products = await tx.product.findMany({ orderBy: { name: "asc" } });
   const sums = await tx.stockMovement.groupBy({
@@ -55,14 +61,20 @@ export const stockSummary = async (tx, location, { upTo } = {}) => {
     _sum: { quantity: true },
   });
   const byProduct = new Map(sums.map((row) => [row.productId, Number(row._sum.quantity || 0)]));
+  const openItems = location === "sales"
+    ? await tx.dispatchItem.findMany({ where: { dispatch: { status: "dispatched" } } })
+    : [];
   return products.map((product) => ({
     productId: product.id,
     code: product.code,
     name: product.name,
     unit: product.unit,
-    unitPrice: Number(product.unitPrice),
+    isActive: product.isActive,
+    localPrice: Number(product.localPrice),
+    vehiclePrice: Number(product.vehiclePrice),
     onHand: round2(byProduct.get(product.id) || 0),
-  }));
+    onVehicles: round2(openItems.filter((item) => item.productId === product.id).reduce((total, item) => total + stillOnVehicle(item), 0)),
+  })).filter((row) => row.isActive || row.onHand !== 0);
 };
 
 /** Atomically reduce a store item, failing if there is not enough. */

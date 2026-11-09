@@ -12,15 +12,17 @@ export const milkTransfers = {
   createFields: [
     { name: "date", label: "Date", type: "date", required: true },
     { name: "session", label: "Session", type: "select", options: "milkSessions", required: true },
+    { name: "dairy", label: "Dairy", type: "select", options: "dairies", required: true },
     { name: "litres", label: "Litres sent", type: "number", required: true },
     { name: "notes", label: "Notes", type: "textarea" },
   ],
   createInitial: () => ({ date: today(), session: "morning" }),
-  filters: [{ name: "status", label: "Status", options: "transferStatus" }, { type: "dateRange" }],
+  filters: [{ name: "status", label: "Status", options: "transferStatus" }, { name: "dairy", label: "Dairy", options: "dairies" }, { type: "dateRange" }],
   columns: [
     { key: "transferNumber", label: "Transfer" },
     { key: "date", label: "Date", type: "date" },
     { key: "session", label: "Session", type: "option:milkSessions" },
+    { key: "dairy", label: "Dairy", type: "option:dairies" },
     { key: "litres", label: "Sent (L)", type: "number" },
     { key: "receivedLitres", label: "Received (L)", type: "number" },
     { key: "status", label: "Status", type: "status:transferStatus" },
@@ -28,7 +30,7 @@ export const milkTransfers = {
   ],
   editableWhen: (r) => r.status === "sent",
   deletableWhen: (r) => r.status === "sent",
-  editFields: [{ name: "litres", label: "Litres sent", type: "number", required: true }, { name: "notes", label: "Notes", type: "textarea" }],
+  editFields: [{ name: "dairy", label: "Dairy", type: "select", options: "dairies", required: true }, { name: "litres", label: "Litres sent", type: "number", required: true }, { name: "notes", label: "Notes", type: "textarea" }],
   actions: [{
     key: "receive", label: "Receive", icon: PackageCheck, variant: "primary",
     allowed: (c) => c.can("milkTransfers", "receive"), when: (r) => r.status === "sent",

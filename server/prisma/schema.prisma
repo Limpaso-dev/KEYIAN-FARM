@@ -87,34 +87,40 @@ model Sequence {
 // =====================================================================
 
 model Employee {
-  id                String             @id @default(uuid())
-  staffNumber       String             @unique
-  firstName         String
-  lastName          String
-  nationalId        String?            @unique
-  gender            String?
-  dateOfBirth       DateTime?
-  phone             String?
-  email             String?
-  address           String?
-  department        Department
-  jobTitle          String
-  employmentType    String             @default("permanent")
-  dateHired         DateTime
-  basicSalary       Decimal            @default(0) @db.Decimal(18, 2)
-  bankName          String?
-  bankAccount       String?
-  kraPin            String?
-  status            String             @default("active")
-  notes             String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  user              User?
-  contracts         Contract[]
-  salaryReviews     SalaryReview[]
-  payrolls          Payroll[]
-  disciplinaryCases DisciplinaryCase[]
-  termination       Termination?
+  id                  String             @id @default(uuid())
+  staffNumber         String             @unique
+  firstName           String
+  lastName            String
+  nationalId          String?            @unique
+  gender              String?
+  dateOfBirth         DateTime?
+  phone               String?
+  email               String?
+  address             String?
+  department          Department
+  jobTitle            String
+  jobGroup            String?
+  employmentType      String             @default("permanent")
+  dateHired           DateTime
+  basicSalary         Decimal            @default(0) @db.Decimal(18, 2)
+  bankName            String?
+  bankAccount         String?
+  kraPin              String?
+  nextOfKinName       String?
+  nextOfKinNationalId String?
+  nextOfKinPhone      String?
+  dependants          Int                @default(0)
+  status              String             @default("active")
+  notes               String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  user                User?
+  contracts           Contract[]
+  salaryReviews       SalaryReview[]
+  payrolls            Payroll[]
+  disciplinaryCases   DisciplinaryCase[]
+  termination         Termination?
+  applicant           JobApplicant?
 
   @@index([department, status])
 }
@@ -145,6 +151,8 @@ model SalaryReview {
   newSalary        Decimal  @db.Decimal(18, 2)
   previousJobTitle String?
   newJobTitle      String?
+  previousJobGroup String?
+  newJobGroup      String?
   reason           String
   createdAt        DateTime @default(now())
   employee         Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
@@ -160,7 +168,7 @@ model Payroll {
   allowances    Decimal   @default(0) @db.Decimal(18, 2)
   deductions    Decimal   @default(0) @db.Decimal(18, 2)
   netPay        Decimal   @db.Decimal(18, 2)
-  status        String    @default("draft")
+  status        String    @default("with_finance")
   paidAt        DateTime?
   transactionId String?   @unique
   notes         String?
@@ -208,28 +216,76 @@ model Termination {
 /// Pioneer founder members and their hereditary successors. A successor
 /// is another Member row that points at the member it succeeded.
 model Member {
-  id             String          @id @default(uuid())
-  memberNumber   String          @unique
-  firstName      String
-  lastName       String
-  nationalId     String?         @unique
-  phone          String?
-  address        String?
-  joinDate       DateTime
-  shares         Int             @default(0)
-  isPioneer      Boolean         @default(true)
-  status         String          @default("active")
-  predecessorId  String?
-  relationship   String?
-  successionDate DateTime?
-  notes          String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  predecessor    Member?         @relation("MemberSuccession", fields: [predecessorId], references: [id], onDelete: Restrict)
-  successors     Member[]        @relation("MemberSuccession")
-  payments       MemberPayment[]
+  id                    String          @id @default(uuid())
+  memberNumber          String          @unique
+  firstName             String
+  lastName              String
+  nationalId            String?         @unique
+  phone                 String?
+  address               String?
+  joinDate              DateTime
+  shares                Int             @default(0)
+  isPioneer             Boolean         @default(true)
+  status                String          @default("active")
+  predecessorId         String?
+  relationship          String?
+  successionDate        DateTime?
+  successionReason      String?
+  successionReasonOther String?
+  notes                 String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  predecessor           Member?         @relation("MemberSuccession", fields: [predecessorId], references: [id], onDelete: Restrict)
+  successors            Member[]        @relation("MemberSuccession")
+  payments              MemberPayment[]
 
   @@index([status])
+}
+
+/// Staff establishment: a post is advertised, people apply, some are
+/// shortlisted and interviewed, and those who pass can be hired.
+model JobAdvert {
+  id             String         @id @default(uuid())
+  advertNumber   String         @unique
+  jobTitle       String
+  department     Department
+  jobGroup       String?
+  employmentType String         @default("permanent")
+  posts          Int            @default(1)
+  advertDate     DateTime
+  closingDate    DateTime?
+  requirements   String?
+  status         String         @default("open")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  applicants     JobApplicant[]
+
+  @@index([status, advertDate])
+}
+
+model JobApplicant {
+  id              String    @id @default(uuid())
+  advertId        String
+  firstName       String
+  lastName        String
+  nationalId      String?
+  phone           String
+  email           String?
+  qualifications  String?
+  appliedOn       DateTime
+  stage           String    @default("applied")
+  interviewDate   DateTime?
+  interviewPanel  String?
+  interviewScore  Decimal?  @db.Decimal(5, 2)
+  interviewNotes  String?
+  rejectionReason String?
+  employeeId      String?   @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  advert          JobAdvert @relation(fields: [advertId], references: [id], onDelete: Restrict)
+  employee        Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  @@index([advertId, stage])
 }
 
 // =====================================================================
@@ -334,6 +390,7 @@ model MilkTransfer {
   transferNumber String    @unique
   date           DateTime  @db.Date
   session        String
+  dairy          String    @default("dairy_a")
   litres         Decimal   @db.Decimal(10, 2)
   status         String    @default("sent")
   receivedLitres Decimal?  @db.Decimal(10, 2)
@@ -361,7 +418,8 @@ model MilkSupplier {
   phone          String?
   location       String?
   paymentMethod  String            @default("mpesa")
-  paymentDetails String?
+  bankName       String?
+  accountNumber  String?
   status         String            @default("active")
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
@@ -395,11 +453,36 @@ model MilkDelivery {
 }
 
 /// One processing run: raw milk in, finished products out.
+/// Where one day's milk went: Mala, Yoghurt, NKCC, Own use, L.Sale, Staff,
+/// Police, School, Spoilage (the list is in config/catalog.js).
+model MilkAllocation {
+  id        String               @id @default(uuid())
+  date      DateTime             @unique @db.Date
+  notes     String?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  lines     MilkAllocationLine[]
+  transfer  ProductTransfer?
+}
+
+model MilkAllocationLine {
+  id           String         @id @default(uuid())
+  allocationId String
+  destination  String
+  quantity     Decimal        @db.Decimal(10, 2)
+  allocation   MilkAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+
+  @@unique([allocationId, destination])
+}
+
 model ProcessingBatch {
   id           String             @id @default(uuid())
   batchNumber  String             @unique
   date         DateTime           @db.Date
   rawMilkInput Decimal            @db.Decimal(10, 2)
+  malaKg       Decimal            @default(0) @db.Decimal(10, 2)
+  yoghurtKg    Decimal            @default(0) @db.Decimal(10, 2)
+  fresh250     Int                @default(0)
   notes        String?
   createdAt    DateTime           @default(now())
   outputs      ProcessingOutput[]
@@ -425,9 +508,11 @@ model ProductTransfer {
   receivedAt     DateTime?
   receivedById   String?
   notes          String?
+  allocationId   String?               @unique
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
   items          ProductTransferItem[]
+  allocation     MilkAllocation?       @relation(fields: [allocationId], references: [id], onDelete: SetNull)
 
   @@index([date, status])
 }
@@ -450,7 +535,8 @@ model Product {
   code              String                @unique
   name              String
   unit              String
-  unitPrice         Decimal               @db.Decimal(10, 2)
+  localPrice        Decimal               @default(0) @db.Decimal(10, 2)
+  vehiclePrice      Decimal               @default(0) @db.Decimal(10, 2)
   isActive          Boolean               @default(true)
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
@@ -486,24 +572,12 @@ model StockMovement {
 // SALES
 // =====================================================================
 
-model Customer {
-  id           String              @id @default(uuid())
-  name         String
-  phone        String?
-  customerType String              @default("individual")
-  location     String?
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  sales        Sale[]
-  damages      DamageReplacement[]
-}
-
 model Sale {
   id            String        @id @default(uuid())
   saleNumber    String        @unique
   date          DateTime      @db.Date
-  customerId    String?
   customerName  String?
+  reference     String?
   paymentMethod String        @default("cash")
   totalAmount   Decimal       @db.Decimal(18, 2)
   amountPaid    Decimal       @default(0) @db.Decimal(18, 2)
@@ -511,7 +585,6 @@ model Sale {
   notes         String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
-  customer      Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items         SaleItem[]
   payments      SalePayment[]
 
@@ -559,23 +632,24 @@ model Vehicle {
 /// Morning: products issued to a vehicle. Evening: the crew reports what
 /// came back, what was damaged and the money handed in.
 model VehicleDispatch {
-  id              String         @id @default(uuid())
-  dispatchNumber  String         @unique
-  date            DateTime       @db.Date
+  id              String              @id @default(uuid())
+  dispatchNumber  String              @unique
+  date            DateTime            @db.Date
   vehicleId       String
   driverName      String
   salesPersonName String
-  status          String         @default("dispatched")
-  expectedAmount  Decimal        @default(0) @db.Decimal(18, 2)
-  cashReturned    Decimal        @default(0) @db.Decimal(18, 2)
-  mpesaReturned   Decimal        @default(0) @db.Decimal(18, 2)
-  variance        Decimal        @default(0) @db.Decimal(18, 2)
+  status          String              @default("dispatched")
+  expectedAmount  Decimal             @default(0) @db.Decimal(18, 2)
+  cashReturned    Decimal             @default(0) @db.Decimal(18, 2)
+  mpesaReturned   Decimal             @default(0) @db.Decimal(18, 2)
+  variance        Decimal             @default(0) @db.Decimal(18, 2)
   reconciledAt    DateTime?
   notes           String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  vehicle         Vehicle        @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  vehicle         Vehicle             @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
   items           DispatchItem[]
+  records         DamageReplacement[]
 
   @@index([date, status])
 }
@@ -587,6 +661,7 @@ model DispatchItem {
   quantityDispatched Decimal         @db.Decimal(10, 2)
   quantityReturned   Decimal         @default(0) @db.Decimal(10, 2)
   quantityDamaged    Decimal         @default(0) @db.Decimal(10, 2)
+  quantityReplaced   Decimal         @default(0) @db.Decimal(10, 2)
   quantitySold       Decimal         @default(0) @db.Decimal(10, 2)
   unitPrice          Decimal         @db.Decimal(10, 2)
   dispatch           VehicleDispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
@@ -596,19 +671,19 @@ model DispatchItem {
 /// Stock written off as damaged, or given to a customer to replace a
 /// spoilt product. Both reduce Sales stock.
 model DamageReplacement {
-  id           String    @id @default(uuid())
-  recordNumber String    @unique
-  date         DateTime  @db.Date
+  id           String           @id @default(uuid())
+  recordNumber String           @unique
+  date         DateTime         @db.Date
   recordType   String
   productId    String
-  quantity     Decimal   @db.Decimal(10, 2)
-  value        Decimal   @db.Decimal(18, 2)
-  customerId   String?
+  quantity     Decimal          @db.Decimal(10, 2)
+  value        Decimal          @db.Decimal(18, 2)
+  dispatchId   String?
   customerName String?
-  reason       String
-  createdAt    DateTime  @default(now())
-  product      Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
-  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  reason       String?
+  createdAt    DateTime         @default(now())
+  product      Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  dispatch     VehicleDispatch? @relation(fields: [dispatchId], references: [id], onDelete: Restrict)
 
   @@index([date, recordType])
 }

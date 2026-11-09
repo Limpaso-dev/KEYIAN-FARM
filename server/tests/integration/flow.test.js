@@ -85,7 +85,7 @@ if (!url) {
   });
 
   test("permissions block other departments", async () => {
-    await call("livestock", "POST", "/sales/customers", { name: "X" }, { expect: 403 });
+    await call("livestock", "POST", "/sales/vehicles", { registrationNumber: "X", driverName: "X", salesPersonName: "X" }, { expect: 403 });
     await call("crops", "GET", "/hr/employees", null, { expect: 403 });
     await call("gm", "POST", "/crops/farms", { farmNumber: "F", cropType: "tea", acreage: 1, location: "x" }, { expect: 403 });
     await call("gm", "GET", "/hr/employees");
@@ -105,39 +105,160 @@ if (!url) {
     assert.equal(after.find((a) => a.id === cashId).balance, 500000);
   });
 
-  test("HR: staff, promotion, payroll, discipline, members, termination", async () => {
-    const employee = await call("hrHead", "POST", "/hr/employees", { firstName: "Mary", lastName: "Wanjiku", department: "sales", jobTitle: "Sales clerk", employmentType: "permanent", dateHired: today, basicSalary: 20000 });
-    assert.equal(employee.staffNumber, "EMP-0001");
-    await call("hrHead", "POST", "/hr/salary-reviews", { employeeId: employee.id, reviewType: "promotion", effectiveDate: today, newSalary: 25000, newJobTitle: "Senior clerk", reason: "Good work" });
-    assert.equal((await call("hrHead", "GET", `/hr/employees/${employee.id}`)).basicSalary, 25000);
+  const registration = (overrides = {}) => ({
+    firstName: "Mary", lastName: "Wanjiku", department: "sales", jobTitle: "Sales clerk", jobGroup: "G4", employmentType: "permanent",
+    dateHired: today, basicSalary: 20000, nextOfKinName: "Peter Wanjiku", nextOfKinNationalId: "12345678", nextOfKinPhone: "0700000001", dependants: 3,
+    contractType: "permanent", contractStart: today, ...overrides,
+  });
 
-    await call("hrHead", "POST", "/hr/payroll/generate", { period: today.slice(0, 7) });
-    const [line] = await call("hrHead", "GET", `/hr/payroll?period=${today.slice(0, 7)}`);
+  test("HR: staff, contract, promotion, payroll to Finance, discipline, members, termination", async () => {
+    // Registration captures job group, next of kin, dependants and the first contract.
+    await call("hrHead", "POST", "/hr/employees", registration({ jobGroup: "" }), { expect: 400 });
+    await call("hrHead", "POST", "/hr/employees", registration({ nextOfKinNationalId: "" }), { expect: 400 });
+    await call("hrHead", "POST", "/hr/employees", registration({ dependants: -1 }), { expect: 400 });
+    await call("hrHead", "POST", "/hr/employees", registration({ contractType: "" }), { expect: 400 });
+    await call("hrHead", "POST", "/hr/employees", registration({ contractType: "fixed_term" }), { expect: 400 });
+    const employee = await call("hrHead", "POST", "/hr/employees", registration());
+    assert.equal(employee.staffNumber, "EMP-0001");
+    assert.equal(employee.dependants, 3);
+    const [firstContract] = await call("hrHead", "GET", `/hr/contracts?employeeId=${employee.id}`);
+    assert.equal(firstContract.salary, 20000);
+    assert.equal(firstContract.status, "active");
+    assert.equal(firstContract.contractType, "permanent");
+
+    // Generating the month sends it straight to Finance.
+    const period = today.slice(0, 7);
+    await call("hrHead", "POST", "/hr/payroll/generate", { period });
+    const [line] = await call("accounts", "GET", `/hr/payroll?status=with_finance&period=${period}`);
+    assert.equal(line.employeeId, employee.id);
     await call("hrHead", "PUT", `/hr/payroll/${line.id}`, { allowances: 2000, deductions: 1000 });
-    await call("accounts", "POST", `/hr/payroll/${line.id}/pay`, { accountId: cashId, date: today }, { expect: 409 });
-    await call("hrHead", "POST", `/hr/payroll/${line.id}/approve`);
+
+    // A salary review reaches the staff record, the contract and unpaid payroll.
+    await call("hrHead", "POST", "/hr/salary-reviews", { employeeId: employee.id, reviewType: "promotion", effectiveDate: "2099-01-01", newSalary: 90000, reason: "Too early" }, { expect: 400 });
+    await call("hrHead", "POST", "/hr/salary-reviews", { employeeId: employee.id, reviewType: "promotion", effectiveDate: today, newSalary: 25000, newJobTitle: "Senior clerk", newJobGroup: "G5", reason: "Good work" });
+    const promoted = await call("hrHead", "GET", `/hr/employees/${employee.id}`);
+    assert.equal(promoted.basicSalary, 25000);
+    assert.equal(promoted.jobTitle, "Senior clerk");
+    assert.equal(promoted.jobGroup, "G5");
+    assert.equal((await call("hrHead", "GET", `/hr/contracts/${firstContract.id}`)).salary, 25000);
+    const repriced = await call("hrHead", "GET", `/hr/payroll/${line.id}`);
+    assert.equal(repriced.basicSalary, 25000);
+    assert.equal(repriced.netPay, 26000);
+
     const paid = await call("accounts", "POST", `/hr/payroll/${line.id}/pay`, { accountId: cashId, date: today });
     assert.equal(paid.status, "paid");
     assert.equal(paid.netPay, 26000);
+    await call("accounts", "POST", `/hr/payroll/${line.id}/pay`, { accountId: cashId, date: today }, { expect: 409 });
+    await call("hrHead", "PUT", `/hr/payroll/${line.id}`, { allowances: 1 }, { expect: 409 });
+    await call("hrHead", "POST", "/hr/salary-reviews", { employeeId: employee.id, reviewType: "adjustment", effectiveDate: today, newSalary: 27000, reason: "Paid payroll stays as it was" });
+    assert.equal((await call("hrHead", "GET", `/hr/payroll/${line.id}`)).netPay, 26000);
+
+    // Contracts are renewed from the profile; the old one is marked renewed.
+    await call("hrHead", "POST", "/hr/contracts", { employeeId: employee.id, contractType: "fixed_term", startDate: today }, { expect: 400 });
+    const renewed = await call("hrHead", "POST", "/hr/contracts", { employeeId: employee.id, contractType: "fixed_term", startDate: today, endDate: "2030-12-31" });
+    assert.equal(renewed.salary, 27000);
+    assert.equal((await call("hrHead", "GET", `/hr/contracts/${firstContract.id}`)).status, "renewed");
+    const corrected = await call("hrHead", "PUT", `/hr/contracts/${renewed.id}`, { endDate: "2031-06-30", salary: 1 });
+    assert.equal(corrected.salary, 27000);
+
+    const profile = await call("gm", "GET", `/hr/employees/${employee.id}/profile`);
+    assert.equal(profile.nextOfKinName, "Peter Wanjiku");
+    assert.equal(profile.nextOfKinNationalId, "12345678");
+    assert.equal(profile.jobGroup, "G5");
+    assert.equal(profile.contracts.length, 2);
+    assert.equal(profile.salaryReviews.length, 2);
+    assert.equal(profile.salaryReviews[0].previousJobGroup, "G5");
+    assert.equal(profile.payrolls.length, 1);
+    await call("accounts", "GET", `/hr/employees/${employee.id}/profile`, null, { expect: 403 });
 
     await call("hrHead", "POST", "/hr/disciplinary", { employeeId: employee.id, incidentDate: today, offence: "Late", actionTaken: "warning_letter", letterServed: true });
     const summary = await call("hrHead", "GET", "/hr/disciplinary/summary");
     assert.equal(summary.totals.lettersServed, 1);
 
     const pioneer = await call("hrHead", "POST", "/hr/members", { memberNumber: "P001", firstName: "Kipkemoi", lastName: "Arap", joinDate: "1975-01-01", shares: 40 });
-    const heir = await call("hrHead", "POST", `/hr/members/${pioneer.id}/succession`, { firstName: "Daniel", lastName: "Kipkemoi", relationship: "Son", successionDate: today, predecessorStatus: "deceased" });
+    const handover = { firstName: "Daniel", lastName: "Kipkemoi", relationship: "Son", successionDate: today };
+    await call("hrHead", "POST", `/hr/members/${pioneer.id}/succession`, handover, { expect: 400 });
+    await call("hrHead", "POST", `/hr/members/${pioneer.id}/succession`, { ...handover, successionReason: "other" }, { expect: 400 });
+    const heir = await call("hrHead", "POST", `/hr/members/${pioneer.id}/succession`, { ...handover, successionReason: "death" });
+    await call("hrHead", "POST", `/hr/members/${pioneer.id}/succession`, { ...handover, firstName: "Again", successionReason: "death" }, { expect: 409 });
+    assert.equal((await call("hrHead", "GET", `/hr/members/${pioneer.id}`)).status, "deceased");
+    const grandchild = await call("hrHead", "POST", `/hr/members/${heir.id}/succession`, { firstName: "Ann", lastName: "Kipkemoi", relationship: "Daughter", successionDate: today, successionReason: "other", successionReasonOther: "Moved abroad" });
+    const { id: tomId } = await call("hrHead", "POST", `/hr/members/${grandchild.id}/succession`, { firstName: "Tom", lastName: "Kipkemoi", relationship: "Son", successionDate: today, successionReason: "old_age" });
+    assert.equal((await call("hrHead", "GET", `/hr/members/${grandchild.id}`)).status, "succeeded");
+    const register = await call("hrHead", "GET", "/hr/members/successions");
+    assert.equal(register.length, 3);
+    const first = register.find((row) => row.id === heir.id);
+    assert.equal(first.predecessor.memberNumber, "P001");
+    assert.equal(first.successionReason, "death");
+    assert.equal(register.find((row) => row.id === grandchild.id).successionReasonOther, "Moved abroad");
+    assert.equal((await call("hrHead", "GET", "/hr/members/successions?successionReason=old_age")).length, 1);
     assert.equal(heir.shares, 40);
     assert.equal(heir.memberNumber, "P001-1");
     const lineage = await call("hrHead", "GET", `/hr/members/${heir.id}/lineage`);
     assert.equal(lineage.successors[0].memberNumber, "P001-1");
     await call("accounts", "POST", "/accounts/member-payments", { memberId: pioneer.id, date: today, paymentType: "dividend", amount: 100, accountId: cashId }, { expect: 409 });
-    await call("accounts", "POST", "/accounts/member-payments", { memberId: heir.id, date: today, paymentType: "dividend", amount: 4000, accountId: cashId });
+    await call("accounts", "POST", "/accounts/member-payments", { memberId: tomId, date: today, paymentType: "dividend", amount: 4000, accountId: cashId });
+    // Accounts reads what paying salaries and members needs - not the rest of HR.
+    assert.ok((await call("accounts", "GET", "/hr/payroll")).length >= 1);
+    assert.ok((await call("accounts", "GET", "/hr/members")).length >= 2);
+    await call("accounts", "GET", "/hr/employees", null, { expect: 403 });
+    await call("accounts", "GET", "/hr/disciplinary", null, { expect: 403 });
 
     const userForEmployee = await call("root", "POST", "/auth/users", { name: "Mary", email: "mary@test.local", role: "officer", department: "sales", employeeId: employee.id });
     await call("hrHead", "POST", "/hr/terminations", { employeeId: employee.id, terminationType: "resignation", terminationDate: today, reason: "Moved" });
     const users = await call("root", "GET", "/auth/users");
     assert.equal(users.find((u) => u.id === userForEmployee.user.id).isActive, false);
     assert.equal((await call("hrHead", "GET", `/hr/employees/${employee.id}`)).status, "resigned");
+  });
+
+  test("HR: staff establishment, from job advert through interviews to hire", async () => {
+    await call("sales", "GET", "/hr/job-adverts", null, { expect: 403 });
+    await call("hrHead", "POST", "/hr/job-adverts", { jobTitle: "Milk technician", department: "mva", employmentType: "permanent", posts: 0, advertDate: today }, { expect: 400 });
+    const advert = await call("hrHead", "POST", "/hr/job-adverts", { jobTitle: "Milk technician", department: "mva", jobGroup: "G3", employmentType: "permanent", posts: 1, advertDate: today });
+    assert.match(advert.advertNumber, /^ADV-\d{4}-0001$/);
+    assert.equal(advert.status, "open");
+
+    const apply = (firstName, nationalId) => call("hrHead", "POST", "/hr/job-applicants", { advertId: advert.id, firstName, lastName: "Applicant", nationalId, phone: "0711000000", appliedOn: today });
+    const anna = await apply("Anna", "33000001");
+    const ben = await apply("Ben", "33000002");
+    const cara = await apply("Cara", "33000003");
+    assert.equal(anna.stage, "applied");
+
+    // Steps cannot be skipped.
+    const step = (id, name, body = {}, options) => call("hrHead", "POST", `/hr/job-applicants/${id}/${name}`, body, options);
+    const hire = registration({ firstName: "Anna", lastName: "Applicant", nationalId: "33000001", department: "mva", jobTitle: "Milk technician", jobGroup: "G3" });
+    await step(anna.id, "hire", hire, { expect: 409 });
+    await step(anna.id, "interview-result", { result: "passed" }, { expect: 409 });
+    await step(anna.id, "shortlist");
+    await step(anna.id, "shortlist", {}, { expect: 409 });
+    await step(anna.id, "schedule-interview", {}, { expect: 400 });
+    await step(anna.id, "schedule-interview", { interviewDate: today, interviewPanel: "Head of HR, Head of MVA" });
+    await step(anna.id, "hire", hire, { expect: 409 });
+    await step(anna.id, "interview-result", { result: "passed", interviewScore: 120 }, { expect: 400 });
+    assert.equal((await step(anna.id, "interview-result", { result: "passed", interviewScore: 78.5, interviewNotes: "Strong" })).stage, "passed");
+
+    await step(ben.id, "shortlist");
+    await step(ben.id, "schedule-interview", { interviewDate: today });
+    assert.equal((await step(ben.id, "interview-result", { result: "failed" })).stage, "rejected");
+    await step(cara.id, "reject", {}, { expect: 400 });
+    assert.equal((await step(cara.id, "reject", { rejectionReason: "Lacks the qualification" })).stage, "rejected");
+
+    await step(anna.id, "hire", { ...hire, nextOfKinPhone: "" }, { expect: 400 });
+    const staffMember = await step(anna.id, "hire", hire);
+    assert.equal(staffMember.jobTitle, "Milk technician");
+    assert.equal(staffMember.status, "active");
+
+    const filled = await call("hrHead", "GET", `/hr/job-adverts/${advert.id}`);
+    assert.equal(filled.status, "filled");
+    assert.equal(filled.applicants.filter((a) => a.stage === "hired").length, 1);
+    const profile = await call("hrHead", "GET", `/hr/employees/${staffMember.id}/profile`);
+    assert.equal(profile.applicant.advert.advertNumber, advert.advertNumber);
+    assert.equal(profile.applicant.interviewScore, 78.5);
+    assert.equal(profile.contracts.length, 1);
+    await call("hrHead", "POST", "/hr/job-applicants", { advertId: advert.id, firstName: "Late", lastName: "Applicant", phone: "0711000000", appliedOn: today }, { expect: 409 });
+    await call("hrHead", "DELETE", `/hr/job-adverts/${advert.id}`, null, { expect: 409 });
+    // Leave the reports below as they were.
+    await call("hrHead", "POST", "/hr/terminations", { employeeId: staffMember.id, terminationType: "contract_end", terminationDate: today, reason: "End of test" });
   });
 
   let rawMilkId; let freshId; let malaId; let yoghurtId;
@@ -152,7 +273,8 @@ if (!url) {
     await call("livestock", "POST", "/livestock/health-records", { recordType: "herd_check", date: today, condition: "Routine check" });
     await call("livestock", "POST", "/livestock/milk-records", { date: today, session: "morning", records: [{ animalId: cow.id, litres: 18.5 }] });
     await call("livestock", "POST", "/livestock/milk-records", { date: today, session: "morning", records: [{ animalId: bull.id, litres: 3 }] }, { expect: 400 });
-    const transfer = await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", litres: 50 });
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", litres: 50 }, { expect: 400 });
+    const transfer = await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", litres: 50 });
     await call("livestock", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedLitres: 48 }, { expect: 403 });
     await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedLitres: 48 });
     await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedLitres: 48 }, { expect: 409 });
@@ -161,7 +283,7 @@ if (!url) {
   test("MVA: farmers, deliveries, processing, transfer to Sales", async () => {
     const products = await call("mva", "GET", "/sales/products");
     const byCode = Object.fromEntries(products.map((p) => [p.code, p.id]));
-    ({ RAW_MILK: rawMilkId, FRESH_MILK: freshId, MALA: malaId, YOGHURT: yoghurtId } = byCode);
+    ({ RAW_MILK: rawMilkId, FRESH_MILK: freshId, MALA: malaId, YOGHURT_500: yoghurtId } = byCode);
 
     const farmer = await call("mva", "POST", "/mva/milk-suppliers", { firstName: "John", lastName: "Kiprop" });
     assert.equal(farmer.supplierNumber, 130);
@@ -176,42 +298,189 @@ if (!url) {
     let stock = await call("mva", "GET", "/stock/mva");
     assert.equal(stock.find((s) => s.code === "RAW_MILK").onHand, 148);
 
-    await call("mva", "POST", "/mva/processing-batches", { date: today, rawMilkInput: 1000, outputs: [{ productId: freshId, quantity: 900 }] }, { expect: 409 });
-    await call("mva", "POST", "/mva/processing-batches", { date: today, rawMilkInput: 120, outputs: [{ productId: freshId, quantity: 60 }, { productId: malaId, quantity: 30 }, { productId: yoghurtId, quantity: 25 }] });
+    // MVA keeps the farmer's name and number; ID and payment details are with Accounts.
+    await call("accounts", "PUT", `/accounts/farmers/${farmer.id}`, { nationalId: "28111222", bankName: "KCB", accountNumber: "0011223344", paymentMethod: "bank", firstName: "Changed" });
+    await call("mva", "PUT", `/mva/milk-suppliers/${farmer.id}`, { nationalId: "999", bankName: "Other" });
+    const seenByMva = await call("mva", "GET", `/mva/milk-suppliers/${farmer.id}`);
+    assert.equal(seenByMva.firstName, "John");
+    for (const field of ["nationalId", "bankName", "accountNumber", "phone", "paymentMethod"]) assert.ok(!(field in seenByMva), field);
+    const seenByAccounts = await call("accounts", "GET", `/accounts/farmers/${farmer.id}`);
+    assert.deepEqual([seenByAccounts.nationalId, seenByAccounts.bankName, seenByAccounts.accountNumber], ["28111222", "KCB", "0011223344"]);
+    await call("mva", "GET", "/accounts/farmers", null, { expect: 403 });
+    await call("mva", "GET", "/accounts/milk-payments", null, { expect: 403 });
+    await call("accounts", "POST", "/accounts/farmers", { firstName: "X" }, { expect: 404 });
 
-    const transfer = await call("mva", "POST", "/mva/product-transfers", { date: today, items: [{ productId: rawMilkId, quantity: 20 }, { productId: freshId, quantity: 50 }] });
+    // Allocation: where the day's milk went.
+    const lines = (overrides = {}) => Object.entries({ mala: 60, yoghurt: 40, staff: 5, police: 3, local_sale: 20, ...overrides }).map(([destination, quantity]) => ({ destination, quantity }));
+    const allocate = (fields, options) => call("mva", "POST", "/mva/milk-allocations", { date: today, lines: lines(fields) }, options);
+    await allocate({ nowhere: 1 }, { expect: 400 });
+    await call("sales", "POST", "/mva/milk-allocations", { date: today, lines: lines() }, { expect: 403 });
+    await allocate();
     stock = await call("mva", "GET", "/stock/mva");
-    assert.equal(stock.find((s) => s.code === "RAW_MILK").onHand, 8);
+    assert.equal(stock.find((s) => s.code === "RAW_MILK").onHand, 20);
+    await allocate({ staff: 7 });
+    stock = await call("mva", "GET", "/stock/mva");
+    assert.equal(stock.find((s) => s.code === "RAW_MILK").onHand, 18);
+    const [sheetDay] = await call("mva", "GET", `/mva/milk-allocations?from=${today}&to=${today}`);
+    assert.deepEqual([sheetDay.dairyA, sheetDay.dairyC, sheetDay.farmers, sheetDay.total, sheetDay.mala, sheetDay.staff, sheetDay.variance], [48, 0, 100, 148, 60, 7, 18]);
+
+    // L.Sale goes to Sales as raw milk by itself, and only that way.
+    await call("mva", "POST", "/mva/product-transfers", { date: today, items: [{ productId: rawMilkId, quantity: 1 }] }, { expect: 400 });
+    const [rawToSales] = await call("sales", "GET", "/mva/product-transfers?status=sent");
+    assert.ok(rawToSales.allocationId);
+    assert.equal(rawToSales.items[0].quantity, 20);
+    await call("root", "DELETE", `/mva/product-transfers/${rawToSales.id}`, null, { expect: 409 });
+    await allocate({ staff: 7, local_sale: 22 });
+    assert.equal((await call("sales", "GET", "/mva/product-transfers?status=sent"))[0].items[0].quantity, 22);
+    await allocate({ staff: 7 });
+    await call("sales", "POST", `/mva/product-transfers/${rawToSales.id}/receive`, {});
+    await allocate({ staff: 7, local_sale: 25 }, { expect: 409 });
+
+    // Product output, using the sheet's own figures for 8 October.
+    await call("mva", "POST", "/mva/processing-batches", { date: today }, { expect: 400 });
+    const output = { date: today, malaKg: 972.1, malaPieces: 1642, yoghurtKg: 409.4, yoghurt500: 374, yoghurt250: 561, fresh250: 520 };
+    const made = await call("mva", "POST", "/mva/processing-batches", output);
+    const [figures] = await call("mva", "GET", `/mva/processing-batches?from=${today}&to=${today}`);
+    assert.deepEqual([figures.malaLitres, figures.malaVariance, figures.yoghurtLitres, figures.yoghurtVariance, figures.fresh250], [941, -82.4, 396.3, -57.2, 520]);
+    stock = await call("mva", "GET", "/stock/mva");
+    assert.equal(stock.find((s) => s.code === "MALA").onHand, 1642);
+    assert.equal(stock.find((s) => s.code === "MALA").unit, "pieces");
+    assert.equal(stock.find((s) => s.code === "YOGHURT_500").onHand, 374);
+    assert.equal(stock.find((s) => s.code === "RAW_MILK").onHand, 18);
+    await call("root", "DELETE", `/mva/processing-batches/${made.id}`);
+    assert.equal((await call("mva", "GET", "/stock/mva")).find((s) => s.code === "MALA").onHand, 0);
+    await call("mva", "POST", "/mva/processing-batches", output);
+
+    // Finished products go across by hand. Fresh milk stock here comes from a count.
+    await call("root", "POST", "/stock/mva/adjustments", { productId: freshId, quantity: 60, date: today, reason: "Opening count" });
+    const transfer = await call("mva", "POST", "/mva/product-transfers", { date: today, items: [{ productId: freshId, quantity: 50 }] });
+    stock = await call("mva", "GET", "/stock/mva");
     assert.equal(stock.find((s) => s.code === "FRESH_MILK").onHand, 10);
     await call("sales", "POST", `/mva/product-transfers/${transfer.id}/receive`, {});
     const sales = await call("sales", "GET", "/stock/sales");
     assert.equal(sales.find((s) => s.code === "FRESH_MILK").onHand, 50);
     assert.equal(sales.find((s) => s.code === "RAW_MILK").onHand, 20);
+
+    // The report, laid out like the sheet.
+    const { reports: [report] } = await call("mva", "GET", `/reports/department?department=mva&period=day&date=${today}`);
+    const table = (title) => report.sections.find((s) => s.title === title);
+    assert.deepEqual(table("Production report").columns.map((c) => c.label), ["Date", "Dairy A", "Dairy C", "Farmers", "Total", "Mala", "Yoghurt", "NKCC", "Own use", "L.Sale", "Staff", "Police", "School", "Spoilage", "Variance"]);
+    assert.equal(table("Production report").rows[0].local_sale, 20);
+    assert.equal(table("Product output").rows[0].malaVariance, -82.4);
+    assert.equal(report.summary.find((s) => s.label === "Product output variance (L)").value, -139.6);
   });
 
-  test("Sales: local sale, vehicle dispatch and evening reconciliation, damages", async () => {
-    const sale = await call("sales", "POST", "/sales/sales", { date: today, paymentMethod: "cash", items: [{ productId: rawMilkId, quantity: 5 }] });
+  test("Sales: two price lists, a day's trading, stock events at any time, and the registers", async () => {
+    // Local sales and vehicles are priced separately; an unpriced product cannot be sold.
+    await call("sales", "PUT", `/sales/products/${freshId}`, { vehiclePrice: 90 });
+    assert.equal((await call("sales", "GET", `/sales/products/${freshId}`)).localPrice, 80);
+    await call("sales", "POST", "/sales/sales", { date: today, paymentMethod: "cash", items: [{ productId: yoghurtId, quantity: 1 }] }, { expect: 400 });
+    await call("livestock", "POST", "/sales/sales", { date: today, paymentMethod: "cash", items: [{ productId: rawMilkId, quantity: 1 }] }, { expect: 403 });
+
+    const sale = await call("sales", "POST", "/sales/sales", { date: today, paymentMethod: "cash", reference: "RCPT-1", items: [{ productId: rawMilkId, quantity: 5, unitPrice: 1 }] });
     assert.equal(sale.totalAmount, 300);
+    await call("sales", "POST", "/sales/sales", { date: today, paymentMethod: "credit", items: [{ productId: freshId, quantity: 2 }] }, { expect: 400 });
     const credit = await call("sales", "POST", "/sales/sales", { date: today, paymentMethod: "credit", customerName: "Hotel", items: [{ productId: freshId, quantity: 2 }] });
     assert.equal(credit.status, "credit");
+    assert.equal(credit.totalAmount, 160);
     await call("sales", "POST", `/sales/sales/${credit.id}/payments`, { date: today, amount: 160, paymentMethod: "mpesa" });
 
+    const onHand = async (id) => (await call("sales", "GET", "/stock/sales")).find((s) => s.productId === id);
     const vehicle = await call("sales", "POST", "/sales/vehicles", { registrationNumber: "kcx 123a", driverName: "Peter", salesPersonName: "Grace" });
     const dispatch = await call("sales", "POST", "/sales/dispatches", { date: today, vehicleId: vehicle.id, items: [{ productId: freshId, quantityDispatched: 40 }] });
     assert.equal(dispatch.driverName, "Peter");
+    assert.equal(dispatch.items[0].unitPrice, 90);
+    assert.equal(dispatch.expectedAmount, 3600);
     await call("sales", "POST", "/sales/dispatches", { date: today, vehicleId: vehicle.id, items: [{ productId: freshId, quantityDispatched: 1 }] }, { expect: 409 });
-    const reconciled = await call("sales", "POST", `/sales/dispatches/${dispatch.id}/reconcile`, {
-      cashReturned: 2000, mpesaReturned: 600, items: [{ itemId: dispatch.items[0].id, quantityReturned: 5, quantityDamaged: 2 }],
-    });
-    assert.equal(reconciled.items[0].quantitySold, 33);
-    assert.equal(reconciled.expectedAmount, 2640);
-    assert.equal(reconciled.variance, -40);
+    assert.equal((await onHand(freshId)).onHand, 8);
+    assert.equal((await onHand(freshId)).onVehicles, 40);
 
-    await call("sales", "POST", "/sales/damages", { date: today, recordType: "replacement", productId: freshId, quantity: 1, customerName: "Hotel", reason: "Sour" });
-    const stock = await call("sales", "GET", "/stock/sales");
-    // 50 received - 2 credit - 40 dispatched + 5 returned - 1 replaced
-    assert.equal(stock.find((s) => s.code === "FRESH_MILK").onHand, 12);
+    // During the day: a return goes straight back into the store; damages and
+    // replacements come off the load.
+    const record = (fields, options) => call("sales", "POST", "/sales/damages", { date: today, productId: freshId, quantity: 1, reason: "Test", ...fields }, options);
+    await record({ recordType: "vehicle_return", quantity: 3 }, { expect: 400 });
+    await record({ recordType: "vehicle_return", dispatchId: dispatch.id, quantity: 100 }, { expect: 409 });
+    await record({ recordType: "vehicle_return", dispatchId: dispatch.id, productId: rawMilkId }, { expect: 400 });
+    await record({ recordType: "office", dispatchId: dispatch.id }, { expect: 400 });
+    await record({ recordType: "damage", reason: "" }, { expect: 400 });
+    await record({ recordType: "vehicle_return", dispatchId: dispatch.id, quantity: 3, reason: "" });
+    assert.equal((await onHand(freshId)).onHand, 11);
+    assert.equal((await onHand(freshId)).onVehicles, 37);
+    await record({ recordType: "damage", dispatchId: dispatch.id, quantity: 2, reason: "Burst" });
+    await record({ recordType: "replacement", dispatchId: dispatch.id, quantity: 1, reason: "Sour", customerName: "Shop" });
+    assert.equal((await onHand(freshId)).onHand, 11);
+    assert.equal((await onHand(freshId)).onVehicles, 34);
+    assert.equal((await call("sales", "GET", `/sales/dispatches/${dispatch.id}`)).expectedAmount, 3060);
+    await call("root", "DELETE", `/sales/dispatches/${dispatch.id}`, null, { expect: 409 });
+
+    // Evening: the form holds the trip's totals, so only the extra counts as new.
+    const line = (fields) => [{ itemId: dispatch.items[0].id, ...fields }];
+    await call("sales", "POST", `/sales/dispatches/${dispatch.id}/reconcile`, { cashReturned: 0, items: line({ quantityReturned: 1, quantityDamaged: 2, quantityReplaced: 1 }) }, { expect: 400 });
+    const reconciled = await call("sales", "POST", `/sales/dispatches/${dispatch.id}/reconcile`, { cashReturned: 2200, mpesaReturned: 600, items: line({ quantityReturned: 5, quantityDamaged: 2, quantityReplaced: 1 }) });
+    assert.equal(reconciled.items[0].quantitySold, 32);
+    assert.equal(reconciled.expectedAmount, 2880);
+    assert.equal(reconciled.variance, -80);
+    assert.equal((await onHand(freshId)).onHand, 13);
+    assert.equal((await onHand(freshId)).onVehicles, 0);
+    await record({ recordType: "damage", dispatchId: dispatch.id, reason: "Too late" }, { expect: 409 });
+
+    // In the store: all of these reduce store stock straight away.
+    await record({ recordType: "damage", quantity: 1, reason: "Dropped" });
+    await record({ recordType: "replacement", quantity: 1, reason: "Sour" });
+    await record({ recordType: "office", quantity: 2, reason: "Staff tea" });
+    assert.equal((await onHand(freshId)).onHand, 9);
     await call("sales", "POST", "/stock/sales/adjustments", { productId: freshId, quantity: -1, date: today, reason: "Count" }, { expect: 403 });
+
+    // The end-of-day registers, as on the department's sheet.
+    const report = (period) => call("sales", "GET", `/reports/department?department=sales&${period}`).then((data) => data.reports[0]);
+    const table = (doc, title) => doc.sections.find((s) => s.title === title);
+    const day = await report(`period=day&date=${today}`);
+    assert.deepEqual(table(day, "Vehicles").columns.map((c) => c.label), ["Date", "Product", "Dispatch", "Replacement", "Returns", "Damages", "Day sales", "Amount"]);
+    const road = table(day, "Vehicles").rows[0];
+    assert.deepEqual([road.product, road.dispatched, road.replaced, road.returned, road.damaged, road.sold, road.amount], ["Fresh milk", 40, 1, 5, 2, 32, 2880]);
+    assert.deepEqual(table(day, "Store").columns.map((c) => c.label), ["Date", "Product", "Production", "Opening Stock", "Packed", "Local sales", "Office", "Damages & replacements", "Return", "Closing stock"]);
+    const fresh = table(day, "Store").rows.find((r) => r.product === "Fresh milk");
+    assert.deepEqual([fresh.production, fresh.opening, fresh.packed, fresh.local, fresh.office, fresh.damages, fresh.returned, fresh.closing], [50, 0, 40, 2, 2, 2, 5, 9]);
+    assert.deepEqual(table(day, "Local sales").columns.map((c) => c.label), ["Date", "Mala", "Raw milk", "Yoghurt 500 ml", "Yoghurt 250 ml", "Yoghurt 150 ml", "Fresh milk", "Amount", "Ref. Number"]);
+    const local = table(day, "Local sales");
+    assert.equal(local.rows[0].RAW_MILK, 5);
+    assert.equal(local.rows[0].reference, "RCPT-1");
+    assert.equal(local.totals.amount, 460);
+    const month = await report(`period=month&date=${today}`);
+    assert.equal(table(month, "Store totals for the period").rows.find((r) => r.product === "Fresh milk").closing, 9);
+    assert.ok(table(day, "Store").rows.some((r) => r.product === "Yoghurt 500 ml"));
+    assert.ok(!table(day, "Store totals for the period"));
+  });
+
+  test("Sales: a trip stays on the list until it is reconciled, whatever its date", async () => {
+    const earlier = new Date(Date.parse(`${today}T00:00:00Z`) - 3 * 86400000).toISOString().slice(0, 10);
+    const vehicle = await call("sales", "POST", "/sales/vehicles", { registrationNumber: "KDD 1", driverName: "Ann", salesPersonName: "Joy" });
+    const trip = await call("sales", "POST", "/sales/dispatches", { date: earlier, vehicleId: vehicle.id, items: [{ productId: rawMilkId, quantityDispatched: 2 }] });
+    const list = (query) => call("sales", "GET", `/sales/dispatches?from=${today}&to=${today}&${query}`).then((rows) => rows.some((row) => row.id === trip.id));
+    assert.equal(await list(""), false);
+    assert.equal(await list("includeActive=true"), true);
+    assert.equal((await call("sales", "GET", `/sales/dispatches?from=${today}&to=${today}&includeActive=true`))[0].status, "dispatched");
+    await call("sales", "POST", `/sales/dispatches/${trip.id}/reconcile`, { cashReturned: 120, items: [{ itemId: trip.items[0].id }] });
+    assert.equal(await list("includeActive=true"), true);
+    assert.equal(await list("includeActive=true&status=dispatched"), false);
+  });
+
+  test("Sales: products can be edited, and deleted when nothing depends on them", async () => {
+    const ghee = await call("sales", "POST", "/sales/products", { code: "ghee", name: "Ghee", unit: "kg", localPrice: 500, vehiclePrice: 550 });
+    assert.equal(ghee.code, "GHEE");
+    const edited = await call("sales", "PUT", `/sales/products/${ghee.id}`, { name: "Pure ghee", localPrice: 520 });
+    assert.deepEqual([edited.name, edited.localPrice, edited.vehiclePrice], ["Pure ghee", 520, 550]);
+    await call("sales", "DELETE", `/sales/products/${ghee.id}`, null, { expect: 403 });
+    await call("root", "DELETE", `/sales/products/${ghee.id}`);
+    await call("sales", "GET", `/sales/products/${ghee.id}`, null, { expect: 404 });
+    await call("root", "DELETE", `/sales/products/${freshId}`, null, { expect: 409 });
+    await call("root", "DELETE", `/sales/products/${rawMilkId}`, null, { expect: 409 });
+
+    // A default product that is deleted does not come back on the next start.
+    const small = (await call("sales", "GET", "/sales/products")).find((p) => p.code === "YOGHURT_150");
+    await call("root", "DELETE", `/sales/products/${small.id}`);
+    await ensureReferenceData(prisma);
+    assert.ok(!(await call("sales", "GET", "/sales/products")).some((p) => p.code === "YOGHURT_150"));
   });
 
   test("Requisitions and Stores issues", async () => {
@@ -376,5 +645,15 @@ if (!url) {
     await call("sales", "GET", "/reports/department?department=sales&period=decade", null, { expect: 400 });
     const dashboard = await call("gm", "GET", "/dashboard");
     assert.equal(dashboard.cards.length, 7);
+
+    // Accounts sees its own department only (and every requisition, which it decides).
+    await call("accounts", "GET", "/reports/department?department=sales&period=month", null, { expect: 403 });
+    await call("accounts", "GET", "/livestock/animals", null, { expect: 403 });
+    await call("accounts", "GET", "/mva/milk-deliveries", null, { expect: 403 });
+    assert.deepEqual((await call("accounts", "GET", "/dashboard")).cards.map((c) => c.department), ["accounts"]);
+    const accountsSession = await call("accounts", "GET", "/auth/me");
+    assert.deepEqual(accountsSession.permissions.departments, ["accounts"]);
+    assert.deepEqual(accountsSession.permissions.reports, ["accounts"]);
+    assert.equal(accountsSession.permissions.requisitions.seeAll, true);
   });
 }

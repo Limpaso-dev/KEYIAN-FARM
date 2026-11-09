@@ -3,13 +3,12 @@ import { ActionButton } from "../../components/resource/ActionButton";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
 import { StockPanel } from "../../components/resource/StockPanel";
-import { Card } from "../../components/ui/ui";
 import { KeyFigures } from "../../components/ui/KeyFigures";
 import { get } from "../../lib/api";
-import { fullName, money, number, nairobiHour, today } from "../../lib/format";
+import { date, daysAgo, fullName, money, number, nairobiHour, today } from "../../lib/format";
 import { useFetch } from "../../lib/useFetch";
 import { milkTransfers } from "../livestock/milkTransfers";
-import { productLines, productTransfers } from "./productTransfers";
+import { productTransfers } from "./productTransfers";
 
 const farmer = (s) => (s ? `${s.supplierNumber} - ${fullName(s)}` : "");
 
@@ -17,17 +16,13 @@ const suppliers = {
   resource: "milkSuppliers",
   endpoint: "/mva/milk-suppliers",
   title: "Farmers supplying milk",
-  description: "Each farmer gets a number (130, 131, 132 ...). Leave the number blank to use the next one.",
+  description: "Each farmer gets a number (130, 131, 132 ...). Leave the number blank to use the next one. Their ID and payment details are kept by Accounts.",
   singular: "Farmer",
   createLabel: "Register farmer",
-  filters: [{ type: "search", placeholder: "Name, phone, location" }, { name: "status", label: "Status", options: "supplierStatus" }],
+  filters: [{ type: "search", placeholder: "Name" }, { name: "status", label: "Status", options: "supplierStatus" }],
   columns: [
     { key: "supplierNumber", label: "No." },
     { key: "name", label: "Farmer", render: fullName },
-    { key: "phone", label: "Phone" },
-    { key: "location", label: "Location" },
-    { key: "paymentMethod", label: "Paid by", type: "option:paymentMethods" },
-    { key: "paymentDetails", label: "Payment details" },
     { key: "status", label: "Status", type: "status:supplierStatus" },
   ],
   createFields: [
@@ -35,15 +30,10 @@ const suppliers = {
     { name: "status", label: "Status", type: "select", options: "supplierStatus" },
     { name: "firstName", label: "First name", required: true },
     { name: "lastName", label: "Last name", required: true },
-    { name: "nationalId", label: "National ID" },
-    { name: "phone", label: "Phone", type: "tel" },
-    { name: "location", label: "Location", span: 2 },
-    { name: "paymentMethod", label: "Paid by", type: "select", options: "paymentMethods", optionFilter: (o) => o.value !== "credit" },
-    { name: "paymentDetails", label: "M-Pesa number / bank account" },
   ],
   createInitial: async () => {
     const { next } = await get("/mva/milk-suppliers/next-number");
-    return { supplierNumber: next, status: "active", paymentMethod: "mpesa" };
+    return { supplierNumber: next, status: "active" };
   },
 };
 
@@ -73,17 +63,14 @@ const DeliveryTotals = () => {
   const { data: price } = useFetch("/mva/milk-prices/current");
   const rows = data || [];
   return (
-    <Card className="overflow-hidden">
-      <KeyFigures
-        bare
-        items={[
-          { label: "Farmer milk today", value: `${number(rows.reduce((s, r) => s + r.litres, 0))} L` },
-          { label: "Farmers delivered", value: new Set(rows.map((r) => r.supplierId)).size },
-          { label: "Value today", value: money(rows.reduce((s, r) => s + r.amount, 0)) },
-          { label: "Current price", value: price ? `${money(price.pricePerLitre)}/L` : "Not set", tone: price ? undefined : "warn" },
-        ]}
-      />
-    </Card>
+    <KeyFigures
+      items={[
+        { label: "Farmer milk today", value: `${number(rows.reduce((s, r) => s + r.litres, 0))} L` },
+        { label: "Farmers delivered", value: new Set(rows.map((r) => r.supplierId)).size },
+        { label: "Value today", value: money(rows.reduce((s, r) => s + r.amount, 0)) },
+        { label: "Current price", value: price ? `${money(price.pricePerLitre)}/L` : "Not set", tone: price ? undefined : "warn" },
+      ]}
+    />
   );
 };
 
@@ -137,54 +124,109 @@ const fromLivestock = {
   defaultQuery: { status: "sent" },
 };
 
+const blankToZero = (value) => (value === "" || value == null ? 0 : Number(value));
+const variance = (value) => <span className={value < 0 ? "text-rose-700" : ""}>{number(value, 1)}</span>;
+
+const allocatedText = (row, ctx) => (ctx.meta?.allocationDestinations || []).filter((d) => row[d.value] > 0).map((d) => `${d.label} ${number(row[d.value])}`).join(", ");
+
+const allocationAction = (key, label, when) => ({
+  key,
+  label,
+  variant: key === "allocate" ? "primary" : undefined,
+  when,
+  allowed: (c) => c.can("milkAllocations", "write"),
+  path: () => "/mva/milk-allocations",
+  title: (r) => `Allocate milk for ${date(r.date)}`,
+  intro: (r) => <p className="text-sm text-slate-600">Received: Dairy A {number(r.dairyA)}, Dairy C {number(r.dairyC)}, Farmers {number(r.farmers)}. <strong className="font-semibold text-slate-900">Total {number(r.total)}</strong></p>,
+  fields: (r) => [
+    {
+      name: "lines", label: "Where the milk went", type: "items", fixedRows: true,
+      columns: [{ name: "name", label: "Destination", type: "display" }, { name: "quantity", label: "Quantity", type: "number", width: 240 }],
+      total: (line) => blankToZero(line.quantity),
+      formatTotal: (t) => `${number(t, 1)} (variance ${number(r.total - t, 1)})`,
+    },
+    { name: "notes", label: "Notes", type: "textarea" },
+  ],
+  initial: (r, ctx) => ({ notes: r.notes || "", lines: (ctx.meta?.allocationDestinations || []).map((d) => ({ destination: d.value, name: d.label, quantity: r[d.value] || "" })) }),
+  toPayload: (v, r) => ({ date: r.id, notes: v.notes, lines: v.lines.map((l) => ({ destination: l.destination, quantity: blankToZero(l.quantity) })) }),
+  submitLabel: "Save allocation",
+  success: () => "Allocation saved and raw milk stock updated",
+});
+
+const allocations = {
+  resource: "milkAllocations",
+  endpoint: "/mva/milk-allocations",
+  title: "Milk allocation",
+  description: "Every day with milk received is listed here. Say where it went. L.Sale goes to Sales as raw milk, to be received there.",
+  singular: "Allocation",
+  emptyText: "No milk received in these dates",
+  canCreate: () => false,
+  createFields: null,
+  editFields: false,
+  deletable: false,
+  defaultQuery: { from: daysAgo(6), to: today() },
+  filters: [{ type: "dateRange" }],
+  columns: [
+    { key: "date", label: "Date", type: "date", className: "whitespace-nowrap" },
+    { key: "dairyA", label: "Dairy A", type: "number" },
+    { key: "dairyC", label: "Dairy C", type: "number" },
+    { key: "farmers", label: "Farmers", type: "number" },
+    { key: "total", label: "Total", align: "right", render: (r) => <strong className="font-semibold text-slate-900">{number(r.total)}</strong> },
+    { key: "allocated", label: "Allocated to", render: (r, ctx) => (r.allocationId ? allocatedText(r, ctx) : <span className="text-amber-700">Not allocated yet</span>) },
+    { key: "variance", label: "Variance", align: "right", render: (r) => (r.allocationId ? variance(r.variance) : "") },
+  ],
+  actions: [allocationAction("allocate", "Allocate", (r) => !r.allocationId), allocationAction("change", "Change", (r) => Boolean(r.allocationId))],
+};
+
 const batches = {
   resource: "processingBatches",
   endpoint: "/mva/processing-batches",
-  title: "Processing",
-  description: "Raw milk used and the Fresh milk, Mala and Yoghurt made from it.",
-  singular: "Batch",
+  title: "Product output",
+  description: "The kilograms processed and the pieces made. Litres and variances are worked out for you, as on the production sheet.",
+  singular: "Output",
   editFields: false,
-  deletable: false,
+  defaultQuery: { from: daysAgo(6), to: today() },
   filters: [{ type: "dateRange" }],
   columns: [
-    { key: "batchNumber", label: "Batch" },
-    { key: "date", label: "Date", type: "date" },
-    { key: "rawMilkInput", label: "Raw milk used (L)", type: "number" },
-    { key: "outputs", label: "Products made", render: (r) => productLines(r.outputs) },
-    { key: "notes", label: "Notes" },
+    { key: "batchNumber", label: "Batch", className: "whitespace-nowrap", render: (r) => <><span className="block font-medium text-slate-900">{r.batchNumber}</span><span className="text-xs text-slate-500">{date(r.date)}</span></> },
+    { key: "mala", label: "Mala", render: (r) => (r.malaKg || r.malaPieces ? `${number(r.malaKg, 1)} kg = ${number(r.malaLitres, 1)} L, ${number(r.malaPieces, 0)} pieces` : "") },
+    { key: "malaVariance", label: "Variance (L)", align: "right", render: (r) => (r.malaKg || r.malaPieces ? variance(r.malaVariance) : "") },
+    { key: "yoghurt", label: "Yoghurt", render: (r) => (r.yoghurtKg || r.yoghurt500 || r.yoghurt250 || r.yoghurt150 ? `${number(r.yoghurtKg, 1)} kg = ${number(r.yoghurtLitres, 1)} L; 500 ml: ${number(r.yoghurt500, 0)}, 250 ml: ${number(r.yoghurt250, 0)}, 150 ml: ${number(r.yoghurt150, 0)}` : "") },
+    { key: "yoghurtVariance", label: "Variance (L)", align: "right", render: (r) => (r.yoghurtKg || r.yoghurt500 || r.yoghurt250 || r.yoghurt150 ? variance(r.yoghurtVariance) : "") },
+    { key: "fresh250", label: "Fresh 250", type: "number" },
   ],
   toolbar: (ctx) => ctx.can("processingBatches", "write") && (
-    <ActionButton label="Record processing" icon={FlaskConical} variant="primary" path="/mva/processing-batches" onDone={(r) => ctx.notify(r?.message)}
+    <ActionButton label="Record output" icon={FlaskConical} variant="primary" path="/mva/processing-batches" submitLabel="Save output" onDone={() => ctx.notify("Output saved and added to stock")}
       fields={[
-        { name: "date", label: "Date", type: "date", required: true },
-        { name: "rawMilkInput", label: "Raw milk used (litres)", type: "number", required: true },
-        {
-          name: "outputs", label: "Products made", type: "items", fixedRows: true,
-          columns: [{ name: "product", label: "Product", type: "display" }, { name: "quantity", label: "Quantity", type: "number", width: 140 }],
-        },
+        { name: "date", label: "Date", type: "date", required: true, span: 2 },
+        { type: "section", label: "Mala" },
+        { name: "malaKg", label: "Amount processed (kg)", type: "number" },
+        { name: "malaPieces", label: "Output (500 ml pieces)", type: "number", step: 1 },
+        { type: "section", label: "Yoghurt" },
+        { name: "yoghurtKg", label: "Amount processed (kg)", type: "number", span: 2 },
+        { name: "yoghurt500", label: "500 ml (pieces)", type: "number", step: 1 },
+        { name: "yoghurt250", label: "250 ml (pieces)", type: "number", step: 1 },
+        { name: "yoghurt150", label: "150 ml (pieces)", type: "number", step: 1 },
+        { type: "section", label: "Fresh" },
+        { name: "fresh250", label: "Fresh 250 ml (pieces)", type: "number", step: 1, help: "Made from the School allocation and sent to the schools" },
         { name: "notes", label: "Notes", type: "textarea" },
       ]}
-      initial={async () => {
-        const products = await get("/sales/products", { isActive: "true" });
-        return { date: today(), outputs: products.filter((p) => p.code !== "RAW_MILK").map((p) => ({ productId: p.id, product: `${p.name} (${p.unit})`, quantity: "" })) };
-      }}
-      toPayload={(v) => ({ ...v, outputs: v.outputs.filter((o) => o.quantity !== "" && Number(o.quantity) > 0).map((o) => ({ productId: o.productId, quantity: o.quantity })) })} />
+      initial={() => ({ date: today() })} />
   ),
 };
 
 const MvaPage = () => (
   <ModulePage
-    title="Milk Value Addition"
-    description="Milk received from Livestock and farmers, processing into Fresh milk, Mala and Yoghurt, and products sent to Sales."
-    tabs={[
-      { key: "collection", label: "Farmer milk", show: (c) => c.can("milkDeliveries"), render: () => <ResourcePage config={deliveries} header={() => <DeliveryTotals />} /> },
-      { key: "livestock", label: "From Livestock", show: (c) => c.can("milkTransfers", "receive") || c.user?.department === "mva", render: () => <ResourcePage config={fromLivestock} /> },
-      { key: "processing", label: "Processing", show: (c) => c.can("processingBatches"), render: () => <ResourcePage config={batches} /> },
-      { key: "transfers", label: "To Sales", show: (c) => c.can("productTransfers"), render: () => <ResourcePage config={productTransfers} /> },
-      { key: "stock", label: "Stock", show: (c) => c.can("mvaStock"), render: () => <StockPanel location="mva" /> },
-      { key: "farmers", label: "Farmers", show: (c) => c.can("milkSuppliers"), render: () => <ResourcePage config={suppliers} /> },
-      { key: "prices", label: "Milk price", show: (c) => c.can("milkPrices"), render: () => <ResourcePage config={prices} /> },
-    ]}
+    sections={{
+      collection: () => <ResourcePage config={deliveries} header={() => <DeliveryTotals />} />,
+      livestock: () => <ResourcePage config={fromLivestock} />,
+      allocation: () => <ResourcePage config={allocations} />,
+      processing: () => <ResourcePage config={batches} />,
+      transfers: () => <ResourcePage config={productTransfers} />,
+      stock: () => <StockPanel location="mva" />,
+      farmers: () => <ResourcePage config={suppliers} />,
+      prices: () => <ResourcePage config={prices} />,
+    }}
   />
 );
 

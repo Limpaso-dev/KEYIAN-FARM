@@ -253,7 +253,7 @@ router.use("/milk-records", crud({
 // ---------------------------------------------------------------------
 const transferRouter = express.Router();
 transferRouter.post("/", allow("milkTransfers", "write"), async (req, res) => {
-  const data = parseBody({ date: "date!", session: "option:milkSessions!", litres: "decimal!", notes: "text" }, req.body);
+  const data = parseBody({ date: "date!", session: "option:milkSessions!", dairy: "option:dairies!", litres: "decimal!", notes: "text" }, req.body);
   if (!(data.litres > 0)) throw badRequest("Litres must be more than zero");
   const transfer = await inTransaction(async (tx) => {
     const created = await tx.milkTransfer.create({
@@ -304,9 +304,9 @@ router.use("/milk-transfers", crud({
   resource: "milkTransfers",
   model: "milkTransfer",
   fields: {},
-  updateFields: { litres: "decimal!", notes: "text" },
+  updateFields: { dairy: "option:dairies!", litres: "decimal!", notes: "text" },
   dateField: "date",
-  filters: ["status", "session"],
+  filters: ["status", "session", "dairy"],
   orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   create: false,
   prepare: (data, { existing }) => {

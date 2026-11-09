@@ -2,11 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CornerDownLeft, KeyRound, LogOut, Search } from "lucide-react";
 import { useAuth } from "../../context/useAuth";
-import { NAV_GROUPS, navigation } from "../../navigation";
+import { NAV_GROUPS, navigation, sectionPath, sectionsFor } from "../../navigation";
 import { cx } from "../../lib/cx";
 import { Kbd } from "../ui/ui";
 
-/** Ctrl+K / Cmd+K quick navigation across every page the user can open. */
+/**
+ * Ctrl+K / Cmd+K quick navigation across every page the user can open.
+ * Department sections turn up as you type: "payroll" finds HR › Payroll,
+ * "sales stock" the Stock section of Sales.
+ */
 const CommandPalette = ({ open, onClose }) => {
   const auth = useAuth();
   const navigate = useNavigate();
@@ -15,17 +19,33 @@ const CommandPalette = ({ open, onClose }) => {
   const input = useRef(null);
   const list = useRef(null);
 
-  const commands = useMemo(() => [
-    ...navigation.filter((item) => item.visible(auth)).map((item) => ({
-      id: item.path, label: item.label, hint: item.hint, icon: item.icon,
-      group: NAV_GROUPS.find((g) => g.key === item.group)?.label, run: () => navigate(item.path),
-    })),
-    { id: "password", label: "Change password", hint: "Account", icon: KeyRound, group: "Account", run: () => navigate("/change-password") },
-    { id: "logout", label: "Sign out", hint: "Account", icon: LogOut, group: "Account", run: () => auth.logout() },
-  ], [auth, navigate]);
+  const commands = useMemo(() => {
+    const pages = navigation.filter((item) => item.visible(auth));
+    return [
+      ...pages.map((item) => ({
+        id: item.path, label: item.label, hint: item.hint, icon: item.icon,
+        text: `${item.label} ${item.short || ""} ${item.hint} ${NAV_GROUPS.find((g) => g.key === item.group)?.label}`,
+        run: () => navigate(item.path),
+      })),
+      ...pages.flatMap((item) => sectionsFor(item, auth).map((section) => ({
+        id: `${item.path}/${section.key}`, label: section.label, hint: item.label, icon: item.icon, section: true,
+        text: `${section.label} ${item.label} ${item.short || ""}`,
+        run: () => navigate(sectionPath(item, section)),
+      }))),
+      { id: "password", label: "Change password", hint: "Account", icon: KeyRound, text: "Change password Account", run: () => navigate("/change-password") },
+      { id: "logout", label: "Sign out", hint: "Account", icon: LogOut, text: "Sign out Account", run: () => auth.logout() },
+    ];
+  }, [auth, navigate]);
 
-  const terms = query.trim().toLowerCase();
-  const results = terms ? commands.filter((c) => `${c.label} ${c.hint} ${c.group}`.toLowerCase().includes(terms)) : commands;
+  // Every word typed must match; names that start with or contain a word come first.
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const rank = (command) => {
+    const label = command.label.toLowerCase();
+    return Math.min(...words.map((word) => (label.startsWith(word) ? 0 : label.includes(word) ? 1 : 2)));
+  };
+  const results = words.length
+    ? commands.filter((c) => words.every((word) => c.text.toLowerCase().includes(word))).sort((a, b) => rank(a) - rank(b))
+    : commands.filter((c) => !c.section);
   const active = Math.min(index, Math.max(results.length - 1, 0));
 
   useEffect(() => {
@@ -76,7 +96,7 @@ const CommandPalette = ({ open, onClose }) => {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setIndex(0); }}
             onKeyDown={onKeyDown}
-            placeholder="Go to a department or page..."
+            placeholder="Go to a department, section or page..."
             aria-label="Search pages"
             role="combobox"
             aria-expanded="true"

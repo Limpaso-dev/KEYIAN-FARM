@@ -10,10 +10,10 @@ export const productTransfers = {
   resource: "productTransfers",
   endpoint: "/mva/product-transfers",
   title: "Products sent to Sales",
-  description: "Raw milk can go straight to Sales without processing. Sales confirms receipt before it counts in Sales stock.",
+  description: "Finished products go to Sales from here. Raw milk goes through the L.Sale allocation. Sales confirms receipt before it counts in Sales stock.",
   singular: "Transfer",
   editFields: false,
-  deletableWhen: (r) => r.status === "sent",
+  deletableWhen: (r) => r.status === "sent" && !r.allocationId,
   filters: [{ name: "status", label: "Status", options: "transferStatus" }, { type: "dateRange" }],
   columns: [
     { key: "transferNumber", label: "Transfer" },
@@ -43,7 +43,7 @@ export const productTransfers = {
       ]}
       initial={async () => {
         const stock = await get("/stock/mva");
-        return { date: today(), items: stock.map((p) => ({ productId: p.productId, product: `${p.name} (${p.unit})`, onHand: number(p.onHand), quantity: "" })) };
+        return { date: today(), items: stock.filter((p) => p.isActive && p.code !== "RAW_MILK").map((p) => ({ productId: p.productId, product: `${p.name} (${p.unit})`, onHand: number(p.onHand), quantity: "" })) };
       }}
       toPayload={(v) => ({ ...v, items: v.items.filter((i) => i.quantity !== "" && Number(i.quantity) > 0).map((i) => ({ productId: i.productId, quantity: i.quantity })) })} />
   ),

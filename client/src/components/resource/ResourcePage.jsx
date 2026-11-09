@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, FilterX, Pencil, Plus, RefreshCw, Search, Trash2, TriangleAlert } from "lucide-react";
 import { useAuth } from "../../context/useAuth";
 import { del, errorMessage, post, put } from "../../lib/api";
@@ -73,7 +74,8 @@ const Pagination = ({ page, pages, total, onPage }) => {
   );
 };
 
-export const DataTable = ({ columns, rows, ctx, actions = [], expand, emptyText }) => {
+export const DataTable = ({ columns, rows, ctx, actions = [], expand, emptyText, rowTo }) => {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(null);
   const [sort, setSort] = useState(null); // { key, dir }
   const [pageState, setPageState] = useState({ page: 1, count: rows.length });
@@ -106,7 +108,7 @@ export const DataTable = ({ columns, rows, ctx, actions = [], expand, emptyText 
 
   return (
     <>
-      <div className="scrollbar-thin overflow-x-auto">
+      <div className="scrollbar-thin relative overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50/80 text-left">
@@ -134,7 +136,10 @@ export const DataTable = ({ columns, rows, ctx, actions = [], expand, emptyText 
               const isOpen = open === row.id;
               return (
                 <Fragment key={row.id}>
-                  <tr className={cx("transition-colors hover:bg-slate-50", isOpen && "bg-slate-50")}>
+                  <tr
+                    className={cx("transition-colors hover:bg-slate-50", rowTo && "cursor-pointer", isOpen && "bg-slate-50")}
+                    onClick={rowTo ? (event) => !event.target.closest("a, button, input, select, label") && navigate(rowTo(row)) : undefined}
+                  >
                     {expand && (
                       <td className="pl-3">
                         <button type="button" aria-label={isOpen ? "Hide details" : "Show details"} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : row.id)} className="rounded-md p-1 text-slate-400 transition hover:bg-slate-200/60 hover:text-slate-700">
@@ -221,8 +226,11 @@ const Filters = ({ filters, query, setQuery, initial }) => {
 
 /**
  * Generic page for one API collection. See modules/* for examples.
+ * config.rowTo(row): clicking a row opens this address.
+ * config.labelRowButtons: show "Edit" and "Delete" in words, not just icons.
+ * header({ ...ctx, rows, query, setQuery }): shown above the table. onChange(): after any save.
  */
-export const ResourcePage = ({ config, header }) => {
+export const ResourcePage = ({ config, header, onChange }) => {
   const auth = useAuth();
   const [query, setQuery] = useState(config.defaultQuery || {});
   const [debounced, setDebounced] = useState(query);
@@ -253,6 +261,7 @@ export const ResourcePage = ({ config, header }) => {
   const notify = (message) => {
     clearFetchCache();
     reload();
+    onChange?.();
     announce(message || "Saved");
   };
   const ctx = { ...auth, reload, notify };
@@ -265,6 +274,7 @@ export const ResourcePage = ({ config, header }) => {
     setForm(null);
     setConfirm(null);
     reload();
+    onChange?.();
     announce(message);
   };
 
@@ -313,8 +323,8 @@ export const ResourcePage = ({ config, header }) => {
         ...a,
         onClick: (row) => (a.fields ? setForm({ mode: "action", row, action: a }) : setConfirm({ kind: "action", action: a, row })),
       })),
-    ...(canEdit ? [{ key: "edit", label: "", ariaLabel: () => "Edit", icon: Pencil, when: config.editableWhen, onClick: (row) => setForm({ mode: "edit", row }) }] : []),
-    ...(canDelete ? [{ key: "delete", label: "", ariaLabel: () => "Delete", icon: Trash2, variant: "ghost", when: config.deletableWhen, onClick: (row) => setConfirm({ kind: "delete", row }) }] : []),
+    ...(canEdit ? [{ key: "edit", label: config.labelRowButtons ? "Edit" : "", ariaLabel: () => "Edit", icon: Pencil, when: config.editableWhen, onClick: (row) => setForm({ mode: "edit", row }) }] : []),
+    ...(canDelete ? [{ key: "delete", label: config.labelRowButtons ? "Delete" : "", ariaLabel: () => "Delete", icon: Trash2, variant: "ghost", when: config.deletableWhen, onClick: (row) => setConfirm({ kind: "delete", row }) }] : []),
   ];
 
   const formConfig = (() => {
@@ -349,7 +359,7 @@ export const ResourcePage = ({ config, header }) => {
   return (
     <div className="space-y-5">
       <Alert tone="success" onClose={() => setNotice(null)}>{notice}</Alert>
-      {header?.(ctx)}
+      {header?.({ ...ctx, rows, query, setQuery })}
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3.5">
           <div className="min-w-0">
@@ -368,7 +378,7 @@ export const ResourcePage = ({ config, header }) => {
         <Filters filters={config.filters} query={query} setQuery={setQuery} initial={config.defaultQuery} />
         {loadError && <div className="p-4"><Alert tone="error">{loadError}</Alert></div>}
         {loading && !data ? <SkeletonRows columns={config.columns.length} /> : (
-          <DataTable columns={config.columns} rows={rows} ctx={ctx} actions={rowActions} expand={config.expand} emptyText={config.emptyText} />
+          <DataTable columns={config.columns} rows={rows} ctx={ctx} actions={rowActions} expand={config.expand} emptyText={config.emptyText} rowTo={config.rowTo} />
         )}
         {config.footer && <div className="bg-slate-50/60 font-medium [&>div]:border-slate-200">{config.footer(rows, ctx)}</div>}
       </Card>

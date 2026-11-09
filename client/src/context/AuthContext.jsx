@@ -1,19 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import authContext from "./AuthContextStore";
-import api, { get, TOKEN_KEY } from "../lib/api";
+import api, { get } from "../lib/api";
+import { forgetToken, restoreToken, saveToken } from "../lib/session";
 import { clearFetchCache } from "../lib/useFetch";
 
+// The sign-in lasts while the site is open: closing the last tab or the
+// browser ends it (see lib/session.js).
 export const AuthProvider = ({ children }) => {
   const [session, setSession] = useState(null); // { user, permissions }
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Drops the signed-in state; the token is forgotten by whoever ends the session.
   const clear = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem("keiyian_user");
     clearFetchCache();
     setSession(null);
   }, []);
+
+  /** Sign out here and in the site's other open tabs. */
+  const logout = useCallback(() => {
+    forgetToken({ everywhere: true });
+    clear();
+  }, [clear]);
 
   const loadMeta = useCallback(async () => {
     try {
@@ -28,7 +36,9 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     let current = true;
     const init = async () => {
-      if (!localStorage.getItem(TOKEN_KEY)) {
+      const token = await restoreToken();
+      if (!current) return;
+      if (!token) {
         setLoading(false);
         return;
       }
@@ -38,7 +48,10 @@ export const AuthProvider = ({ children }) => {
         setSession(data);
         if (!data.user.mustChangePassword) await loadMeta();
       } catch {
-        if (current) clear();
+        if (current) {
+          forgetToken();
+          clear();
+        }
       } finally {
         if (current) setLoading(false);
       }
@@ -61,7 +74,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = useCallback(async (credentials) => {
     const { data } = (await api.post("/auth/login", credentials)).data;
-    localStorage.setItem(TOKEN_KEY, data.token);
+    saveToken(data.token);
     setSession({ user: data.user, permissions: data.permissions });
     if (!data.user.mustChangePassword) await loadMeta();
     return data;
@@ -89,10 +102,10 @@ export const AuthProvider = ({ children }) => {
       can,
       label,
       login,
-      logout: clear,
+      logout,
       changePassword,
     };
-  }, [session, meta, loading, login, clear, changePassword]);
+  }, [session, meta, loading, login, logout, changePassword]);
 
   return <authContext.Provider value={value}>{children}</authContext.Provider>;
 };

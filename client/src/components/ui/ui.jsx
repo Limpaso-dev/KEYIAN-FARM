@@ -239,73 +239,6 @@ export const CardHeader = ({ title, description, actions, icon: Icon, className 
   </div>
 );
 
-const STAT_TONE = {
-  default: "border-slate-200 bg-white",
-  warn: "border-amber-200 bg-amber-50/60",
-};
-const STAT_ICON = {
-  default: "bg-primary-50 text-primary-700",
-  warn: "bg-amber-100 text-amber-700",
-};
-
-/** KPI tile. `delta` is a short signed note; `deltaTone` good | bad | neutral. */
-export const StatCard = ({ label, value, hint, tone = "default", icon: Icon, delta, deltaTone = "neutral", className }) => (
-  <div className={cx("rounded-xl border px-4 py-3.5 shadow-card", STAT_TONE[tone] || STAT_TONE.default, className)}>
-    <div className="flex items-start justify-between gap-2">
-      <p className="text-[13px] font-medium leading-snug text-slate-500">{label}</p>
-      {Icon && <span className={cx("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", STAT_ICON[tone] || STAT_ICON.default)}><Icon size={16} aria-hidden /></span>}
-      {!Icon && tone === "warn" && <AlertTriangle size={15} className="shrink-0 text-amber-600" aria-label="Needs attention" />}
-    </div>
-    <p className="mt-1.5 truncate text-xl font-semibold tracking-tight text-slate-900 sm:text-[1.375rem]">{value}</p>
-    {(hint || delta) && (
-      <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
-        {delta && <span className={cx("font-semibold", deltaTone === "good" ? "text-emerald-700" : deltaTone === "bad" ? "text-rose-700" : "text-slate-600")}>{delta}</span>}
-        {hint}
-      </p>
-    )}
-  </div>
-);
-
-export const Tabs = ({ tabs, active, onChange }) => {
-  const onKeyDown = (event, index) => {
-    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-    if (!step) return;
-    event.preventDefault();
-    const next = tabs[(index + step + tabs.length) % tabs.length];
-    onChange(next.key);
-    event.currentTarget.parentElement?.querySelector(`[data-tab="${next.key}"]`)?.focus();
-  };
-  return (
-    <div className="scrollbar-thin -mx-1 mb-5 overflow-x-auto px-1">
-      <div role="tablist" className="flex min-w-max gap-1 border-b border-slate-200">
-        {tabs.map((tab, index) => {
-          const selected = active === tab.key;
-          return (
-            <button
-              key={tab.key}
-              data-tab={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              tabIndex={selected ? 0 : -1}
-              onKeyDown={(e) => onKeyDown(e, index)}
-              onClick={() => onChange(tab.key)}
-              className={cx(
-                "relative -mb-px inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-3 pb-2.5 pt-2 text-sm font-medium transition-colors",
-                selected ? "border-primary-700 text-primary-800" : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800",
-              )}
-            >
-              {tab.icon && <tab.icon size={15} aria-hidden />}
-              {tab.label}
-              {tab.count > 0 && <span className={cx("rounded-full px-1.5 py-px text-[11px] font-semibold", selected ? "bg-primary-100 text-primary-800" : "bg-slate-100 text-slate-600")}>{tab.count}</span>}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
 const BADGE = {
   green: ["bg-emerald-50 text-emerald-800 ring-emerald-600/20", "bg-emerald-500"],
   amber: ["bg-amber-50 text-amber-800 ring-amber-600/25", "bg-amber-500"],
@@ -314,6 +247,7 @@ const BADGE = {
   gray: ["bg-slate-100 text-slate-700 ring-slate-500/20", "bg-slate-400"],
 };
 const STATUS_TONE = {
+  with_finance: "amber", filled: "green", shortlisted: "blue", interview: "amber", passed: "blue", hired: "green",
   active: "green", approved: "blue", paid: "green", received: "green", reconciled: "green", fulfilled: "green", recovered: "green", milking: "green", cleared: "green", closed: "gray",
   pending: "amber", draft: "amber", sent: "amber", dispatched: "amber", returned: "amber", partial: "amber", partially_received: "amber", ordered: "blue", open: "amber", under_treatment: "amber", credit: "red", awaiting_fertiliser: "amber",
   rejected: "red", cancelled: "gray", voided: "gray", terminated: "red", resigned: "gray", retired: "gray", dead: "red", died: "red", inactive: "gray", suspended: "red", sold: "gray", culled: "gray", dry: "gray", succeeded: "gray", deceased: "gray", expired: "gray", posted: "green",

@@ -2,6 +2,7 @@ import { optionLabel, optionValues } from "../../config/catalog.js";
 import { bucketsOf, dayText } from "../../lib/periods.js";
 import { stockSummary } from "../../lib/stock.js";
 import { round2 } from "../../lib/validate.js";
+import { outputFigures, productionDays } from "../mva/production.js";
 
 // Department reports for any period (see lib/periods.js): a day, a week, two
 // weeks, a month, a quarter, a half year, a year or a custom range.
@@ -158,18 +159,61 @@ const livestock = async (db, range) => {
 };
 
 // ---------------------------------------------------------------------
+// MVA's production report, as on the department's sheet.
+const productionRegister = (range, days) => {
+  const destinations = optionValues("allocationDestinations");
+  const keys = ["dairyA", "dairyC", "farmers", "total", ...destinations, "variance"];
+  const rows = bucketsOf(range).flatMap((bucket) => {
+    const inBucket = days.filter((day) => day.date >= bucket.from && day.date < bucket.to);
+    return inBucket.length ? [{ date: bucket.label, ...Object.fromEntries(keys.map((key) => [key, sum(inBucket, key)])) }] : [];
+  });
+  return section("Production report", [
+    dateColumn(range),
+    col("dairyA", "Dairy A", "number"),
+    col("dairyC", "Dairy C", "number"),
+    col("farmers", "Farmers", "number"),
+    col("total", "Total", "number"),
+    ...destinations.map((destination) => col(destination, optionLabel("allocationDestinations", destination), "number")),
+    col("variance", "Variance", "number"),
+  ], rows, keys);
+};
+
+// MVA's product output, as on the department's sheet.
+const OUTPUT_KEYS = ["malaKg", "malaLitres", "malaPieces", "malaVariance", "yoghurtKg", "yoghurtLitres", "yoghurt500", "yoghurt250", "yoghurt150", "yoghurtVariance", "fresh250"];
+const outputRegister = (range, figures) => {
+  const rows = bucketsOf(range).flatMap((bucket) => {
+    const inBucket = figures.filter((row) => row.date >= bucket.from && row.date < bucket.to);
+    return inBucket.length ? [{ date: bucket.label, ...Object.fromEntries(OUTPUT_KEYS.map((key) => [key, sum(inBucket, key)])) }] : [];
+  });
+  return section("Product output", [
+    dateColumn(range),
+    col("malaKg", "Mala processed (kg)", "number"),
+    col("malaLitres", "Mala processed (L)", "number"),
+    col("malaPieces", "Mala output (pcs)", "number"),
+    col("malaVariance", "Mala variance (L)", "number"),
+    col("yoghurtKg", "Yoghurt processed (kg)", "number"),
+    col("yoghurtLitres", "Yoghurt processed (L)", "number"),
+    col("yoghurt500", "Yog 500", "number"),
+    col("yoghurt250", "Yog 250", "number"),
+    col("yoghurt150", "Yog 150", "number"),
+    col("yoghurtVariance", "Yoghurt variance (L)", "number"),
+    col("fresh250", "Fresh 250 (pcs)", "number"),
+  ], rows, OUTPUT_KEYS);
+};
+
 const mva = async (db, range) => {
   const span = within(range);
-  const [transfers, deliveries, batches, outgoing, stock] = await Promise.all([
+  const [days, transfers, deliveries, batches, outgoing, stock] = await Promise.all([
+    productionDays(db, { date: span }),
     db.milkTransfer.findMany({ where: { date: span, status: "received" }, orderBy: { date: "asc" } }),
     db.milkDelivery.findMany({ where: { date: span }, include: { supplier: true }, orderBy: [{ date: "asc" }, { supplier: { supplierNumber: "asc" } }] }),
     db.processingBatch.findMany({ where: { date: span }, include: { outputs: { include: { product: true } } }, orderBy: { date: "asc" } }),
     db.productTransfer.findMany({ where: { date: span }, include: { items: { include: { product: true } } } }),
     stockSummary(db, "mva", { upTo: range.asAt }),
   ]);
+  const figures = batches.map((batch) => ({ date: batch.date, ...outputFigures(batch) }));
   const fromLivestock = sum(transfers, "receivedLitres");
   const fromFarmers = sum(deliveries, "litres");
-  const processed = sum(batches, "rawMilkInput");
   const perFarmer = new Map();
   for (const d of deliveries) {
     const entry = perFarmer.get(d.supplierId) || { number: d.supplier.supplierNumber, farmer: name(d.supplier), morning: 0, midday: 0, evening: 0, litres: 0, amount: 0 };
@@ -192,21 +236,20 @@ const mva = async (db, range) => {
       { label: "Milk from Livestock (litres)", value: fromLivestock },
       { label: "Milk from farmers (litres)", value: fromFarmers },
       { label: "Farmers delivering", value: perFarmer.size },
-      { label: "Raw milk processed (litres)", value: processed },
+      { label: "Total intake", value: sum(days, "total") },
+      { label: "Milk allocated", value: sum(days, "allocated") },
+      { label: "Production variance (L)", value: sum(days, "variance") },
+      { label: "Product output variance (L)", value: round2(sum(figures, "malaVariance") + sum(figures, "yoghurtVariance")) },
       { label: "Transfers to Sales", value: outgoing.length },
       { label: "Farmer milk value", value: sum(deliveries, "amount"), type: "money" },
     ],
     sections: [
-      breakdown(range, "Milk received and processed", [col("farmers", "From farmers (litres)", "number"), col("livestock", "From Livestock (litres)", "number"), col("processed", "Processed (litres)", "number"), col("value", "Farmer milk value", "money")],
-        { deliveries: { rows: deliveries, date: "date" }, transfers: { rows: transfers, date: "date" }, batches: { rows: batches, date: "date" } },
-        (r) => ({ farmers: sum(r.deliveries, "litres"), livestock: sum(r.transfers, "receivedLitres"), processed: sum(r.batches, "rawMilkInput"), value: sum(r.deliveries, "amount") }),
-        ["farmers", "livestock", "processed", "value"]),
+      productionRegister(range, days),
+      outputRegister(range, figures),
       section("Farmer deliveries", [col("number", "No."), col("farmer", "Farmer"), col("morning", "Morning", "number"), col("midday", "Midday", "number"), col("evening", "Evening", "number"), col("litres", "Litres", "number"), col("amount", "Value", "money")],
         [...perFarmer.values()], ["morning", "midday", "evening", "litres", "amount"]),
-      listsEachRecord(range) && section("Received from Livestock", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("session", "Session"), col("sent", "Sent", "number"), col("received", "Received", "number")],
-        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, session: optionLabel("milkSessions", t.session), sent: Number(t.litres), received: Number(t.receivedLitres) })), ["sent", "received"]),
-      listsEachRecord(range) && section("Processing batches", [col("date", "Date", "date"), col("batchNumber", "Batch"), col("input", "Raw milk in", "number"), col("outputs", "Products made")],
-        batches.map((b) => ({ date: b.date, batchNumber: b.batchNumber, input: Number(b.rawMilkInput), outputs: b.outputs.map((o) => `${o.product.name} ${Number(o.quantity)}`).join(", ") })), ["input"]),
+      listsEachRecord(range) && section("Received from Livestock", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("dairy", "Dairy"), col("session", "Session"), col("sent", "Sent", "number"), col("received", "Received", "number")],
+        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, dairy: optionLabel("dairies", t.dairy), session: optionLabel("milkSessions", t.session), sent: Number(t.litres), received: Number(t.receivedLitres) })), ["sent", "received"]),
       section("Products made and sent to Sales", [col("product", "Product"), col("made", "Made", "number"), col("sent", "Sent to Sales", "number")],
         [...new Set([...outputs.keys(), ...sent.keys()])].map((product) => ({ product, made: outputs.get(product) || 0, sent: sent.get(product) || 0 }))),
       section(`MVA stock at ${dayText(range.asAt)}`, [col("name", "Product"), col("unit", "Unit"), col("onHand", "On hand", "number")], stock),
@@ -215,30 +258,129 @@ const mva = async (db, range) => {
 };
 
 // ---------------------------------------------------------------------
+// Products always on the local sales register, in the order of the paper sheet.
+const LOCAL_SHEET = ["MALA", "RAW_MILK", "YOGHURT_500", "YOGHURT_250", "YOGHURT_150"];
+
+// The Store column each kind of stock movement belongs to. Stock going out
+// reads as a positive quantity in its column. Anything else (a count
+// adjustment) has its own column, shown only when there is one.
+const STORE_COLUMN = {
+  received_from_mva: ["production", 1],
+  vehicle_dispatch: ["packed", -1],
+  dispatch_cancelled: ["packed", -1],
+  local_sale: ["local", -1],
+  sale_reversal: ["local", -1],
+  office: ["office", -1],
+  damage: ["damages", -1],
+  replacement: ["damages", -1],
+  vehicle_return: ["returned", 1],
+};
+const STORE_FLOWS = ["production", "packed", "local", "office", "damages", "returned", "adjusted"];
+
+const dateColumn = (range) => col("date", range.bucket === "day" ? "Date" : "Month");
+
+/** The Vehicles register: what each product did on the road, per day. */
+const vehicleRegister = (range, dispatches) => {
+  const rows = bucketsOf(range).flatMap((bucket) => {
+    const byProduct = new Map();
+    for (const dispatch of dispatches.filter((d) => d.date >= bucket.from && d.date < bucket.to)) {
+      for (const item of dispatch.items) {
+        const entry = byProduct.get(item.productId) || { date: bucket.label, product: item.product.name, dispatched: 0, replaced: 0, returned: 0, damaged: 0, sold: 0, amount: 0 };
+        entry.dispatched = round2(entry.dispatched + Number(item.quantityDispatched));
+        entry.replaced = round2(entry.replaced + Number(item.quantityReplaced));
+        entry.returned = round2(entry.returned + Number(item.quantityReturned));
+        entry.damaged = round2(entry.damaged + Number(item.quantityDamaged));
+        entry.sold = round2(entry.sold + Number(item.quantitySold));
+        entry.amount = round2(entry.amount + Number(item.quantitySold) * Number(item.unitPrice));
+        byProduct.set(item.productId, entry);
+      }
+    }
+    return [...byProduct.values()];
+  });
+  return section("Vehicles", [dateColumn(range), col("product", "Product"), col("dispatched", "Dispatch", "number"), col("replaced", "Replacement", "number"), col("returned", "Returns", "number"), col("damaged", "Damages", "number"), col("sold", "Day sales", "number"), col("amount", "Amount", "money")], rows, ["amount"]);
+};
+
+/**
+ * The Store register, worked out from the stock ledger so that opening plus
+ * what came in less what went out always equals closing. For longer periods
+ * only days with movement are listed, followed by a total for each product.
+ */
+const storeRegister = (range, products, movements) => {
+  const flow = (rows) => {
+    const totals = Object.fromEntries(STORE_FLOWS.map((key) => [key, 0]));
+    for (const row of rows) {
+      const [key, sign] = STORE_COLUMN[row.movementType] || ["adjusted", 1];
+      totals[key] = round2(totals[key] + sign * Number(row._sum.quantity || 0));
+    }
+    return totals;
+  };
+  const net = (rows) => round2(rows.reduce((total, row) => total + Number(row._sum.quantity || 0), 0));
+  const forProduct = (product) => movements.filter((row) => row.productId === product.id);
+  const openings = new Map(products.map((product) => [product.id, net(forProduct(product).filter((row) => row.date < range.from))]));
+
+  const balance = new Map(openings);
+  const rows = bucketsOf(range).flatMap((bucket) => products.flatMap((product) => {
+    const moved = forProduct(product).filter((row) => row.date >= bucket.from && row.date < bucket.to);
+    const opening = balance.get(product.id);
+    const closing = round2(opening + net(moved));
+    balance.set(product.id, closing);
+    const show = moved.length > 0 || (range.days === 1 && (product.isActive || opening !== 0));
+    return show ? [{ date: bucket.label, product: product.name, opening, ...flow(moved), closing }] : [];
+  }));
+
+  const hasAdjustments = movements.some((row) => row.date >= range.from && !STORE_COLUMN[row.movementType]);
+  const columns = (first) => [
+    ...first,
+    col("product", "Product"),
+    col("production", "Production", "number"),
+    col("opening", "Opening Stock", "number"),
+    col("packed", "Packed", "number"),
+    col("local", "Local sales", "number"),
+    col("office", "Office", "number"),
+    col("damages", "Damages & replacements", "number"),
+    col("returned", "Return", "number"),
+    ...(hasAdjustments ? [col("adjusted", "Count adjustment", "number")] : []),
+    col("closing", "Closing stock", "number"),
+  ];
+
+  const totals = range.days > 1 && section("Store totals for the period", columns([]), products.flatMap((product) => {
+    const moved = forProduct(product).filter((row) => row.date >= range.from);
+    const opening = openings.get(product.id);
+    const closing = round2(opening + net(moved));
+    return product.isActive || opening !== 0 || moved.length ? [{ product: product.name, opening, ...flow(moved), closing }] : [];
+  }));
+  return [section("Store", columns([dateColumn(range)]), rows), totals];
+};
+
+/** The Local sales register: one line per sale, or per month on long periods. */
+const localRegister = (range, localSales, products) => {
+  const sold = new Set(localSales.flatMap((sale) => sale.items.map((item) => item.product.code)));
+  const known = new Map(products.map((product) => [product.code, product]));
+  const codes = [...LOCAL_SHEET.filter((code) => known.has(code)), ...products.filter((p) => sold.has(p.code) && !LOCAL_SHEET.includes(p.code)).map((p) => p.code)];
+  const columns = codes.map((code) => col(code, known.get(code).name, "number"));
+  const quantities = (items) => Object.fromEntries(codes.map((code) => [code, round2(items.filter((item) => item.product.code === code).reduce((total, item) => total + Number(item.quantity), 0)) || ""]));
+  if (listsEachRecord(range)) {
+    return section("Local sales", [col("date", "Date", "date"), ...columns, col("amount", "Amount", "money"), col("reference", "Ref. Number")],
+      localSales.map((sale) => ({ date: sale.date, ...quantities(sale.items), amount: Number(sale.totalAmount), reference: sale.reference || sale.saleNumber })),
+      [...codes, "amount"]);
+  }
+  const rows = bucketsOf(range).map((bucket) => {
+    const inBucket = localSales.filter((sale) => sale.date >= bucket.from && sale.date < bucket.to);
+    return { date: bucket.label, ...quantities(inBucket.flatMap((sale) => sale.items)), amount: sum(inBucket, "totalAmount") };
+  });
+  return section("Local sales by month", [col("date", "Month"), ...columns, col("amount", "Amount", "money")], rows, [...codes, "amount"]);
+};
+
 const sales = async (db, range) => {
   const span = within(range);
-  const [received, localSales, dispatches, damages, payments, stock] = await Promise.all([
-    db.productTransfer.findMany({ where: { date: span, status: "received" }, include: { items: { include: { product: true } } } }),
-    db.sale.findMany({ where: { date: span }, include: { items: { include: { product: true } }, customer: true }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+  const [localSales, dispatches, records, payments, products, movements] = await Promise.all([
+    db.sale.findMany({ where: { date: span }, include: { items: { include: { product: true } } }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
     db.vehicleDispatch.findMany({ where: { date: span }, include: { vehicle: true, items: { include: { product: true } } }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
-    db.damageReplacement.findMany({ where: { date: span }, include: { product: true, customer: true }, orderBy: { date: "asc" } }),
+    db.damageReplacement.findMany({ where: { date: span }, include: { product: true, dispatch: { include: { vehicle: true } } }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
     db.salePayment.findMany({ where: { date: span }, include: { sale: true } }),
-    stockSummary(db, "sales", { upTo: range.asAt }),
+    db.product.findMany({ orderBy: { name: "asc" } }),
+    db.stockMovement.groupBy({ by: ["productId", "date", "movementType"], where: { location: "sales", date: { lt: range.to } }, _sum: { quantity: true } }),
   ]);
-  const products = new Map();
-  const bump = (product, key, quantity) => {
-    const entry = products.get(product.name) || { product: product.name, received: 0, local: 0, dispatched: 0, returned: 0, vehicleSold: 0, damaged: 0 };
-    entry[key] = round2(entry[key] + Number(quantity));
-    products.set(product.name, entry);
-  };
-  received.forEach((t) => t.items.forEach((i) => bump(i.product, "received", i.quantity)));
-  localSales.forEach((s) => s.items.forEach((i) => bump(i.product, "local", i.quantity)));
-  dispatches.forEach((d) => d.items.forEach((i) => {
-    bump(i.product, "dispatched", i.quantityDispatched);
-    bump(i.product, "returned", i.quantityReturned);
-    bump(i.product, "vehicleSold", i.quantitySold);
-  }));
-  damages.forEach((d) => bump(d.product, "damaged", d.quantity));
 
   const reconciled = dispatches.filter((d) => d.status === "reconciled");
   const handedIn = (rows) => round2(sum(rows, "cashReturned") + sum(rows, "mpesaReturned"));
@@ -246,6 +388,7 @@ const sales = async (db, range) => {
   const vehicleExpected = sum(reconciled, "expectedAmount");
   const vehicleCollected = handedIn(reconciled);
   const collectedLocal = sum(payments, "amount");
+  const losses = records.filter((r) => ["damage", "replacement"].includes(r.recordType));
 
   const perVehicle = new Map();
   for (const d of reconciled) {
@@ -266,17 +409,18 @@ const sales = async (db, range) => {
       { label: "Vehicle money handed in", value: vehicleCollected, type: "money" },
       { label: "Vehicle shortage / excess", value: round2(vehicleCollected - vehicleExpected), type: "money" },
       { label: "Vehicles not yet reconciled", value: dispatches.length - reconciled.length },
-      { label: "Damage / replacement value", value: sum(damages, "value"), type: "money" },
+      { label: "Damage / replacement value", value: sum(losses, "value"), type: "money" },
     ],
     sections: [
+      vehicleRegister(range, dispatches),
+      ...storeRegister(range, products, movements),
+      localRegister(range, localSales, products),
       breakdown(range, "Sales", [col("local", "Local sales", "money"), col("collected", "Collected at counter", "money"), col("expected", "Vehicle sales (expected)", "money"), col("handedIn", "Vehicle money handed in", "money")],
         { sales: { rows: localSales, date: "date" }, payments: { rows: payments, date: "date" }, vehicles: { rows: reconciled, date: "date" } },
         (r) => ({ local: sum(r.sales, "totalAmount"), collected: sum(r.payments, "amount"), expected: sum(r.vehicles, "expectedAmount"), handedIn: handedIn(r.vehicles) }),
         ["local", "collected", "expected", "handedIn"]),
-      section("Product movement", [col("product", "Product"), col("received", "From MVA", "number"), col("local", "Local sales", "number"), col("dispatched", "To vehicles", "number"), col("returned", "Returned", "number"), col("vehicleSold", "Sold by vehicles", "number"), col("damaged", "Damaged / replaced", "number")],
-        [...products.values()]),
       listsEachRecord(range)
-        ? section("Vehicles", [col("date", "Date", "date"), col("dispatchNumber", "Dispatch"), col("vehicle", "Vehicle"), col("crew", "Crew"), col("status", "Status"), col("expected", "Expected", "money"), col("handedIn", "Handed in", "money"), col("variance", "Variance", "money")],
+        ? section("Vehicle trips and money", [col("date", "Date", "date"), col("dispatchNumber", "Dispatch"), col("vehicle", "Vehicle"), col("crew", "Crew"), col("status", "Status"), col("expected", "Expected", "money"), col("handedIn", "Handed in", "money"), col("variance", "Variance", "money")],
           dispatches.map((d) => ({
             date: d.date,
             dispatchNumber: d.dispatchNumber,
@@ -287,21 +431,20 @@ const sales = async (db, range) => {
             handedIn: round2(Number(d.cashReturned) + Number(d.mpesaReturned)),
             variance: Number(d.variance),
           })), ["expected", "handedIn", "variance"])
-        : section("Vehicles", [col("vehicle", "Vehicle"), col("trips", "Trips reconciled", "number"), col("expected", "Expected", "money"), col("handedIn", "Handed in", "money"), col("variance", "Variance", "money")],
+        : section("Vehicle trips and money", [col("vehicle", "Vehicle"), col("trips", "Trips reconciled", "number"), col("expected", "Expected", "money"), col("handedIn", "Handed in", "money"), col("variance", "Variance", "money")],
           [...perVehicle.values()], ["trips", "expected", "handedIn", "variance"]),
-      listsEachRecord(range) && section("Local sales", [col("date", "Date", "date"), col("saleNumber", "Sale"), col("customer", "Customer"), col("items", "Items"), col("method", "Payment"), col("total", "Total", "money"), col("paid", "Paid", "money")],
-        localSales.map((s) => ({
-          date: s.date,
-          saleNumber: s.saleNumber,
-          customer: s.customer?.name || s.customerName || "Walk-in",
-          items: s.items.map((i) => `${i.product.name} ${Number(i.quantity)}`).join(", "),
-          method: optionLabel("paymentMethods", s.paymentMethod),
-          total: Number(s.totalAmount),
-          paid: Number(s.amountPaid),
-        })), ["total", "paid"]),
-      section("Damages and replacements", [col("date", "Date", "date"), col("recordNumber", "Record"), col("type", "Type"), col("product", "Product"), col("quantity", "Qty", "number"), col("customer", "Customer"), col("reason", "Reason"), col("value", "Value", "money")],
-        damages.map((d) => ({ date: d.date, recordNumber: d.recordNumber, type: optionLabel("damageTypes", d.recordType), product: d.product.name, quantity: Number(d.quantity), customer: d.customer?.name || d.customerName || "", reason: d.reason, value: Number(d.value) })), ["value"]),
-      section(`Sales stock at ${dayText(range.asAt)}`, [col("name", "Product"), col("unit", "Unit"), col("onHand", "On hand", "number"), col("unitPrice", "Price", "money")], stock),
+      section("Damages, replacements, returns and office use", [col("date", "Date", "date"), col("recordNumber", "Record"), col("type", "Type"), col("where", "Where"), col("product", "Product"), col("quantity", "Qty", "number"), col("customer", "Customer"), col("reason", "Reason"), col("value", "Value", "money")],
+        records.map((r) => ({
+          date: r.date,
+          recordNumber: r.recordNumber,
+          type: optionLabel("damageTypes", r.recordType),
+          where: r.dispatch ? r.dispatch.vehicle.registrationNumber : "Store",
+          product: r.product.name,
+          quantity: Number(r.quantity),
+          customer: r.customerName || "",
+          reason: r.reason || "",
+          value: ["damage", "replacement"].includes(r.recordType) ? Number(r.value) : "",
+        })), ["value"]),
     ].filter(Boolean),
   };
 };

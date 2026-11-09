@@ -1,14 +1,13 @@
 import axios from "axios";
+import { forgetToken, getToken } from "./session";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "http://localhost:5000/api",
   headers: { "Content-Type": "application/json" },
 });
 
-export const TOKEN_KEY = "keiyian_token";
-
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem(TOKEN_KEY);
+  const token = getToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
@@ -18,7 +17,7 @@ api.interceptors.response.use(
   (error) => {
     const status = error.response?.status;
     if (status === 401) {
-      localStorage.removeItem(TOKEN_KEY);
+      forgetToken();
       window.dispatchEvent(new Event("keiyian:unauthorized"));
     }
     if (status === 428) window.dispatchEvent(new Event("keiyian:password-change"));

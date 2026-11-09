@@ -61,7 +61,7 @@ export const OPTIONS = {
   contractTypes: list([["permanent", "Permanent"], ["fixed_term", "Fixed term"], ["casual", "Casual"], ["probation", "Probation"]]),
   contractStatus: list([["active", "Active"], ["expired", "Expired"], ["renewed", "Renewed"], ["terminated", "Terminated"]]),
   salaryReviewTypes: list([["promotion", "Promotion"], ["annual_review", "Annual review"], ["adjustment", "Adjustment"], ["demotion", "Demotion"]]),
-  payrollStatus: list([["draft", "Draft"], ["approved", "Approved"], ["paid", "Paid"]]),
+  payrollStatus: list([["with_finance", "With Finance"], ["paid", "Paid"]]),
   disciplinaryActions: list([
     ["verbal_warning", "Verbal warning"],
     ["warning_letter", "Warning letter"],
@@ -79,7 +79,31 @@ export const OPTIONS = {
     ["death", "Death"],
   ]),
   clearanceStatus: list([["pending", "Pending"], ["cleared", "Cleared"]]),
+  dairies: list([["dairy_a", "Dairy A"], ["dairy_c", "Dairy C"]]),
+  // Where a day's milk can go, in the order of the production sheet.
+  allocationDestinations: list([
+    ["mala", "Mala"],
+    ["yoghurt", "Yoghurt"],
+    ["nkcc", "NKCC"],
+    ["own_use", "Own use"],
+    ["local_sale", "L.Sale"],
+    ["staff", "Staff"],
+    ["police", "Police"],
+    ["school", "School"],
+    ["spoilage", "Spoilage"],
+  ]),
   memberStatus: list([["active", "Active"], ["deceased", "Deceased"], ["succeeded", "Succeeded"], ["withdrawn", "Withdrawn"]]),
+  successionReasons: list([["death", "Death"], ["old_age", "Old age"], ["other", "Other reason"]]),
+  advertStatus: list([["open", "Open"], ["closed", "Closed"], ["filled", "Filled"], ["cancelled", "Cancelled"]]),
+  applicantStages: list([
+    ["applied", "Applied"],
+    ["shortlisted", "Shortlisted"],
+    ["interview", "Interview scheduled"],
+    ["passed", "Passed interview"],
+    ["hired", "Hired"],
+    ["rejected", "Not successful"],
+  ]),
+  interviewResults: list([["passed", "Passed"], ["failed", "Not successful"]]),
   memberPaymentTypes: list([["dividend", "Dividend"], ["bonus", "Bonus"], ["other", "Other"]]),
 
   animalSex: list([["female", "Female"], ["male", "Male"]]),
@@ -98,11 +122,10 @@ export const OPTIONS = {
   transferStatus: list([["sent", "Sent"], ["received", "Received"]]),
 
   supplierStatus: list([["active", "Active"], ["inactive", "Inactive"]]),
-  customerTypes: list([["individual", "Individual"], ["shop", "Shop"], ["hotel", "Hotel"], ["institution", "Institution"]]),
   saleStatus: list([["paid", "Paid"], ["partial", "Partly paid"], ["credit", "Credit"]]),
   vehicleStatus: list([["active", "Active"], ["inactive", "Inactive"]]),
   dispatchStatus: list([["dispatched", "On the road"], ["reconciled", "Reconciled"]]),
-  damageTypes: list([["damage", "Damage / write-off"], ["replacement", "Customer replacement"]]),
+  damageTypes: list([["damage", "Damage"], ["replacement", "Customer replacement"], ["vehicle_return", "Return from vehicle"], ["office", "Office use"]]),
 
   storeCategories: list([
     ["animal_feeds", "Animal feeds"],
@@ -154,10 +177,19 @@ export const optionLabel = (name, value) =>
 
 /// Products MVA makes and Sales sells. Seeded on start-up if missing.
 export const DEFAULT_PRODUCTS = [
-  { code: "RAW_MILK", name: "Raw milk", unit: "litres", unitPrice: 60 },
-  { code: "FRESH_MILK", name: "Fresh milk", unit: "litres", unitPrice: 80 },
-  { code: "MALA", name: "Mala", unit: "litres", unitPrice: 120 },
-  { code: "YOGHURT", name: "Yoghurt", unit: "litres", unitPrice: 150 },
+  { code: "RAW_MILK", name: "Raw milk", unit: "litres", localPrice: 60, vehiclePrice: 60 },
+  { code: "FRESH_MILK", name: "Fresh milk", unit: "litres", localPrice: 80, vehiclePrice: 80 },
+  { code: "MALA", name: "Mala", unit: "pieces", localPrice: 120, vehiclePrice: 120 },
+  // Yoghurt is sold by pack size. Sales sets these prices under Prices.
+  { code: "YOGHURT_500", name: "Yoghurt 500 ml", unit: "pieces", localPrice: 0, vehiclePrice: 0 },
+  { code: "YOGHURT_250", name: "Yoghurt 250 ml", unit: "pieces", localPrice: 0, vehiclePrice: 0 },
+  { code: "YOGHURT_150", name: "Yoghurt 150 ml", unit: "pieces", localPrice: 0, vehiclePrice: 0 },
 ];
 
 export const RAW_MILK = "RAW_MILK";
+
+// How MVA's production sheets work out litres and expected losses.
+export const KG_TO_LITRES = 0.968;
+export const MALA_YIELD = 0.96;
+export const YOGHURT_YIELD = 0.97;
+export const PACK_LITRES = { MALA: 0.5, YOGHURT_500: 0.5, YOGHURT_250: 0.25, YOGHURT_150: 0.15 };

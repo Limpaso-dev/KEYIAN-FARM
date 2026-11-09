@@ -114,14 +114,12 @@ const issues = {
 
 const StoresPage = () => (
   <ModulePage
-    title="Stores"
-    description="Animal feeds, MVA processing tools, farm tools and fertilisers, transport and construction materials."
-    tabs={[
-      { key: "items", label: "Items", show: (c) => c.can("storeItems"), render: () => <ResourcePage config={items} /> },
-      { key: "issues", label: "Issues", show: (c) => c.can("storeIssues"), render: () => <ResourcePage config={issues} /> },
-      { key: "receipts", label: "Goods received", show: (c) => c.can("storeReceipts"), render: () => <ResourcePage config={receipts} /> },
-      { key: "orders", label: "Purchase orders", show: (c) => c.can("purchaseOrders", "receive"), render: () => <ResourcePage config={purchaseOrdersConfig} /> },
-    ]}
+    sections={{
+      items: () => <ResourcePage config={items} />,
+      issues: () => <ResourcePage config={issues} />,
+      receipts: () => <ResourcePage config={receipts} />,
+      orders: () => <ResourcePage config={purchaseOrdersConfig} />,
+    }}
   />
 );
 

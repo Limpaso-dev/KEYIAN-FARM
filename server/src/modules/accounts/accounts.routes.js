@@ -101,12 +101,29 @@ router.use("/transactions", crud({
 }));
 
 // ---------------------------------------------------------------------
+// Farmers' ID and payment details. MVA registers the farmer (name and
+// number); these details are kept by Accounts and hidden from MVA.
+// ---------------------------------------------------------------------
+router.use("/farmers", crud({
+  resource: "farmerDetails",
+  model: "milkSupplier",
+  label: "Farmer",
+  fields: {},
+  updateFields: { nationalId: "string", phone: "string", location: "string", paymentMethod: "option:paymentMethods!", bankName: "string", accountNumber: "string" },
+  create: false,
+  remove: false,
+  search: ["firstName", "lastName", "nationalId", "accountNumber"],
+  filters: ["status", "paymentMethod"],
+  orderBy: { supplierNumber: "asc" },
+}));
+
+// ---------------------------------------------------------------------
 // Farmer milk payments (Members payment). A run collects every unpaid
 // delivery in the period, totals it per farmer, and is paid in one go.
 // ---------------------------------------------------------------------
 const runInclude = {
   lines: {
-    include: { supplier: { select: { id: true, supplierNumber: true, firstName: true, lastName: true, paymentMethod: true, paymentDetails: true } } },
+    include: { supplier: { select: { id: true, supplierNumber: true, firstName: true, lastName: true, paymentMethod: true, bankName: true, accountNumber: true } } },
     orderBy: { supplier: { supplierNumber: "asc" } },
   },
 };

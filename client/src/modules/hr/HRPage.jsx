@@ -2,73 +2,29 @@ import { GitBranch } from "lucide-react";
 import { payroll } from "./payroll";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
-import { Card, Spinner } from "../../components/ui/ui";
+import { Spinner } from "../../components/ui/ui";
 import { ReportTable } from "../../components/reports/ReportDocument";
 import { SystemNote } from "../../components/ui/KeyFigures";
 import { date, fullName, inputDate, money, today } from "../../lib/format";
 import { refs } from "../../lib/refs";
 import { useFetch } from "../../lib/useFetch";
+import { adverts } from "./establishment";
+import { staff, staffPath } from "./staff";
 
 const staffName = (row) => (row.employee ? `${row.employee.staffNumber} - ${fullName(row.employee)}` : "");
 
 // ---------------------------------------------------------------------
-const employeeFields = (ctx, row) => [
-  { name: "staffNumber", label: "Staff number", help: row ? undefined : "Leave blank to number automatically (EMP-0001)" },
-  { name: "firstName", label: "First name", required: true },
-  { name: "lastName", label: "Last name", required: true },
-  { name: "nationalId", label: "National ID" },
-  { name: "gender", label: "Gender", type: "select", options: "gender" },
-  { name: "dateOfBirth", label: "Date of birth", type: "date" },
-  { name: "phone", label: "Phone", type: "tel" },
-  { name: "email", label: "Email", type: "email" },
-  { name: "department", label: "Department", type: "select", options: "departments", required: true },
-  ...(row ? [] : [{ name: "jobTitle", label: "Job title", required: true }]),
-  { name: "employmentType", label: "Employment type", type: "select", options: "employmentTypes", required: true },
-  { name: "dateHired", label: "Date hired", type: "date", required: true },
-  ...(row ? [{ name: "status", label: "Status", type: "select", options: "employeeStatus", help: "Use Terminations to record a staff member leaving" }] : [{ name: "basicSalary", label: "Basic salary (KES)", type: "number", required: true }]),
-  { name: "bankName", label: "Bank" },
-  { name: "bankAccount", label: "Bank account" },
-  { name: "kraPin", label: "KRA PIN" },
-  { name: "address", label: "Address" },
-  { name: "notes", label: "Notes", type: "textarea" },
-];
-
-const staff = {
-  resource: "employees",
-  endpoint: "/hr/employees",
-  title: "Staff register",
-  singular: "Staff member",
-  createLabel: "Add staff",
-  filters: [{ type: "search", placeholder: "Name, staff no., ID, phone" }, { name: "department", label: "Department", options: "departments" }, { name: "status", label: "Status", options: "employeeStatus" }],
-  defaultQuery: { status: "active" },
-  columns: [
-    { key: "staffNumber", label: "Staff no." },
-    { key: "name", label: "Name", render: fullName },
-    { key: "department", label: "Department", type: "option:departments" },
-    { key: "jobTitle", label: "Job title" },
-    { key: "employmentType", label: "Type", type: "option:employmentTypes" },
-    { key: "dateHired", label: "Hired", type: "date" },
-    { key: "basicSalary", label: "Salary", type: "money" },
-    { key: "status", label: "Status", type: "status:employeeStatus" },
-  ],
-  createFields: (ctx) => employeeFields(ctx),
-  editFields: (ctx, row) => employeeFields(ctx, row),
-  toForm: (row) => ({ ...row, dateOfBirth: inputDate(row.dateOfBirth), dateHired: inputDate(row.dateHired) }),
-  createInitial: () => ({ employmentType: "permanent", dateHired: today() }),
-  expand: (row) => (
-    <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
-      {[["National ID", row.nationalId], ["Phone", row.phone], ["Email", row.email], ["Bank", [row.bankName, row.bankAccount].filter(Boolean).join(" ")], ["KRA PIN", row.kraPin], ["System account", row.user ? `${row.user.email}${row.user.isActive ? "" : " (inactive)"}` : "None"], ["Notes", row.notes]].map(([k, v]) => (
-        <div key={k}><dt className="text-xs text-slate-500">{k}</dt><dd className="text-slate-800">{v || "-"}</dd></div>
-      ))}
-    </dl>
-  ),
-};
-
 const contracts = {
   resource: "contracts",
   endpoint: "/hr/contracts",
   title: "Contracts",
+  description: "Every contract on record. A contract is added when a staff member is registered, and renewed from their profile. Click one to open the staff member.",
   singular: "Contract",
+  canCreate: () => false,
+  createFields: null,
+  editFields: false,
+  deletable: false,
+  rowTo: (row) => staffPath(row.employeeId),
   filters: [{ name: "status", label: "Status", options: "contractStatus" }, { name: "contractType", label: "Type", options: "contractTypes" }],
   columns: [
     { key: "contractNumber", label: "Contract" },
@@ -79,25 +35,13 @@ const contracts = {
     { key: "salary", label: "Salary", type: "money" },
     { key: "status", label: "Status", type: "status:contractStatus" },
   ],
-  createFields: [
-    { name: "employeeId", label: "Staff member", type: "select", ref: refs.employees, required: true, span: 2 },
-    { name: "contractType", label: "Contract type", type: "select", options: "contractTypes", required: true },
-    { name: "salary", label: "Salary (KES)", type: "number", required: true },
-    { name: "startDate", label: "Start date", type: "date", required: true },
-    { name: "endDate", label: "End date", type: "date", help: "Leave blank for permanent" },
-    { name: "contractNumber", label: "Contract number", help: "Leave blank to number automatically" },
-    { name: "status", label: "Status", type: "select", options: "contractStatus" },
-    { name: "terms", label: "Terms", type: "textarea" },
-  ],
-  createInitial: () => ({ startDate: today(), status: "active" }),
-  toForm: (row) => ({ ...row, startDate: inputDate(row.startDate), endDate: inputDate(row.endDate) }),
 };
 
 const salaryReviews = {
   resource: "salaryReviews",
   endpoint: "/hr/salary-reviews",
   title: "Salary reviews and promotions",
-  description: "Saving a review updates the staff member's salary and job title.",
+  description: "Saving a review updates the salary everywhere: the staff record, their current contract and any payroll not yet paid.",
   singular: "Salary review",
   createLabel: "Record review",
   editFields: false,
@@ -110,19 +54,23 @@ const salaryReviews = {
     { key: "previousSalary", label: "Previous", type: "money" },
     { key: "newSalary", label: "New", type: "money" },
     { key: "title", label: "Job title", render: (r) => (r.previousJobTitle !== r.newJobTitle ? `${r.previousJobTitle} → ${r.newJobTitle}` : r.newJobTitle) },
+    { key: "group", label: "Job group", render: (r) => (r.previousJobGroup !== r.newJobGroup ? `${r.previousJobGroup || "Not set"} → ${r.newJobGroup}` : r.newJobGroup) },
     { key: "reason", label: "Reason" },
   ],
   createFields: [
-    { name: "employeeId", label: "Staff member", type: "select", ref: refs.employees, required: true, span: 2, onSelect: (e) => (e ? { currentSalary: money(e.basicSalary), currentTitle: e.jobTitle } : {}) },
+    { name: "employeeId", label: "Staff member", type: "select", ref: refs.employees, required: true, span: 2, onSelect: (e) => (e ? { currentSalary: money(e.basicSalary), currentTitle: e.jobTitle, currentGroup: e.jobGroup || "Not set" } : {}) },
     { name: "currentSalary", label: "Current salary", type: "display" },
     { name: "currentTitle", label: "Current job title", type: "display" },
+    { name: "currentGroup", label: "Current job group", type: "display" },
     { name: "reviewType", label: "Review type", type: "select", options: "salaryReviewTypes", required: true },
-    { name: "effectiveDate", label: "Effective date", type: "date", required: true },
+    { name: "effectiveDate", label: "Effective date", type: "date", required: true, help: "Today or earlier. The change applies as soon as you save." },
     { name: "newSalary", label: "New salary (KES)", type: "number", required: true },
     { name: "newJobTitle", label: "New job title", help: "Leave blank to keep the current title" },
+    { name: "newJobGroup", label: "New job group", help: "Leave blank to keep the current group" },
     { name: "reason", label: "Reason", type: "textarea", required: true },
   ],
   createInitial: () => ({ effectiveDate: today(), reviewType: "promotion" }),
+  created: () => "Salary updated on the staff record, current contract and unpaid payroll",
 };
 
 const DisciplinarySummary = () => {
@@ -130,9 +78,9 @@ const DisciplinarySummary = () => {
   if (loading) return <Spinner />;
   if (!data) return null;
   return (
-    <Card className="overflow-hidden">
-      <h2 className="border-b border-slate-200 px-5 py-4 text-[15px] font-semibold text-slate-900">Disciplinary summary</h2>
-      <div className="space-y-6 px-5 py-5">
+    <section>
+      <h2 className="border-b border-slate-200 pb-2.5 text-[15px] font-semibold text-slate-900">Disciplinary summary</h2>
+      <div className="space-y-6 py-5">
         <ReportTable
           narrow
           section={{
@@ -165,10 +113,8 @@ const DisciplinarySummary = () => {
           />
         )}
       </div>
-      <footer className="border-t border-slate-200 bg-slate-50/70 px-5 py-3">
-        <SystemNote />
-      </footer>
-    </Card>
+      <SystemNote className="border-t border-slate-200 pt-3" />
+    </section>
   );
 };
 
@@ -240,6 +186,7 @@ const terminations = {
 };
 
 const memberLine = (m) => `${m.memberNumber} - ${fullName(m)}`;
+const successionReason = (m, ctx) => (m.successionReason === "other" ? m.successionReasonOther : m.successionReason ? ctx.label("successionReasons", m.successionReason) : "Not recorded");
 const members = {
   resource: "members",
   endpoint: "/hr/members",
@@ -275,10 +222,10 @@ const members = {
     {
       key: "succession", label: "Register successor", icon: GitBranch,
       allowed: (ctx) => ctx.can("members", "succession"),
-      when: (r) => r.status !== "succeeded",
+      when: (r) => r.status !== "succeeded" && !r.successors?.length,
       path: (r) => `/hr/members/${r.id}/succession`,
       title: (r) => `Successor to ${memberLine(r)}`,
-      intro: (r) => <p className="text-sm text-slate-600">The successor inherits {r.shares} share(s). {fullName(r)} will be marked as succeeded.</p>,
+      intro: (r) => <p className="text-sm text-slate-600">The successor inherits {r.shares} share(s) and takes the place of {fullName(r)}.</p>,
       fields: [
         { name: "firstName", label: "First name", required: true },
         { name: "lastName", label: "Last name", required: true },
@@ -287,37 +234,59 @@ const members = {
         { name: "nationalId", label: "National ID" },
         { name: "phone", label: "Phone", type: "tel" },
         { name: "memberNumber", label: "New member number", help: "Leave blank to use the original number with a suffix (e.g. P001-1)" },
-        { name: "predecessorStatus", label: "Original member is now", type: "select", options: "memberStatus", optionFilter: (o) => o.value !== "active" },
+        { name: "successionReason", label: "Reason for the succession", type: "select", options: "successionReasons", required: true },
+        { name: "successionReasonOther", label: "State the reason", required: true, showIf: (v) => v.successionReason === "other" },
         { name: "address", label: "Address", span: 2 },
       ],
-      initial: () => ({ successionDate: today(), predecessorStatus: "deceased" }),
+      initial: () => ({ successionDate: today() }),
       success: (m) => `${memberLine(m)} registered as successor`,
     },
   ],
-  expand: (row) => (
+  expand: (row, ctx) => (
     <div className="text-sm">
       <p className="font-medium text-slate-700">Line of succession</p>
       <ul className="mt-1 space-y-0.5 text-slate-600">
-        {row.predecessor && <li>Succeeded {memberLine(row.predecessor)}</li>}
-        {row.successors?.length ? row.successors.map((s) => <li key={s.id}>Succeeded by {memberLine(s)} ({s.relationship}) on {date(s.successionDate)}</li>) : <li>No successors registered</li>}
+        {row.predecessor && <li>Took the place of {memberLine(row.predecessor)} on {date(row.successionDate)}. Reason: {successionReason(row, ctx)}</li>}
+        {row.successors?.length ? row.successors.map((s) => <li key={s.id}>Replaced by {memberLine(s)} ({s.relationship}) on {date(s.successionDate)}. Reason: {successionReason(s, ctx)}</li>) : <li>No successor registered</li>}
       </ul>
     </div>
   ),
 };
 
+const successions = {
+  resource: "members",
+  endpoint: "/hr/members/successions",
+  title: "Succession register",
+  description: "Who took the place of whom, when and why. Successors are registered from the Members list.",
+  singular: "Succession",
+  canCreate: () => false,
+  createFields: null,
+  editFields: false,
+  deletable: false,
+  filters: [{ type: "search", placeholder: "Member name or number" }, { name: "successionReason", label: "Reason", options: "successionReasons" }, { type: "dateRange" }],
+  columns: [
+    { key: "successionDate", label: "Date", type: "date" },
+    { key: "predecessor", label: "Previous member", render: (r) => (r.predecessor ? memberLine(r.predecessor) : "") },
+    { key: "successor", label: "Took their place", render: memberLine },
+    { key: "relationship", label: "Relationship" },
+    { key: "reason", label: "Reason", render: successionReason },
+    { key: "shares", label: "Shares", type: "number" },
+  ],
+};
+
 const HRPage = () => (
   <ModulePage
-    title="HR"
-    description="Staffing, contracts, payroll and salary reviews, discipline, terminations and the members register."
-    tabs={[
-      { key: "staff", label: "Staff", show: (c) => c.can("employees"), render: () => <ResourcePage config={staff} /> },
-      { key: "contracts", label: "Contracts", show: (c) => c.can("contracts"), render: () => <ResourcePage config={contracts} /> },
-      { key: "reviews", label: "Salary reviews", show: (c) => c.can("salaryReviews"), render: () => <ResourcePage config={salaryReviews} /> },
-      { key: "payroll", label: "Payroll", show: (c) => c.can("payroll"), render: () => <ResourcePage config={payroll} /> },
-      { key: "discipline", label: "Disciplinary", show: (c) => c.can("disciplinary"), render: () => <ResourcePage config={disciplinary} header={() => <DisciplinarySummary />} /> },
-      { key: "terminations", label: "Terminations", show: (c) => c.can("terminations"), render: () => <ResourcePage config={terminations} /> },
-      { key: "members", label: "Members", show: (c) => c.can("members"), render: () => <ResourcePage config={members} /> },
-    ]}
+    sections={{
+      staff: () => <ResourcePage config={staff} />,
+      establishment: () => <ResourcePage config={adverts} />,
+      contracts: () => <ResourcePage config={contracts} />,
+      reviews: () => <ResourcePage config={salaryReviews} />,
+      payroll: () => <ResourcePage config={payroll} />,
+      discipline: () => <ResourcePage config={disciplinary} header={() => <DisciplinarySummary />} />,
+      terminations: () => <ResourcePage config={terminations} />,
+      members: () => <ResourcePage config={members} />,
+      succession: () => <ResourcePage config={successions} />,
+    }}
   />
 );
 

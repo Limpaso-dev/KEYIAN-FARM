@@ -16,7 +16,9 @@ export const refs = {
   products: { path: "/sales/products", params: { isActive: "true" }, label: (p) => `${p.name} (${p.unit})` },
   processedProducts: { path: "/sales/products", params: { isActive: "true" }, label: (p) => `${p.name} (${p.unit})`, filter: (p) => p.code !== "RAW_MILK" },
 
-  customers: { path: "/sales/customers", label: (c) => `${c.name}${c.phone ? ` (${c.phone})` : ""}` },
+  // Includes products no longer sold, so leftover stock can still be adjusted.
+  allProducts: { path: "/sales/products", label: (p) => `${p.name} (${p.unit})${p.isActive ? "" : " - no longer sold"}` },
+  openTrips: { path: "/sales/dispatches", params: { status: "dispatched" }, label: (d) => `${d.vehicle?.registrationNumber} - ${d.dispatchNumber}` },
   vehicles: { path: "/sales/vehicles", params: { status: "active" }, label: (v) => `${v.registrationNumber} - ${v.driverName} / ${v.salesPersonName}` },
 
   storeItems: { path: "/stores/items", params: { isActive: "true" }, label: (i) => `${i.code} - ${i.name} (${Number(i.quantityOnHand)} ${i.unit})` },

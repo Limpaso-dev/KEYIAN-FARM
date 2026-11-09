@@ -4,11 +4,15 @@
 // Rules, in order:
 //   * super_admin / admin   - everything except deciding requisitions
 //   * general_manager       - read everything, decide requisitions, reports
-//   * accounts department   - read everything (financial oversight)
 //   * owning department     - read and write; "delete" needs a head
-//   * `read` list           - other departments that may read
+//   * `read` list           - other departments that may read, where their
+//                             own work needs it (Accounts reads payroll to
+//                             pay salaries, and members to pay members)
 //   * `actions`             - extra named actions and which departments may
 //                             perform them (heads only when `headOnly`)
+//
+// Department screens and reports: staff see their own department only; the
+// General Manager and administrators see every department.
 
 const ALL = ["hr", "livestock", "mva", "sales", "stores", "crops", "accounts"];
 
@@ -17,10 +21,12 @@ export const RESOURCES = {
   employees: { dept: "hr" },
   contracts: { dept: "hr" },
   salaryReviews: { dept: "hr" },
-  payroll: { dept: "hr", actions: { approve: { depts: ["hr"], headOnly: true }, pay: { depts: ["accounts"] } } },
+  payroll: { dept: "hr", read: ["accounts"], actions: { pay: { depts: ["accounts"] } } },
   disciplinary: { dept: "hr" },
   terminations: { dept: "hr" },
-  members: { dept: "hr", actions: { succession: { depts: ["hr"] } } },
+  members: { dept: "hr", read: ["accounts"], actions: { succession: { depts: ["hr"] } } },
+  jobAdverts: { dept: "hr" },
+  jobApplicants: { dept: "hr" },
 
   // Livestock
   animals: { dept: "livestock" },
@@ -35,13 +41,13 @@ export const RESOURCES = {
   milkPrices: { dept: "mva" },
   milkDeliveries: { dept: "mva" },
   processingBatches: { dept: "mva" },
+  milkAllocations: { dept: "mva" },
   productTransfers: { dept: "mva", read: ["sales"], actions: { receive: { depts: ["sales"] } } },
   mvaStock: { dept: "mva", read: ["sales"], actions: { adjust: { depts: ["mva"], headOnly: true } } },
 
   // Sales
   products: { dept: "sales", read: ["mva"] },
   salesStock: { dept: "sales", actions: { adjust: { depts: ["sales"], headOnly: true } } },
-  customers: { dept: "sales" },
   sales: { dept: "sales" },
   vehicles: { dept: "sales" },
   dispatches: { dept: "sales", actions: { reconcile: { depts: ["sales"] } } },
@@ -59,7 +65,8 @@ export const RESOURCES = {
   // Accounts (finance + procurement)
   accounts: { dept: "accounts" },
   transactions: { dept: "accounts", actions: { void: { depts: ["accounts"], headOnly: true } } },
-  milkPayments: { dept: "accounts", read: ["mva"], actions: { pay: { depts: ["accounts"] } } },
+  milkPayments: { dept: "accounts", actions: { pay: { depts: ["accounts"] } } },
+  farmerDetails: { dept: "accounts" },
   memberPayments: { dept: "accounts", read: ["hr"] },
   suppliers: { dept: "accounts", read: ["stores"] },
   purchaseOrders: {
@@ -88,7 +95,7 @@ export const can = (user, resource, action = "read") => {
   const dept = user.department;
   if (!dept) return false;
   if (action === "read") {
-    return dept === rule.dept || dept === "accounts" || Boolean(rule.read?.includes(dept));
+    return dept === rule.dept || Boolean(rule.read?.includes(dept));
   }
   if (action === "write") return dept === rule.dept;
   if (action === "delete") return dept === rule.dept && isHead(user);
@@ -110,10 +117,14 @@ export const requisitionRules = {
     Boolean(user?.isActive && (isSystemAdmin(user) || ["stores", "accounts"].includes(user.department))),
 };
 
-// End-of-day reports: your own department; GM, admins and Accounts see all.
-export const canReadReport = (user, department) =>
+// A department's screens and reports: its own staff; the General Manager and
+// administrators see every department. (Accounts sees every requisition
+// because it approves and fulfils them - see requisitionRules.)
+export const canOpenDepartment = (user, department) =>
   Boolean(user?.isActive) &&
-  (isSystemAdmin(user) || isGeneralManager(user) || user.department === "accounts" || user.department === department);
+  (isSystemAdmin(user) || isGeneralManager(user) || user.department === department);
+
+export const canReadReport = canOpenDepartment;
 
 export const canManageUsers = (user) => Boolean(user?.isActive && isSystemAdmin(user));
 
@@ -137,6 +148,7 @@ export const permissionsFor = (user) => {
       decide: requisitionRules.canDecide(user),
       fulfil: requisitionRules.canFulfil(user),
     },
+    departments: ALL.filter((department) => canOpenDepartment(user, department)),
     reports: ALL.filter((department) => canReadReport(user, department)),
     manageUsers: canManageUsers(user),
   };

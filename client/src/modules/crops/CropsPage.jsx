@@ -214,13 +214,11 @@ const harvests = {
 
 const CropsPage = () => (
   <ModulePage
-    title="Crops"
-    description="Sugarcane, tea, coffee and fodder: the farm register, status, harvests and period reports."
-    tabs={[
-      { key: "farms", label: "Farms", show: (c) => c.can("cropFarms"), render: () => <ResourcePage config={farms} /> },
-      { key: "harvests", label: "Harvests", show: (c) => c.can("cropHarvests"), render: () => <ResourcePage config={harvests} /> },
-      { key: "reports", label: "Reports", show: (c) => c.can("cropFarms"), render: () => <CropReports /> },
-    ]}
+    sections={{
+      farms: () => <ResourcePage config={farms} />,
+      harvests: () => <ResourcePage config={harvests} />,
+      reports: () => <CropReports />,
+    }}
   />
 );
 

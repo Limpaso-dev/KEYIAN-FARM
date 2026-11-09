@@ -10,6 +10,8 @@ import { Spinner } from "../components/ui/ui";
 
 // Department screens load on demand to keep the first load small.
 const HRPage = lazy(() => import("../modules/hr/HRPage"));
+const StaffProfile = lazy(() => import("../modules/hr/StaffProfile"));
+const AdvertPage = lazy(() => import("../modules/hr/AdvertPage"));
 const LivestockPage = lazy(() => import("../modules/livestock/LivestockPage"));
 const MvaPage = lazy(() => import("../modules/mva/MvaPage"));
 const SalesPage = lazy(() => import("../modules/sales/SalesPage"));
@@ -31,6 +33,8 @@ const AppRoutes = () => (
         <Route path="/dashboard" element={<Dashboard />} />
         {[
           ["/hr", HRPage],
+          ["/hr/staff/:id", StaffProfile],
+          ["/hr/establishment/:id", AdvertPage],
           ["/livestock", LivestockPage],
           ["/mva", MvaPage],
           ["/sales", SalesPage],

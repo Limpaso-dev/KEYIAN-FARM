@@ -3,7 +3,6 @@ import { milkTransfers as transfers } from "./milkTransfers";
 import { ActionButton } from "../../components/resource/ActionButton";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
-import { Card } from "../../components/ui/ui";
 import { KeyFigures } from "../../components/ui/KeyFigures";
 import { get } from "../../lib/api";
 import { daysAgo, inputDate, nairobiHour, number, today } from "../../lib/format";
@@ -173,17 +172,14 @@ const MilkTotals = () => {
   const litres = todayRows.reduce((s, r) => s + r.litres, 0);
   const sent = todayRows.reduce((s, r) => s + r.sentToMva, 0);
   return (
-    <Card className="overflow-hidden">
-      <KeyFigures
-        bare
-        items={[
-          { label: "Milk today", value: `${number(litres)} L` },
-          { label: "Sent to MVA today", value: `${number(sent)} L` },
-          { label: "Not yet sent", value: `${number(litres - sent)} L`, tone: litres - sent > 0 ? "warn" : undefined },
-          { label: "Last 7 days", value: `${number(rows.reduce((s, r) => s + r.litres, 0))} L` },
-        ]}
-      />
-    </Card>
+    <KeyFigures
+      items={[
+        { label: "Milk today", value: `${number(litres)} L` },
+        { label: "Sent to MVA today", value: `${number(sent)} L` },
+        { label: "Not yet sent", value: `${number(litres - sent)} L`, tone: litres - sent > 0 ? "warn" : undefined },
+        { label: "Last 7 days", value: `${number(rows.reduce((s, r) => s + r.litres, 0))} L` },
+      ]}
+    />
   );
 };
 
@@ -219,16 +215,14 @@ const milkRecords = {
 
 const LivestockPage = () => (
   <ModulePage
-    title="Livestock"
-    description="Herd register, calvings and lactations, vaccinations, disease and herd health, milk records and milk sent to MVA."
-    tabs={[
-      { key: "herd", label: "Herd", show: (c) => c.can("animals"), render: () => <ResourcePage config={animals} /> },
-      { key: "lactations", label: "Calvings & lactations", show: (c) => c.can("lactations"), render: () => <ResourcePage config={lactations} /> },
-      { key: "vaccinations", label: "Vaccinations", show: (c) => c.can("vaccinations"), render: () => <ResourcePage config={vaccinations} /> },
-      { key: "health", label: "Health", show: (c) => c.can("healthRecords"), render: () => <ResourcePage config={health} /> },
-      { key: "milk", label: "Milk records", show: (c) => c.can("milkRecords"), render: () => <ResourcePage config={milkRecords} header={() => <MilkTotals />} /> },
-      { key: "transfers", label: "To MVA", show: (c) => c.can("milkTransfers"), render: () => <ResourcePage config={transfers} /> },
-    ]}
+    sections={{
+      herd: () => <ResourcePage config={animals} />,
+      lactations: () => <ResourcePage config={lactations} />,
+      vaccinations: () => <ResourcePage config={vaccinations} />,
+      health: () => <ResourcePage config={health} />,
+      milk: () => <ResourcePage config={milkRecords} header={() => <MilkTotals />} />,
+      transfers: () => <ResourcePage config={transfers} />,
+    }}
   />
 );
 

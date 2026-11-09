@@ -1,28 +1,27 @@
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
-import { findNavItem, NAV_GROUPS } from "../../navigation";
-import { EmptyState, PageHeader, Tabs } from "../ui/ui";
+import { currentSection, findNavItem } from "../../navigation";
+import { EmptyState, PageHeader } from "../ui/ui";
 
 /**
- * A department page made of tabs. Each tab: { key, label, show?(ctx), render(ctx) }.
- * The open tab is kept in the URL (?tab=...) so it survives refresh.
+ * A department page. Its sections are listed under the department in the
+ * sidebar (navigation.js says which users see which); the page shows only the
+ * section chosen there, named in the address (?tab=...) so it survives a
+ * refresh, under a heading of department and section.
+ *
+ * sections: { [key]: () => content }, one for each section key in navigation.js.
  */
-export const ModulePage = ({ title, description, tabs, actions }) => {
+export const ModulePage = ({ sections }) => {
   const auth = useAuth();
-  const { pathname } = useLocation();
-  const [params, setParams] = useSearchParams();
+  const { pathname, search } = useLocation();
   const nav = findNavItem(pathname);
-  const group = NAV_GROUPS.find((g) => g.key === nav?.group);
-  const visible = tabs.filter((tab) => !tab.show || tab.show(auth));
-  const active = visible.find((tab) => tab.key === params.get("tab")) || visible[0];
+  const active = currentSection(nav, auth, search);
+  const render = active && sections[active.key];
   return (
     <div>
-      <PageHeader title={title} description={description} actions={actions} icon={nav?.icon} eyebrow={group?.key === "departments" ? "Department" : group?.label} />
-      {visible.length > 1 && (
-        <Tabs tabs={visible} active={active?.key} onChange={(key) => setParams({ tab: key }, { replace: true })} />
-      )}
-      {active
-        ? <div key={active.key} className="animate-fade-in">{active.render(auth)}</div>
+      <PageHeader icon={nav?.icon} eyebrow={active ? nav?.label : "Department"} title={active?.label || nav?.label} />
+      {render
+        ? <div key={active.key} className="animate-fade-in">{render()}</div>
         : <EmptyState title="No access">You do not have access to any part of this department.</EmptyState>}
     </div>
   );

@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowDownRight, ArrowRight, ArrowUpRight, CheckCircle2, ChevronRight, FileBarChart2 } from "lucide-react";
 import { ColumnChart } from "../components/charts/ColumnChart";
-import { Alert, Badge, Card, Skeleton } from "../components/ui/ui";
+import { Alert, Badge, Skeleton } from "../components/ui/ui";
+import { KeyFigures } from "../components/ui/KeyFigures";
 import { useAuth } from "../context/useAuth";
 import { cx } from "../lib/cx";
 import { compactMoney, date, greeting, lastDays, money, number, shortDate, timeAgo, today, weekday } from "../lib/format";
 import { useFetch } from "../lib/useFetch";
-import { navForDepartment, navigation } from "../navigation";
+import { navForDepartment, navigation, opensDepartment } from "../navigation";
 
 const DAYS = 14;
 
@@ -66,61 +67,43 @@ const Change = ({ now, before }) => {
   );
 };
 
-const XL_COLS = { 1: "xl:grid-cols-1", 2: "xl:grid-cols-2", 3: "xl:grid-cols-3", 4: "xl:grid-cols-4" };
-/** Hairlines between cells: stacked on phones, 2 x 2 on tablets, one row on desktop. */
-const cellEdges = (i) => cx(
-  "border-slate-100",
-  i === 1 && "border-t sm:border-t-0",
-  i >= 2 && "border-t xl:border-t-0",
-  i % 2 === 1 && "sm:border-l",
-  i % 2 === 0 && i > 0 && "xl:border-l",
-);
-
-/** One card, up to four figures divided by hairlines - read left to right like a statement. */
-const KpiStrip = ({ items, loading }) => (
-  <Card className="overflow-hidden">
-    <dl className={cx("grid grid-cols-1 sm:grid-cols-2", XL_COLS[loading ? 4 : Math.max(1, items.length)])}>
-      {loading
-        ? [0, 1, 2, 3].map((i) => <div key={i} className={cx("space-y-2.5 px-5 py-5", cellEdges(i))}><Skeleton className="h-3.5 w-28" /><Skeleton className="h-7 w-32" /><Skeleton className="h-3 w-24" /></div>)
-        : items.map((k, i) => (
-          <div key={k.label} title={k.title} className={cx("px-5 py-5", cellEdges(i))}>
-            <dt className="text-[13px] font-medium text-slate-500">{k.label}</dt>
-            <dd className={cx("mt-1.5 text-2xl font-semibold tracking-tight tabular-nums", k.negative ? "text-rose-700" : "text-slate-900")}>{k.value}</dd>
-            <dd className="mt-1.5 text-xs">{k.foot}</dd>
-          </div>
-        ))}
-    </dl>
-  </Card>
-);
-
-const Panel = ({ title, description, aside, children, className, footer }) => (
-  <Card className={cx("flex flex-col", className)}>
-    <div className="flex items-start justify-between gap-4 px-5 pb-1 pt-4">
+/**
+ * A block of the dashboard: a heading row over a hairline, then its content.
+ * Figures and lists sit on the page in ruled sections like this - never in
+ * rounded boxes.
+ */
+const Section = ({ title, description, aside, children, footer, className }) => (
+  <section className={cx("min-w-0", className)}>
+    <div className="flex items-end justify-between gap-4 border-b border-slate-200 pb-2.5">
       <div className="min-w-0">
         <h2 className="text-[15px] font-semibold text-slate-900">{title}</h2>
         {description && <p className="mt-0.5 text-xs text-slate-500">{description}</p>}
       </div>
       {aside}
     </div>
-    <div className="flex-1">{children}</div>
+    {children}
     {footer}
-  </Card>
+  </section>
 );
 
-const ChartPanel = ({ title, description, total, loading, children, className }) => (
-  <Panel
+const ChartSection = ({ title, description, total, loading, children, className }) => (
+  <Section
     title={title}
     description={description}
     className={className}
     aside={total && (
       <div className="shrink-0 text-right">
-        <p className="text-lg font-semibold tracking-tight tabular-nums text-slate-900">{total.value}</p>
+        <p className="text-lg font-semibold leading-6 tracking-tight tabular-nums text-slate-900">{total.value}</p>
         <p className="text-xs text-slate-500">{total.label}</p>
       </div>
     )}
   >
-    <div className="px-5 pb-4 pt-3">{loading ? <Skeleton className="h-[240px] w-full" /> : children}</div>
-  </Panel>
+    <div className="pt-4">{loading ? <Skeleton className="h-[240px] w-full" /> : children}</div>
+  </Section>
+);
+
+const ListSkeleton = ({ rows, height }) => (
+  <div className="space-y-2 py-3">{Array.from({ length: rows }, (_, i) => <Skeleton key={i} className={height} />)}</div>
 );
 
 const SEVERITY = {
@@ -130,15 +113,13 @@ const SEVERITY = {
 };
 
 const NeedsAttention = ({ items, loading }) => (
-  <Panel title="Needs attention" description={items.length ? `${items.length} ${plural(items.length, "item")} waiting on you or your teams` : "Items waiting on you or your teams"}>
-    {loading ? (
-      <div className="space-y-2 px-5 py-4">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-10" />)}</div>
-    ) : items.length ? (
-      <ul className="mt-2 divide-y divide-slate-100 border-t border-slate-100">
+  <Section title="Needs attention" description={items.length ? `${items.length} ${plural(items.length, "item")} waiting on you or your teams` : "Items waiting on you or your teams"}>
+    {loading ? <ListSkeleton rows={3} height="h-10" /> : items.length ? (
+      <ul>
         {items.map((item) => (
-          <li key={item.key}>
-            <Link to={item.to} className="group flex items-center gap-3 px-5 py-3 transition hover:bg-slate-50">
-              <span className={cx("min-w-[2.75rem] shrink-0 rounded-md px-1.5 py-1 text-center text-xs font-semibold tabular-nums ring-1 ring-inset", SEVERITY[item.severity])}>{item.count}</span>
+          <li key={item.key} className="border-b border-slate-200">
+            <Link to={item.to} className="group -mx-2 flex items-center gap-3 px-2 py-3 transition-colors hover:bg-white">
+              <span className={cx("min-w-[2.75rem] shrink-0 rounded px-1.5 py-1 text-center text-xs font-semibold tabular-nums ring-1 ring-inset", SEVERITY[item.severity])}>{item.count}</span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-medium text-slate-800">{item.title}</span>
                 {item.detail && <span className="block truncate text-xs text-slate-500">{item.detail}</span>}
@@ -149,22 +130,20 @@ const NeedsAttention = ({ items, loading }) => (
         ))}
       </ul>
     ) : (
-      <div className="flex items-center gap-3 px-5 pb-5 pt-3">
+      <div className="flex items-center gap-3 border-b border-slate-200 py-3.5">
         <CheckCircle2 size={18} className="shrink-0 text-emerald-600" aria-hidden />
         <p className="text-sm text-slate-600">All clear. Nothing is waiting on you right now.</p>
       </div>
     )}
-  </Panel>
+  </Section>
 );
 
 const RecentActivity = ({ items, loading }) => (
-  <Panel title="Recent activity" description="Latest entries across your departments">
-    {loading ? (
-      <div className="space-y-2 px-5 py-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-9" />)}</div>
-    ) : items.length ? (
-      <ul className="mt-2 divide-y divide-slate-100 border-t border-slate-100">
+  <Section title="Recent activity" description="Latest entries across your departments">
+    {loading ? <ListSkeleton rows={4} height="h-9" /> : items.length ? (
+      <ul>
         {items.map((item) => (
-          <li key={item.key} className="flex items-start justify-between gap-3 px-5 py-2.5">
+          <li key={item.key} className="flex items-start justify-between gap-3 border-b border-slate-200 py-2.5">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-slate-800">{item.title}</p>
               <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500">
@@ -181,12 +160,15 @@ const RecentActivity = ({ items, loading }) => (
         ))}
       </ul>
     ) : (
-      <p className="px-5 pb-5 pt-3 text-sm text-slate-500">No recent entries yet.</p>
+      <p className="border-b border-slate-200 py-3.5 text-sm text-slate-500">No recent entries yet.</p>
     )}
-  </Panel>
+  </Section>
 );
 
-/** Every department's end-of-day headline figures in one panel, one department at a time. */
+/**
+ * Every department's end-of-day headline figures, one department at a time,
+ * as a ruled two-column table.
+ */
 const DepartmentsToday = ({ cards, className, hide = [] }) => {
   const [picked, setPicked] = useState(null);
   const card = cards.find((c) => c.department === picked) || cards[0];
@@ -194,48 +176,45 @@ const DepartmentsToday = ({ cards, className, hide = [] }) => {
   const metrics = card ? card.summary.filter((s) => cards.length > 1 || !hide.includes(s.label)) : [];
   if (!card || !metrics.length) return null;
   const nav = navForDepartment(card.department);
+  const name = nav?.label || card.title;
   return (
-    <Panel
-      className={className}
-      title={cards.length > 1 ? "Departments today" : metrics.length < card.summary.length ? `More from ${nav?.label || card.title} today` : `${nav?.label || card.title} today`}
-      description="Headline figures from today's department reports"
-      footer={(
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-slate-100 px-5 py-3 text-sm">
-          {nav && <Link to={nav.path} className="inline-flex items-center gap-1 font-medium text-primary-700 hover:text-primary-900 hover:underline">Open {nav.label} <ArrowRight size={14} aria-hidden /></Link>}
-          <Link to={`/reports?department=${card.department}`} className="inline-flex items-center gap-1.5 font-medium text-slate-600 hover:text-slate-900 hover:underline"><FileBarChart2 size={14} aria-hidden /> End-of-day report</Link>
+    <section className={cx("min-w-0", className)}>
+      <h2 className="text-[15px] font-semibold text-slate-900">
+        {cards.length > 1 ? "Departments today" : metrics.length < card.summary.length ? `More from ${name} today` : `${name} today`}
+      </h2>
+      <p className="mt-0.5 text-xs text-slate-500">Headline figures from today&apos;s department reports</p>
+      {cards.length > 1 ? (
+        <div role="tablist" aria-label="Department" className="scrollbar-thin mt-1.5 flex gap-5 overflow-x-auto">
+          {cards.map((c) => {
+            const selected = c.department === card.department;
+            return (
+              <button
+                key={c.department}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setPicked(c.department)}
+                className={cx("whitespace-nowrap border-b-2 py-2 text-[13px] font-medium transition-colors", selected ? "border-primary-700 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-800")}
+              >
+                {navForDepartment(c.department)?.short || navForDepartment(c.department)?.label || c.title}
+              </button>
+            );
+          })}
         </div>
-      )}
-    >
-      {cards.length > 1 && (
-        <div className="scrollbar-thin mt-3 overflow-x-auto px-5">
-          <div role="tablist" aria-label="Department" className="inline-flex min-w-max gap-0.5 rounded-lg bg-slate-100 p-0.5">
-            {cards.map((c) => {
-              const selected = c.department === card.department;
-              return (
-                <button
-                  key={c.department}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  onClick={() => setPicked(c.department)}
-                  className={cx("rounded-md px-3 py-1.5 text-[13px] font-medium transition", selected ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800")}
-                >
-                  {navForDepartment(c.department)?.short || navForDepartment(c.department)?.label || c.title}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      <dl role="tabpanel" className="grid grid-cols-1 gap-x-8 px-5 pb-2 pt-2 sm:grid-cols-2">
+      ) : <div className="mt-2.5" />}
+      <dl role={cards.length > 1 ? "tabpanel" : undefined} className="grid grid-cols-1 gap-x-10 border-t border-slate-200 sm:grid-cols-2">
         {metrics.map((s) => (
-          <div key={s.label} className="flex items-baseline justify-between gap-4 border-b border-slate-100 py-2.5">
-            <dt className="text-[13px] text-slate-500">{s.label}</dt>
+          <div key={s.label} className="flex items-baseline justify-between gap-4 border-b border-slate-200 py-2.5">
+            <dt className="text-[13px] text-slate-600">{s.label}</dt>
             <dd className={cx("text-sm font-semibold tabular-nums", Number(s.value) < 0 ? "text-rose-700" : "text-slate-900")}>{s.type === "money" ? money(s.value) : number(s.value)}</dd>
           </div>
         ))}
       </dl>
-    </Panel>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pt-3 text-sm">
+        {nav && <Link to={nav.path} className="inline-flex items-center gap-1 font-medium text-primary-700 hover:text-primary-900 hover:underline">Open {nav.label} <ArrowRight size={14} aria-hidden /></Link>}
+        <Link to={`/reports?department=${card.department}`} className="inline-flex items-center gap-1.5 font-medium text-slate-600 hover:text-slate-900 hover:underline"><FileBarChart2 size={14} aria-hidden /> End-of-day report</Link>
+      </div>
+    </section>
   );
 };
 
@@ -257,9 +236,11 @@ const Dashboard = () => {
   const dispatches = useFetch(can("dispatches") ? "/sales/dispatches" : null, range);
   const ledger = useFetch(can("transactions") ? "/accounts/transactions" : null, range);
   const requisitions = useFetch(canRequisitions ? "/requisitions" : null);
-  const lowStock = useFetch(can("storeItems") ? "/stores/items/low-stock" : null);
+  // Every department can read store items (for requisitions); the reorder alert is for those who run Stores.
+  const lowStock = useFetch(opensDepartment(auth, "stores") ? "/stores/items/low-stock" : null);
   const vaccinations = useFetch(can("vaccinations") ? "/livestock/vaccinations-due" : null, { days: 7 });
   const contracts = useFetch(can("contracts") ? "/hr/contracts-expiring" : null, { days: 30 });
+  const salaries = useFetch(can("payroll", "pay") ? "/hr/payroll" : null, { status: "with_finance" });
 
   const data = summary.data;
   const req = data?.requisitions;
@@ -315,8 +296,9 @@ const Dashboard = () => {
   if (lowStock.data?.length) attention.push({ key: "stock", severity: "high", count: lowStock.data.length, title: `Store ${plural(lowStock.data.length, "item")} at or below reorder level`, detail: lowStock.data.slice(0, 3).map((i) => i.name).join(", "), to: "/stores?tab=items" });
   if (vaccinations.data?.length) attention.push({ key: "vacc", severity: "medium", count: vaccinations.data.length, title: `${plural(vaccinations.data.length, "Vaccination")} due within 7 days`, detail: vaccinations.data.slice(0, 3).map((v) => `${v.animal?.tagNumber || ""} ${v.vaccine || ""}`.trim()).join(", "), to: "/livestock?tab=vaccinations" });
   if (contracts.data?.length) attention.push({ key: "contracts", severity: "low", count: contracts.data.length, title: `${plural(contracts.data.length, "Contract")} ending within 30 days`, detail: contracts.data.slice(0, 3).map((c) => `${c.employee?.firstName || ""} ${c.employee?.lastName || ""}`.trim()).join(", "), to: "/hr?tab=contracts" });
+  if (salaries.data?.length) attention.push({ key: "salaries", severity: "medium", count: salaries.data.length, title: `Staff ${salaries.data.length === 1 ? "salary" : "salaries"} to pay`, detail: `${money(salaries.data.reduce((sum, line) => sum + line.netPay, 0))} sent by HR`, to: "/accounts?tab=salaries" });
   const onRoad = (dispatches.data || []).filter((d) => d.status === "dispatched" && dayOf(d.date) < day).length;
-  if (onRoad) attention.push({ key: "road", severity: "high", count: onRoad, title: `Vehicle ${plural(onRoad, "trip")} from earlier days not reconciled`, detail: "Record the evening return", to: "/sales?tab=vehicles-out" });
+  if (onRoad) attention.push({ key: "road", severity: "high", count: onRoad, title: `Vehicle ${plural(onRoad, "trip")} from earlier days not reconciled`, detail: "Reconcile the trip under Vehicle sales", to: "/sales?tab=vehicles-out" });
   const unsent = summaryValue(cards, "livestock", "Not yet sent (litres)");
   if (unsent > 0) attention.push({ key: "unsent", severity: "low", count: `${number(unsent, 0)} L`, title: "Today's milk not yet sent to MVA", to: "/livestock?tab=transfers" });
   const variance = summaryValue(cards, "sales", "Vehicle shortage / excess");
@@ -324,7 +306,7 @@ const Dashboard = () => {
 
   // ---- Recent activity ------------------------------------------------
   const activity = [
-    ...(sales.data || []).map((s) => ({ key: `s${s.id}`, at: s.createdAt, kind: "Sale", title: s.customer?.name || s.customerName || "Walk-in customer", detail: s.saleNumber, amount: money(s.totalAmount) })),
+    ...(sales.data || []).map((s) => ({ key: `s${s.id}`, at: s.createdAt, kind: "Sale", title: s.customerName || s.reference || "Local sale", detail: s.saleNumber, amount: money(s.totalAmount) })),
     ...(dispatches.data || []).map((d) => ({ key: `d${d.id}`, at: d.updatedAt || d.createdAt, kind: "Vehicle trip", title: `${d.driverName} · ${d.salesPersonName}`, detail: d.dispatchNumber, badge: <Badge value={d.status}>{label("dispatchStatus", d.status)}</Badge> })),
     ...(ledger.data || []).map((t) => ({ key: `t${t.id}`, at: t.createdAt, kind: t.type === "expense" ? "Expense" : "Income", title: t.description, detail: label(t.type === "income" ? "incomeCategories" : "expenseCategories", t.category), amount: `${t.type === "expense" ? "−" : "+"}${money(t.amount)}`, negative: t.type === "expense" })),
     ...(requisitions.data || []).map((r) => ({ key: `r${r.id}`, at: r.updatedAt || r.createdAt, kind: "Requisition", title: r.title, detail: `${r.requisitionNumber} · ${label("departments", r.department)}`, badge: <Badge value={r.status}>{label("requisitionStatus", r.status)}</Badge> })),
@@ -335,8 +317,8 @@ const Dashboard = () => {
   const hasCharts = showMilk || showSales || showCash;
 
   return (
-    <div className="space-y-6">
-      <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+    <div className="space-y-8">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm text-slate-500">{weekday(day)}, {date(day)}</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{greeting()}, {user?.name?.split(" ")[0] || ""}</h1>
@@ -351,13 +333,20 @@ const Dashboard = () => {
 
       <Alert tone="error">{summary.error}</Alert>
 
-      {(kpis.length > 0 || (summary.loading && !data)) && <KpiStrip items={kpis.slice(0, 4)} loading={summary.loading && !data && !kpis.length} />}
+      {/* Today's headline figures: one ruled strip, read left to right like a statement. */}
+      {(kpis.length > 0 || (summary.loading && !data)) && (
+        <KeyFigures
+          size="lg"
+          loading={summary.loading && !data && !kpis.length ? 4 : 0}
+          items={kpis.slice(0, 4).map((k) => ({ label: k.label, value: k.value, hint: k.foot, title: k.title, tone: k.negative ? "bad" : undefined }))}
+        />
+      )}
 
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-3">
+      <div className="grid grid-cols-1 items-start gap-x-12 gap-y-10 xl:grid-cols-3">
         {/* Main column: trends, then the departments' own figures. */}
-        <div className="min-w-0 space-y-6 xl:col-span-2">
+        <div className="min-w-0 space-y-10 xl:col-span-2">
           {showMilk && (
-            <ChartPanel
+            <ChartSection
               title="Milk intake"
               description={`Litres per day, last ${DAYS} days`}
               loading={(herd.loading && !herd.data) || (farmers.loading && !farmers.data)}
@@ -370,12 +359,12 @@ const Dashboard = () => {
                 series={[...(herd.data ? [{ key: "herd", label: "Own herd" }] : []), ...(farmers.data ? [{ key: "farmers", label: "Local farmers" }] : [])]}
                 format={(v, full) => (full ? litres(v) : number(v, 0))}
               />
-            </ChartPanel>
+            </ChartSection>
           )}
           {(showSales || showCash) && (
-            <div className={cx("grid grid-cols-1 gap-6", showSales && showCash && "lg:grid-cols-2")}>
+            <div className={cx("grid grid-cols-1 gap-x-10 gap-y-10", showSales && showCash && "lg:grid-cols-2")}>
               {showSales && (
-                <ChartPanel title="Sales" description={`Value per day, last ${DAYS} days`} loading={(sales.loading && !sales.data) || (dispatches.loading && !dispatches.data)} total={{ value: compactMoney(total(salesByDay.local) + total(salesByDay.vehicles)), label: `${DAYS}-day total` }}>
+                <ChartSection title="Sales" description={`Value per day, last ${DAYS} days`} loading={(sales.loading && !sales.data) || (dispatches.loading && !dispatches.data)} total={{ value: compactMoney(total(salesByDay.local) + total(salesByDay.vehicles)), label: `${DAYS}-day total` }}>
                   <ColumnChart
                     title="Sales value per day"
                     stacked
@@ -384,10 +373,10 @@ const Dashboard = () => {
                     series={[...(sales.data ? [{ key: "local", label: "Local sales" }] : []), ...(dispatches.data ? [{ key: "vehicles", label: "Vehicle sales" }] : [])]}
                     format={(v, full) => (full ? money(v) : compactMoney(v))}
                   />
-                </ChartPanel>
+                </ChartSection>
               )}
               {showCash && (
-                <ChartPanel title="Income and expenses" description={`Posted entries per day, last ${DAYS} days`} loading={ledger.loading && !ledger.data} total={{ value: compactMoney(total(cashByDay.income) - total(cashByDay.expense)), label: `Net, ${DAYS} days` }}>
+                <ChartSection title="Income and expenses" description={`Posted entries per day, last ${DAYS} days`} loading={ledger.loading && !ledger.data} total={{ value: compactMoney(total(cashByDay.income) - total(cashByDay.expense)), label: `Net, ${DAYS} days` }}>
                   <ColumnChart
                     title="Income and expenses per day"
                     height={220}
@@ -395,15 +384,15 @@ const Dashboard = () => {
                     series={[{ key: "income", label: "Income" }, { key: "expense", label: "Expenses" }]}
                     format={(v, full) => (full ? money(v) : compactMoney(v))}
                   />
-                </ChartPanel>
+                </ChartSection>
               )}
             </div>
           )}
-          {cards.length > 0 ? <DepartmentsToday cards={cards} hide={kpis.slice(0, 4).map((k) => k.label)} /> : !hasCharts && summary.loading && <Skeleton className="h-72 rounded-xl" />}
+          {cards.length > 0 ? <DepartmentsToday cards={cards} hide={kpis.slice(0, 4).map((k) => k.label)} /> : !hasCharts && summary.loading && <Skeleton className="h-72" />}
         </div>
 
         {/* Side column: what needs doing, and what just happened. */}
-        <div className="min-w-0 space-y-6">
+        <div className="min-w-0 space-y-10">
           <NeedsAttention items={attention} loading={summary.loading && !data} />
           {(hasCharts || activity.length > 0) && <RecentActivity items={activity} loading={listsLoading && !activity.length} />}
         </div>

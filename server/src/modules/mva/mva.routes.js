@@ -1,13 +1,15 @@
 import express from "express";
 import prisma from "../../config/prisma.js";
-import { RAW_MILK } from "../../config/catalog.js";
+import { optionLabel, optionValues, RAW_MILK } from "../../config/catalog.js";
 import { allow } from "../../middleware/auth.js";
 import { audit } from "../../lib/audit.js";
-import { crud, inTransaction } from "../../lib/crud.js";
+import { crud, dateRange, inTransaction, listQuery } from "../../lib/crud.js";
 import { badRequest, conflict, notFound, ok } from "../../lib/http.js";
 import { nextNumber } from "../../lib/numbers.js";
+import { isoDay } from "../../lib/periods.js";
 import { moveStock, productByCode } from "../../lib/stock.js";
 import { parseBody, parseItems, round2 } from "../../lib/validate.js";
+import { outputFigures, productionDays } from "./production.js";
 
 const router = express.Router();
 const supplierBrief = { select: { id: true, supplierNumber: true, firstName: true, lastName: true } };
@@ -29,18 +31,15 @@ router.use("/milk-suppliers", crud({
   resource: "milkSuppliers",
   model: "milkSupplier",
   label: "Farmer",
+  // MVA keeps the farmer's name and number; ID and payment details are Accounts'.
   fields: {
     supplierNumber: "int",
     firstName: "string!",
     lastName: "string!",
-    nationalId: "string",
-    phone: "string",
-    location: "string",
-    paymentMethod: "option:paymentMethods",
-    paymentDetails: "string",
     status: "option:supplierStatus",
   },
-  search: ["firstName", "lastName", "phone", "nationalId", "location"],
+  omit: { nationalId: true, phone: true, location: true, paymentMethod: true, bankName: true, accountNumber: true },
+  search: ["firstName", "lastName"],
   filters: ["status"],
   orderBy: { supplierNumber: "asc" },
   prepare: async (data, { tx, existing }) => {
@@ -142,7 +141,7 @@ deliveryRouter.get("/statement", allow("milkDeliveries", "read"), async (req, re
   if (!from || !to) throw badRequest("Choose a from and to date");
   const where = { date: { gte: new Date(from), lte: new Date(to) }, ...(supplierId ? { supplierId } : {}) };
   const groups = await prisma.milkDelivery.groupBy({ by: ["supplierId"], where, _sum: { litres: true, amount: true }, _count: true });
-  const suppliers = await prisma.milkSupplier.findMany({ where: { id: { in: groups.map((g) => g.supplierId) } } });
+  const suppliers = await prisma.milkSupplier.findMany({ where: { id: { in: groups.map((g) => g.supplierId) } }, select: supplierBrief.select });
   const byId = new Map(suppliers.map((s) => [s.id, s]));
   ok(res, groups.map((g) => ({
     supplier: byId.get(g.supplierId),
@@ -180,47 +179,153 @@ router.use("/milk-deliveries", crud({
 }));
 
 // ---------------------------------------------------------------------
-// Processing: raw milk in, Fresh milk / Mala / Yoghurt out.
+// Allocation: where each day's milk goes. There is one record per day, and
+// saving it again changes it. Raw milk stock falls as it is allocated. L.Sale
+// goes to Sales as raw milk, waiting there to be received.
 // ---------------------------------------------------------------------
-const batchRouter = express.Router();
-batchRouter.post("/", allow("processingBatches", "write"), async (req, res) => {
-  const data = parseBody({ date: "date!", rawMilkInput: "decimal!", notes: "text" }, req.body);
-  if (!(data.rawMilkInput > 0)) throw badRequest("Raw milk input must be more than zero");
-  const outputs = parseItems(req.body.outputs, { productId: "id!", quantity: "decimal!" }, { label: "products made" })
-    .filter((line) => line.quantity > 0);
-  if (!outputs.length) throw badRequest("Enter the quantity made for at least one product");
-  const batch = await inTransaction(async (tx) => {
+const allocationRouter = express.Router();
+
+allocationRouter.get("/", allow("milkAllocations", "read"), async (req, res) => {
+  ok(res, (await productionDays(prisma, dateRange("date", req.query))).reverse());
+});
+
+const syncLocalSale = async (tx, allocation, transfer, quantity, rawMilkId) => {
+  const ref = { productId: rawMilkId, location: "mva", date: allocation.date, allowNegative: true };
+  if (transfer?.status === "received") throw conflict("Sales has already received this day's L.Sale milk, so it cannot be changed");
+  if (!transfer) {
+    const created = await tx.productTransfer.create({
+      data: {
+        date: allocation.date,
+        allocationId: allocation.id,
+        transferNumber: await nextNumber(tx, "PTR", allocation.date),
+        notes: "L.Sale allocation",
+        items: { create: [{ productId: rawMilkId, quantity }] },
+      },
+    });
+    await moveStock(tx, { ...ref, quantity: -quantity, movementType: "transfer_to_sales", referenceType: "productTransfer", referenceId: created.id, notes: created.transferNumber });
+    return;
+  }
+  const before = Number(transfer.items[0].quantity);
+  await moveStock(tx, { ...ref, quantity: round2(before - quantity), movementType: "transfer_to_sales", referenceType: "productTransfer", referenceId: transfer.id, notes: `${transfer.transferNumber} changed` });
+  if (quantity > 0) await tx.productTransferItem.update({ where: { id: transfer.items[0].id }, data: { quantity } });
+  else await tx.productTransfer.delete({ where: { id: transfer.id } });
+};
+
+allocationRouter.post("/", allow("milkAllocations", "write"), async (req, res) => {
+  const { date, notes } = parseBody({ date: "date!", notes: "text" }, req.body);
+  const lines = parseItems(req.body.lines, { destination: "option:allocationDestinations!", quantity: "decimal" }, { label: "allocations" });
+  if (new Set(lines.map((line) => line.destination)).size !== lines.length) throw badRequest("List each destination only once");
+  const wanted = new Map(lines.map((line) => [line.destination, round2(line.quantity || 0)]));
+
+  await inTransaction(async (tx) => {
     const rawMilk = await productByCode(tx, RAW_MILK);
-    if (outputs.some((line) => line.productId === rawMilk.id)) throw badRequest("Raw milk cannot be a processing output");
+    const existing = await tx.milkAllocation.findUnique({ where: { date }, include: { lines: true, transfer: { include: { items: true } } } });
+    const before = new Map((existing?.lines || []).map((line) => [line.destination, Number(line.quantity)]));
+    const allocation = existing
+      ? await tx.milkAllocation.update({ where: { id: existing.id }, data: { notes } })
+      : await tx.milkAllocation.create({ data: { date, notes } });
+
+    for (const destination of optionValues("allocationDestinations")) {
+      const quantity = wanted.get(destination) || 0;
+      const change = round2(quantity - (before.get(destination) || 0));
+      if (!change) continue;
+      if (destination === "local_sale") {
+        await syncLocalSale(tx, allocation, existing?.transfer, quantity, rawMilk.id);
+      } else {
+        // A day's allocation can run ahead of its intake; the sheet shows that as variance.
+        await moveStock(tx, {
+          productId: rawMilk.id,
+          location: "mva",
+          quantity: -change,
+          movementType: "allocation",
+          referenceType: "milkAllocation",
+          referenceId: allocation.id,
+          date,
+          notes: `${optionLabel("allocationDestinations", destination)}${existing ? " (changed)" : ""}`,
+          allowNegative: true,
+        });
+      }
+    }
+
+    await tx.milkAllocationLine.deleteMany({ where: { allocationId: allocation.id } });
+    const rows = [...wanted].filter(([, quantity]) => quantity > 0).map(([destination, quantity]) => ({ allocationId: allocation.id, destination, quantity }));
+    if (rows.length) await tx.milkAllocationLine.createMany({ data: rows });
+    else await tx.milkAllocation.delete({ where: { id: allocation.id } });
+    await audit(tx, { user: req.user, action: existing ? "update" : "create", entity: "milkAllocation", entityId: allocation.id, metadata: { date: isoDay(date), lines: rows } });
+  });
+  ok(res, { date: isoDay(date) }, 201);
+});
+
+router.use("/milk-allocations", allocationRouter);
+
+// ---------------------------------------------------------------------
+// Product output: kilograms processed and the pieces made from them. The
+// milk has already left raw stock when it was allocated. Fresh 250 ml packs
+// are made from the School allocation and go to the schools, so they are
+// counted but do not enter stock.
+// ---------------------------------------------------------------------
+const batchInclude = { outputs: { include: { product: productBrief } } };
+const batchRouter = express.Router();
+
+batchRouter.get("/", allow("processingBatches", "read"), async (req, res) => {
+  const { where, take } = listQuery(req.query, { dateField: "date" });
+  const rows = await prisma.processingBatch.findMany({ where, include: batchInclude, orderBy: [{ date: "desc" }, { createdAt: "desc" }], take });
+  ok(res, rows.map((batch) => ({ ...batch, ...outputFigures(batch) })));
+});
+
+batchRouter.post("/", allow("processingBatches", "write"), async (req, res) => {
+  const data = parseBody({ date: "date!", malaKg: "decimal", malaPieces: "int", yoghurtKg: "decimal", yoghurt500: "int", yoghurt250: "int", yoghurt150: "int", fresh250: "int", notes: "text" }, req.body);
+  const packed = [["MALA", data.malaPieces], ["YOGHURT_500", data.yoghurt500], ["YOGHURT_250", data.yoghurt250], ["YOGHURT_150", data.yoghurt150]];
+  if ([...packed.map(([, pieces]) => pieces), data.fresh250].some((pieces) => pieces < 0)) throw badRequest("The number of pieces cannot be negative");
+  const made = packed.filter(([, pieces]) => pieces > 0);
+  if (!made.length && !data.malaKg && !data.yoghurtKg && !data.fresh250) throw badRequest("Enter at least one figure");
+
+  const batch = await inTransaction(async (tx) => {
+    const products = await tx.product.findMany({ where: { code: { in: made.map(([code]) => code) } } });
+    const outputs = made.map(([code, quantity]) => {
+      const product = products.find((p) => p.code === code);
+      if (!product) throw badRequest(`The product ${code} no longer exists`);
+      return { productId: product.id, quantity };
+    });
     const created = await tx.processingBatch.create({
       data: {
-        ...data,
+        date: data.date,
+        notes: data.notes,
         batchNumber: await nextNumber(tx, "BAT", data.date),
+        malaKg: data.malaKg || 0,
+        yoghurtKg: data.yoghurtKg || 0,
+        fresh250: data.fresh250 || 0,
+        rawMilkInput: round2((data.malaKg || 0) + (data.yoghurtKg || 0)),
         outputs: { create: outputs },
       },
-      include: { outputs: { include: { product: productBrief } } },
+      include: batchInclude,
     });
-    const ref = { referenceType: "processingBatch", referenceId: created.id, date: data.date, notes: created.batchNumber };
-    await moveStock(tx, { ...ref, productId: rawMilk.id, location: "mva", quantity: -data.rawMilkInput, movementType: "processing_input" });
     for (const line of outputs) {
-      await moveStock(tx, { ...ref, productId: line.productId, location: "mva", quantity: line.quantity, movementType: "processing_output" });
+      await moveStock(tx, { productId: line.productId, location: "mva", quantity: line.quantity, movementType: "processing_output", referenceType: "processingBatch", referenceId: created.id, date: data.date, notes: created.batchNumber });
     }
     await audit(tx, { user: req.user, action: "create", entity: "processingBatch", entityId: created.id, after: created });
     return created;
   });
   ok(res, batch, 201);
 });
+
 router.use("/processing-batches", crud({
   router: batchRouter,
   resource: "processingBatches",
   model: "processingBatch",
+  label: "Product output",
   fields: {},
-  include: { outputs: { include: { product: productBrief } } },
+  include: batchInclude,
   dateField: "date",
-  orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   create: false,
   update: false,
-  remove: false,
+  // Deleting takes the pieces back out of stock, so anything already sent to Sales blocks it.
+  beforeDelete: async (batch, { tx }) => {
+    const outputs = await tx.processingOutput.findMany({ where: { batchId: batch.id } });
+    for (const line of outputs) {
+      await moveStock(tx, { productId: line.productId, location: "mva", quantity: -Number(line.quantity), movementType: "processing_reversal", referenceType: "processingBatch", referenceId: batch.id, date: batch.date, notes: `${batch.batchNumber} deleted` });
+    }
+  },
 }));
 
 // ---------------------------------------------------------------------
@@ -236,6 +341,8 @@ transferRouter.post("/", allow("productTransfers", "write"), async (req, res) =>
   if (!items.length) throw badRequest("Enter a quantity for at least one product");
   if (new Set(items.map((i) => i.productId)).size !== items.length) throw badRequest("List each product only once");
   const transfer = await inTransaction(async (tx) => {
+    const rawMilk = await productByCode(tx, RAW_MILK);
+    if (items.some((line) => line.productId === rawMilk.id)) throw badRequest("Raw milk goes to Sales through the L.Sale allocation");
     const created = await tx.productTransfer.create({
       data: { ...data, transferNumber: await nextNumber(tx, "PTR", data.date), items: { create: items } },
       include: transferInclude,
@@ -305,6 +412,7 @@ router.use("/product-transfers", crud({
   update: false,
   beforeDelete: async (transfer, { tx }) => {
     if (transfer.status !== "sent") throw conflict("A received transfer cannot be deleted");
+    if (transfer.allocationId) throw conflict("This came from the day's L.Sale allocation. Change the allocation instead.");
     const items = await tx.productTransferItem.findMany({ where: { transferId: transfer.id } });
     for (const line of items) {
       await moveStock(tx, {

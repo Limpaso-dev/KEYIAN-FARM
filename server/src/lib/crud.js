@@ -40,7 +40,8 @@ export const listQuery = (query, { search = [], dateField, filters = [] } = {}) 
  *   model      Prisma delegate name, e.g. "employee"
  *   fields     validation spec for create (see lib/validate.js)
  *   updateFields  spec for updates (defaults to fields)
- *   include, orderBy, search, dateField, filters
+ *   include, omit, orderBy, search, dateField, filters
+ *   listWhere(where, query)  adjust the list's where-clause
  *   numbering  { field, prefix, yearly }  generated when left blank
  *   prepare(data, { req, tx, existing })  adjust/validate before write
  *   afterWrite(record, { req, tx, existing, action })
@@ -54,11 +55,13 @@ export const crud = (options) => {
     fields,
     updateFields = fields,
     include,
+    omit,
     orderBy = { createdAt: "desc" },
     search,
     dateField,
     filters,
     numbering,
+    listWhere,
     prepare,
     afterWrite,
     beforeDelete,
@@ -72,12 +75,12 @@ export const crud = (options) => {
 
   router.get("/", allow(resource, "read"), async (req, res) => {
     const { where, take } = listQuery(req.query, { search, dateField, filters });
-    const rows = await prisma[model].findMany({ where, include, orderBy, take });
+    const rows = await prisma[model].findMany({ where: listWhere ? listWhere(where, req.query) : where, include, omit, orderBy, take });
     ok(res, rows, 200, { count: rows.length });
   });
 
   router.get("/:id", allow(resource, "read"), async (req, res) => {
-    const row = await prisma[model].findUnique({ where: { id: req.params.id }, include });
+    const row = await prisma[model].findUnique({ where: { id: req.params.id }, include, omit });
     if (!row) throw notFound(label);
     ok(res, row);
   });
@@ -92,7 +95,7 @@ export const crud = (options) => {
             : await nextNumber(tx, numbering.prefix, data[dateField] || new Date());
         }
         const prepared = prepare ? (await prepare(data, { req, tx })) ?? data : data;
-        const created = await tx[model].create({ data: prepared, include });
+        const created = await tx[model].create({ data: prepared, include, omit });
         if (afterWrite) await afterWrite(created, { req, tx, action: "create" });
         await audit(tx, { user: req.user, action: "create", entity: model, entityId: created.id, after: created });
         return created;
@@ -108,7 +111,7 @@ export const crud = (options) => {
         const existing = await tx[model].findUnique({ where: { id: req.params.id } });
         if (!existing) throw notFound(label);
         const prepared = prepare ? (await prepare(data, { req, tx, existing })) ?? data : data;
-        const updated = await tx[model].update({ where: { id: existing.id }, data: prepared, include });
+        const updated = await tx[model].update({ where: { id: existing.id }, data: prepared, include, omit });
         if (afterWrite) await afterWrite(updated, { req, tx, existing, action: "update" });
         await audit(tx, { user: req.user, action: "update", entity: model, entityId: existing.id, before: existing, after: updated });
         return updated;

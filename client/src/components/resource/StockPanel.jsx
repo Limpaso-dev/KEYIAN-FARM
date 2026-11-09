@@ -1,11 +1,11 @@
 import { SlidersHorizontal } from "lucide-react";
 import { useAuth } from "../../context/useAuth";
-import { daysAgo, money, number, today } from "../../lib/format";
+import { daysAgo, number, today } from "../../lib/format";
 import { refs } from "../../lib/refs";
 import { useFetch } from "../../lib/useFetch";
 import { ActionButton } from "./ActionButton";
 import { ResourcePage } from "./ResourcePage";
-import { Alert, Card, Spinner } from "../ui/ui";
+import { Alert, Spinner } from "../ui/ui";
 import { KeyFigures } from "../ui/KeyFigures";
 
 const MOVEMENT_LABELS = {
@@ -25,6 +25,9 @@ const MOVEMENT_LABELS = {
   damage: "Damage / write-off",
   replacement: "Customer replacement",
   adjustment: "Stock count adjustment",
+  office: "Office use",
+  allocation: "Allocated",
+  processing_reversal: "Output deleted",
 };
 
 /** Stock on hand at MVA or Sales, with adjustments (heads) and history. */
@@ -52,15 +55,16 @@ export const StockPanel = ({ location }) => {
   };
 
   return (
-    <div className="space-y-4">
-      <Card className="p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-900">Stock on hand at {location === "mva" ? "MVA" : "Sales"}</h2>
+    <div className="space-y-5">
+      {/* Stock on hand: a ruled strip of figures on the page, no box. */}
+      <section>
+        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-[15px] font-semibold text-slate-900">Stock on hand at {location === "mva" ? "MVA" : "Sales"}</h2>
           {can(resource, "adjust") && (
             <ActionButton label="Adjust after count" icon={SlidersHorizontal} path={`/stock/${location}/adjustments`} onDone={reload}
               intro={<Alert tone="warning">Use this only to correct stock after a physical count. Enter a negative number to reduce stock.</Alert>}
               fields={[
-                { name: "productId", label: "Product", type: "select", ref: refs.products, required: true, span: 2 },
+                { name: "productId", label: "Product", type: "select", ref: refs.allProducts, required: true, span: 2 },
                 { name: "quantity", label: "Quantity to add (+) or remove (-)", type: "number", min: -1000000, required: true },
                 { name: "date", label: "Date", type: "date", required: true },
                 { name: "reason", label: "Reason", type: "textarea", required: true },
@@ -69,17 +73,19 @@ export const StockPanel = ({ location }) => {
           )}
         </div>
         <Alert tone="error">{error}</Alert>
-        {loading && !data ? <Spinner /> : (
+        {loading && !data ? <Spinner /> : data?.length ? (
           <KeyFigures
-            items={(data || []).map((p) => ({
+            items={data.map((p) => ({
               label: p.name,
               value: `${number(p.onHand)} ${p.unit}`,
-              hint: location === "sales" ? `${money(p.unitPrice)} each` : undefined,
+              hint: p.onVehicles > 0 ? `${number(p.onVehicles)} ${p.unit} out on vehicles` : undefined,
               tone: p.onHand < 0 ? "bad" : undefined,
             }))}
           />
+        ) : (
+          <p className="border-y border-slate-200 py-3 text-sm text-slate-500">No products yet.</p>
         )}
-      </Card>
+      </section>
       <ResourcePage config={movements} />
     </div>
   );
