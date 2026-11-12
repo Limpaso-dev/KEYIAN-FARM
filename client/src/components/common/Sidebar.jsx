@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { ChevronDown, ChevronsLeft, ChevronsRight, X } from "lucide-react";
 import { useAuth } from "../../context/useAuth";
-import { currentSection, findNavItem, NAV_GROUPS, navigation, sectionPath, sectionsFor } from "../../navigation";
+import { currentSection, findNavItem, groupOf, linksOf, NAV_GROUPS, navigation, sectionPath, sectionsFor } from "../../navigation";
 import { cx } from "../../lib/cx";
 
 // The sidebar folds to an icon rail on large screens only (Tailwind's lg).
@@ -30,6 +30,11 @@ const Brand = ({ collapsed }) => (
       <span className="font-medium text-sidebar-text">Cooperative Society Ltd</span>
     </p>
   </div>
+);
+
+/** A heading that groups the sections under it (the Reports dropdown, by department). */
+const SectionHeading = ({ label }) => (
+  <li className="truncate px-2.5 pb-0.5 pt-2.5 text-[10.5px] font-semibold uppercase tracking-wider text-sidebar-muted">{label}</li>
 );
 
 /** One section of a department: in its dropdown, or in the rail's pop-out (menu). */
@@ -100,8 +105,9 @@ const PopoutMenu = ({ id, item, sections, activeKey, position, trigger, onClose,
     >
       <p className="border-b border-sidebar-border px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-muted">{item.label}</p>
       <ul className="space-y-0.5 p-1.5">
-        {sections.map((section) => (
-          <SectionLink key={section.key} menu to={sectionPath(item, section)} label={section.label} current={section.key === activeKey} onNavigate={onNavigate} />
+        {sections.map((section) => (section.heading
+          ? <SectionHeading key={section.key} label={section.label} />
+          : <SectionLink key={section.key} menu to={sectionPath(item, section)} label={section.label} current={section.key === activeKey} onNavigate={onNavigate} />
         ))}
       </ul>
     </div>
@@ -114,7 +120,7 @@ const PopoutMenu = ({ id, item, sections, activeKey, position, trigger, onClose,
  */
 const DepartmentGroup = ({ item, sections, activeKey, here, open, rail, popout, onToggle, onPopout, onClosePopout, onNavigate }) => {
   const trigger = useRef(null);
-  const listId = `nav-sections-${item.department}`;
+  const listId = `nav-sections-${groupOf(item)}`;
   const expanded = rail ? Boolean(popout) : open;
   // While its sections are out of sight, the department itself shows where you are.
   const marked = here && (rail || !open);
@@ -127,14 +133,14 @@ const DepartmentGroup = ({ item, sections, activeKey, here, open, rail, popout, 
     } else {
       const row = trigger.current.getBoundingClientRect();
       const right = trigger.current.closest("aside")?.getBoundingClientRect().right ?? row.right;
-      const height = 46 + sections.length * 34;
+      const height = Math.min(46 + sections.length * 34, window.innerHeight - 80);
       // Beside the icon, kept below the top bar and on screen.
       onPopout({ top: Math.max(72, Math.min(row.top, window.innerHeight - height - 8)), left: right + 6 });
     }
   };
 
   return (
-    <li data-department={item.department} onBlur={(event) => popout && !event.currentTarget.contains(event.relatedTarget) && onClosePopout()}>
+    <li data-department={item.department} data-group={groupOf(item)} onBlur={(event) => popout && !event.currentTarget.contains(event.relatedTarget) && onClosePopout()}>
       <button
         ref={trigger}
         type="button"
@@ -151,8 +157,9 @@ const DepartmentGroup = ({ item, sections, activeKey, here, open, rail, popout, 
       </button>
       {!rail && open && (
         <ul id={listId} className="mb-1 ml-5 mt-0.5 space-y-0.5 border-l border-white/[0.14] pl-2.5 animate-slide-down">
-          {sections.map((section) => (
-            <SectionLink key={section.key} to={sectionPath(item, section)} label={section.label} current={section.key === activeKey} onNavigate={onNavigate} />
+          {sections.map((section) => (section.heading
+            ? <SectionHeading key={section.key} label={section.label} />
+            : <SectionLink key={section.key} to={sectionPath(item, section)} label={section.label} current={section.key === activeKey} onNavigate={onNavigate} />
           ))}
         </ul>
       )}
@@ -182,7 +189,7 @@ const Sidebar = ({ mobileOpen = false, onClose = () => {}, collapsed = false, on
   // One department's sections show at a time: those of the department you are
   // in, unless you have opened or closed one since the page last changed.
   const [choice, setChoice] = useState({ at: null, department: null });
-  const openDepartment = choice.at === location.key ? choice.department : current?.department ?? null;
+  const openDepartment = choice.at === location.key ? choice.department : groupOf(current);
   const toggle = (department) => setChoice({ at: location.key, department: openDepartment === department ? null : department });
 
   // The rail's pop-out closes when the page changes.
@@ -193,7 +200,7 @@ const Sidebar = ({ mobileOpen = false, onClose = () => {}, collapsed = false, on
   // Bring a dropdown that opens below the fold into view, keeping its department in sight.
   useEffect(() => {
     if (rail || !openDepartment || !nav.current) return;
-    const group = nav.current.querySelector(`[data-department="${openDepartment}"]`);
+    const group = nav.current.querySelector(`[data-group="${openDepartment}"]`);
     if (!group) return;
     const box = nav.current.getBoundingClientRect();
     const rect = group.getBoundingClientRect();
@@ -224,7 +231,7 @@ const Sidebar = ({ mobileOpen = false, onClose = () => {}, collapsed = false, on
               <ul className="space-y-0.5">
                 {group.items.map((item) => {
                   const sections = sectionsFor(item, auth);
-                  if (sections.length > 1) {
+                  if (linksOf(sections).length > 1) {
                     return (
                       <DepartmentGroup
                         key={item.path}
@@ -232,11 +239,11 @@ const Sidebar = ({ mobileOpen = false, onClose = () => {}, collapsed = false, on
                         sections={sections}
                         here={current === item}
                         activeKey={current === item ? activeKey : null}
-                        open={openDepartment === item.department}
+                        open={openDepartment === groupOf(item)}
                         rail={rail}
-                        popout={openPopout?.department === item.department ? openPopout : null}
-                        onToggle={() => toggle(item.department)}
-                        onPopout={(position) => setPopout({ ...position, at: location.key, department: item.department })}
+                        popout={openPopout?.department === groupOf(item) ? openPopout : null}
+                        onToggle={() => toggle(groupOf(item))}
+                        onPopout={(position) => setPopout({ ...position, at: location.key, department: groupOf(item) })}
                         onClosePopout={closePopout}
                         onNavigate={onClose}
                       />

@@ -236,7 +236,7 @@ const Dashboard = () => {
   const dispatches = useFetch(can("dispatches") ? "/sales/dispatches" : null, range);
   const ledger = useFetch(can("transactions") ? "/accounts/transactions" : null, range);
   const requisitions = useFetch(canRequisitions ? "/requisitions" : null);
-  // Every department can read store items (for requisitions); the reorder alert is for those who run Stores.
+  // The reorder alert is for those who run Stores.
   const lowStock = useFetch(opensDepartment(auth, "stores") ? "/stores/items/low-stock" : null);
   const vaccinations = useFetch(can("vaccinations") ? "/livestock/vaccinations-due" : null, { days: 7 });
   const contracts = useFetch(can("contracts") ? "/hr/contracts-expiring" : null, { days: 30 });
@@ -290,9 +290,15 @@ const Dashboard = () => {
 
   // ---- Needs attention ------------------------------------------------
   const attention = [];
-  if (req?.toDecide > 0) attention.push({ key: "decide", severity: "medium", count: req.toDecide, title: `${plural(req.toDecide, "Requisition")} awaiting your approval`, detail: "Approve, return or reject", to: "/requisitions" });
-  if (req?.toFulfil > 0 && permissions?.requisitions?.fulfil) attention.push({ key: "fulfil", severity: "low", count: req.toFulfil, title: `Approved ${plural(req.toFulfil, "requisition")} to fulfil`, detail: "Issue from stores or raise a purchase order", to: "/requisitions" });
-  if (req?.department?.returned > 0) attention.push({ key: "returned", severity: "medium", count: req.department.returned, title: `${plural(req.department.returned, "Requisition")} returned for changes`, detail: "Edit and resubmit", to: "/requisitions" });
+  if (req?.toDecide > 0) attention.push({ key: "decide", severity: "medium", count: req.toDecide, title: `${plural(req.toDecide, "Requisition")} awaiting your approval`, detail: "Approve, return or reject", to: "/requisitions?tab=accounts" });
+  if (req?.toFulfil > 0 && permissions?.requisitions?.fulfil) attention.push({ key: "fulfil", severity: "low", count: req.toFulfil, title: `Approved ${plural(req.toFulfil, "requisition")} to fulfil`, detail: "Mark fulfilled once bought or paid for", to: "/requisitions?tab=accounts" });
+  if (req?.department?.returned > 0) attention.push({ key: "returned", severity: "medium", count: req.department.returned, title: `${plural(req.department.returned, "Requisition")} returned for changes`, detail: "Edit and resubmit", to: "/requisitions?tab=accounts" });
+  const asked = data?.productRequests;
+  if (asked?.toHandle > 0) {
+    attention.push(asked.department === "mva"
+      ? { key: "asked", severity: "medium", count: asked.toHandle, title: `${plural(asked.toHandle, "Product request")} from Sales`, detail: "Send the products to Sales", to: "/requisitions?tab=mva" }
+      : { key: "asked", severity: "medium", count: asked.toHandle, title: `${plural(asked.toHandle, "Office request")} from the administration`, detail: "Give the products out as office use", to: "/requisitions?tab=sales" });
+  }
   if (lowStock.data?.length) attention.push({ key: "stock", severity: "high", count: lowStock.data.length, title: `Store ${plural(lowStock.data.length, "item")} at or below reorder level`, detail: lowStock.data.slice(0, 3).map((i) => i.name).join(", "), to: "/stores?tab=items" });
   if (vaccinations.data?.length) attention.push({ key: "vacc", severity: "medium", count: vaccinations.data.length, title: `${plural(vaccinations.data.length, "Vaccination")} due within 7 days`, detail: vaccinations.data.slice(0, 3).map((v) => `${v.animal?.tagNumber || ""} ${v.vaccine || ""}`.trim()).join(", "), to: "/livestock?tab=vaccinations" });
   if (contracts.data?.length) attention.push({ key: "contracts", severity: "low", count: contracts.data.length, title: `${plural(contracts.data.length, "Contract")} ending within 30 days`, detail: contracts.data.slice(0, 3).map((c) => `${c.employee?.firstName || ""} ${c.employee?.lastName || ""}`.trim()).join(", "), to: "/hr?tab=contracts" });

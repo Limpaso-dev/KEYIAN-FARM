@@ -11,7 +11,8 @@ import { parseBody, parseItems, round2 } from "../../lib/validate.js";
 //   department raises  -> pending
 //   Accounts head / GM -> approved | rejected | returned (with comment)
 //   requester          -> edits a returned one and resubmits (pending)
-//   Stores / Accounts  -> fulfilled (issued from stores or bought)
+//   Accounts           -> fulfilled (bought or paid for)
+// Stores takes requests for its items by word of mouth, so it has none.
 
 const router = express.Router();
 const include = {
@@ -54,7 +55,7 @@ router.get("/", async (req, res) => {
   if (req.query.status) where.status = req.query.status;
   if (req.query.department) where.department = req.query.department;
   if (!requisitionRules.canSeeAll(user)) {
-    // Own department, plus approved ones for Stores to fulfil.
+    // Own department, plus approved ones for those who fulfil them.
     where.OR = [
       { department: user.department ?? "__none__" },
       ...(requisitionRules.canFulfil(user) ? [{ status: { in: ["approved", "fulfilled"] } }] : []),
@@ -82,7 +83,7 @@ router.get("/:id", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  if (!requisitionRules.canRaise(req.user)) throw forbidden("Only department staff can raise requisitions");
+  if (!requisitionRules.canRaise(req.user)) throw forbidden(req.user?.department === "stores" ? "Stores takes requests by word of mouth and does not raise requisitions" : "Only department staff can raise requisitions");
   const data = parseBody({ title: "string!", purpose: "text!", priority: "option:priorities" }, req.body);
   const items = buildItems(req.body.items);
   const requisition = await inTransaction(async (tx) => {
@@ -151,7 +152,7 @@ router.post("/:id/decision", async (req, res) => {
 });
 
 router.post("/:id/fulfil", async (req, res) => {
-  if (!requisitionRules.canFulfil(req.user)) throw forbidden("Only Stores or Accounts can mark requisitions fulfilled");
+  if (!requisitionRules.canFulfil(req.user)) throw forbidden("Only Accounts can mark requisitions fulfilled");
   const requisition = await inTransaction(async (tx) => {
     const existing = await load(tx, req.params.id);
     if (existing.status !== "approved") throw conflict("Only an approved requisition can be fulfilled");

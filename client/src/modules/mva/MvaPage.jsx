@@ -208,7 +208,7 @@ const batches = {
         { name: "yoghurt250", label: "250 ml (pieces)", type: "number", step: 1 },
         { name: "yoghurt150", label: "150 ml (pieces)", type: "number", step: 1 },
         { type: "section", label: "Fresh" },
-        { name: "fresh250", label: "Fresh 250 ml (pieces)", type: "number", step: 1, help: "Made from the School allocation and sent to the schools" },
+        { name: "fresh250", label: "Fresh milk 250 ml (packets)", type: "number", step: 1, help: "Packets go into MVA stock, ready to send to Sales" },
         { name: "notes", label: "Notes", type: "textarea" },
       ]}
       initial={() => ({ date: today() })} />

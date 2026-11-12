@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { can, canReadReport, permissionsFor, requisitionRules } from "../src/config/access.js";
+import { can, canReadReport, permissionsFor, productRequestRules, requisitionRules } from "../src/config/access.js";
 
 const user = (role, department = null, extra = {}) => ({ id: `${role}-${department}`, role, department, isActive: true, ...extra });
 
@@ -23,7 +23,6 @@ test("hand-over actions belong to the receiving department", () => {
   assert.equal(can(user("officer", "livestock"), "milkTransfers", "receive"), false);
   assert.equal(can(user("officer", "sales"), "productTransfers", "receive"), true);
   assert.equal(can(user("officer", "mva"), "productTransfers", "receive"), false);
-  assert.equal(can(user("officer", "stores"), "purchaseOrders", "receive"), true);
   assert.equal(can(user("officer", "accounts"), "purchaseOrders", "pay"), true);
   assert.equal(can(user("officer", "accounts"), "payroll", "pay"), true);
   assert.equal(can(user("officer", "hr"), "payroll", "pay"), false);
@@ -82,6 +81,34 @@ test("requisitions are decided by the head of Accounts or the General Manager", 
   assert.equal(requisitionRules.canDecide(user("admin")), false);
   assert.equal(requisitionRules.canRaise(user("officer", "crops")), true);
   assert.equal(requisitionRules.canRaise(user("general_manager")), false);
+});
+
+test("Stores keeps quantities to itself: no purchase orders, suppliers or requisitions", () => {
+  const stores = user("officer", "stores");
+  assert.equal(can(stores, "purchaseOrders", "read"), false);
+  assert.equal(can(stores, "purchaseOrders", "receive"), false);
+  assert.equal(can(stores, "suppliers", "read"), false);
+  assert.equal(can(stores, "storeIssues", "write"), true);
+  assert.equal(requisitionRules.canRaise(stores), false);
+  assert.equal(requisitionRules.canFulfil(stores), false);
+  assert.equal(requisitionRules.canFulfil(user("officer", "accounts")), true);
+  // Other departments do not read the store's items or issues.
+  assert.equal(can(user("officer", "livestock"), "storeItems", "read"), false);
+  assert.equal(can(user("officer", "crops"), "storeIssues", "read"), false);
+});
+
+test("product requests: Sales asks MVA, the administration asks Sales; the department asked handles them", () => {
+  assert.deepEqual(productRequestRules.raiseTo(user("officer", "sales")), ["mva"]);
+  assert.deepEqual(productRequestRules.raiseTo(user("admin")), ["sales"]);
+  assert.deepEqual(productRequestRules.raiseTo(user("super_admin")), ["sales"]);
+  assert.deepEqual(productRequestRules.raiseTo(user("officer", "mva")), []);
+  assert.deepEqual(productRequestRules.raiseTo(user("general_manager")), []);
+  assert.deepEqual(productRequestRules.handles(user("officer", "mva")), ["mva"]);
+  assert.deepEqual(productRequestRules.handles(user("head", "sales")), ["sales"]);
+  assert.deepEqual(productRequestRules.handles(user("head", "hr")), []);
+  assert.equal(productRequestRules.seeAll(user("general_manager")), true);
+  assert.equal(productRequestRules.seeAll(user("head", "accounts")), false);
+  assert.deepEqual(permissionsFor(user("officer", "sales")).productRequests, { raiseTo: ["mva"], handles: ["sales"], seeAll: false });
 });
 
 test("reports: own department, or all for GM and admin", () => {

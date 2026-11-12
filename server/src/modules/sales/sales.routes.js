@@ -284,7 +284,9 @@ dispatchRouter.post("/", allow("dispatches", "write"), async (req, res) => {
 });
 
 dispatchRouter.post("/:id/reconcile", allow("dispatches", "reconcile"), async (req, res) => {
-  const money = parseBody({ cashReturned: "decimal!", mpesaReturned: "decimal", notes: "text" }, req.body);
+  // The crew's money comes back as cash, M-Pesa and bank deposits; together they are what was handed in.
+  const money = parseBody({ cashReturned: "decimal!", mpesaReturned: "decimal", bankDeposit: "decimal", notes: "text" }, req.body);
+  if ([money.cashReturned, money.mpesaReturned, money.bankDeposit].some((amount) => amount < 0)) throw badRequest("Amounts cannot be negative");
   const lines = parseItems(req.body.items, { itemId: "id!", quantityReturned: "decimal", quantityReplaced: "decimal", quantityDamaged: "decimal" }, { label: "returns" });
 
   const dispatch = await inTransaction(async (tx) => {
@@ -320,7 +322,7 @@ dispatchRouter.post("/:id/reconcile", allow("dispatches", "reconcile"), async (r
       }
     }
     const expectedAmount = round2(expected);
-    const handedIn = round2(money.cashReturned + (money.mpesaReturned || 0));
+    const handedIn = round2(money.cashReturned + (money.mpesaReturned || 0) + (money.bankDeposit || 0));
     const updated = await tx.vehicleDispatch.update({
       where: { id: existing.id },
       data: {
@@ -328,6 +330,7 @@ dispatchRouter.post("/:id/reconcile", allow("dispatches", "reconcile"), async (r
         expectedAmount,
         cashReturned: money.cashReturned,
         mpesaReturned: money.mpesaReturned || 0,
+        bankDeposit: money.bankDeposit || 0,
         variance: round2(handedIn - expectedAmount),
         reconciledAt: new Date(),
         notes: [existing.notes, money.notes].filter(Boolean).join(" | ") || null,

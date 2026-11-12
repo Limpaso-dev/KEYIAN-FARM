@@ -8,7 +8,7 @@
 | Livestock | Herd register with mother (dam) and father (sire), calvings and lactations, vaccinations, disease and herd health, milk per cow per session, and milk sent to MVA. |
 | Milk Value Addition (MVA) | Milk received from Livestock and from numbered local farmers (130, 131, ...), the milk price per litre, processing of raw milk into Fresh milk, Mala and Yoghurt, and products (including unprocessed raw milk) sent to Sales. |
 | Sales | Products received from MVA, local sales (cash, M-Pesa or credit), vehicles and their two-person crew, morning dispatch and evening returns, damages and customer replacements, and Sales stock. |
-| Stores | Items by category (animal feeds, MVA tools, farm tools, fertilisers, transport and construction materials), goods received, issues to departments, and deliveries against purchase orders. |
+| Stores | Items by category (animal feeds, MVA tools, farm tools, fertilisers, transport and construction materials), goods received and stock out to departments, in quantities only (no costs, suppliers, delivery notes or purchase orders). Departments ask for items by word of mouth. Reports: stock out, goods received and stock remaining. |
 | Crops | Sugarcane, tea and coffee farms: farm number, acreage, location, ratoon count, status history and harvests. |
 | Accounts | Income and expenses under the cooperative's categories, cash/bank/M-Pesa accounts, farmer milk payments, member dividends, salaries, suppliers and purchase orders (Accounts also does procurement). |
 
@@ -26,16 +26,16 @@ These lists live in `server/src/config/catalog.js`.
 | Head of Department | Everything in their department, plus deleting records and head-only steps (approve payroll, void entries, adjust stock after a count). The head of Accounts approves requisitions. |
 | Officer | Records and edits their department's data. |
 
-Accounts staff can read every department for financial oversight. Hand-overs are done by the receiving department: MVA receives milk from Livestock, Sales receives products from MVA, Stores receives purchase-order deliveries, Accounts pays payroll approved by HR.
+Staff see their own department only; the General Manager and administrators see every department. Hand-overs are done by the receiving department: MVA receives milk from Livestock, Sales receives products from MVA, Accounts pays payroll approved by HR.
 
 All rules are in `server/src/config/access.js`; the browser receives the computed permissions at sign-in.
 
 ## Requisitions
 
-1. Any department raises a requisition (items with estimated cost).
+1. A department raises a requisition (items with estimated cost). Stores does not: its items are asked for by word of mouth.
 2. The head of Accounts or the General Manager approves, returns (with a comment) or rejects it. Nobody can decide their own requisition.
 3. A returned requisition can be edited and resubmitted by the person who raised it.
-4. Stores issues the items against it, or Accounts raises a purchase order; either marks it fulfilled.
+4. Accounts buys or pays for what was approved and marks it fulfilled.
 
 ## End-of-day reports
 

@@ -17,6 +17,9 @@ const router = express.Router();
  *   date:   any day inside the period (today when left out)
  *   from, to: for period=custom
  * department=all combines every department the user may see.
+ * part:   one of a department's own reports, where it has several
+ *         (config/catalog.js REPORT_PARTS, e.g. Stores: out | received | stock);
+ *         left out, they print together with the rest of the report.
  * /api/reports/daily is the same report (it defaults to a single day).
  */
 const departmentReport = async (req, res) => {
@@ -30,16 +33,29 @@ const departmentReport = async (req, res) => {
     : [requested];
   if (!departments.length || departments.some((d) => !BUILDERS[d])) throw badRequest("Choose a department");
   if (departments.some((d) => !canReadReport(req.user, d))) throw forbidden("You can only view your own department's report");
+  const part = requested === "all" ? "" : String(req.query.part || "");
 
   const reports = [];
+  let chosen = null;
   for (const department of departments) {
     const report = await BUILDERS[department](prisma, range);
-    reports.push({ department, ...report, heading: `${report.title} report - ${range.label}` });
+    chosen = part ? report.parts?.find((p) => p.key === part) : null;
+    if (part && !chosen) throw badRequest("Choose one of this department's reports");
+    reports.push(chosen
+      ? {
+        department,
+        ...report,
+        part: chosen.key,
+        heading: `${report.title}: ${chosen.title} - ${range.label}`,
+        summary: report.summary.filter((item) => item.part === chosen.key),
+        sections: report.sections.filter((s) => s.part === chosen.key),
+      }
+      : { department, ...report, heading: `${report.title} report - ${range.label}` });
   }
 
   const generatedAt = new Date().toISOString();
   const meta = { organisation: ORGANISATION, motto: MOTTO, generatedBy: req.user.name, generatedAt };
-  const fileBase = `keiyian-${requested}-report-${range.slug}`;
+  const fileBase = `keiyian-${requested}-${chosen ? `${chosen.title.toLowerCase().replace(/\s+/g, "-")}-` : ""}report-${range.slug}`;
   if (format === "csv") {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${fileBase}.csv"`);

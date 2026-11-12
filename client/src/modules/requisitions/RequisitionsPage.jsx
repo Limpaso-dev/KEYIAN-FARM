@@ -1,8 +1,10 @@
-import { CheckCircle2, ClipboardList, CornerUpLeft, XCircle } from "lucide-react";
+import { CheckCircle2, CornerUpLeft, XCircle } from "lucide-react";
+import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
-import { Alert, PageHeader } from "../../components/ui/ui";
+import { Alert } from "../../components/ui/ui";
 import { useAuth } from "../../context/useAuth";
 import { dateTime, money, number } from "../../lib/format";
+import { productRequestsConfig } from "./productRequests";
 
 const blank = (v) => (v === "" || v == null ? 0 : Number(v));
 
@@ -43,7 +45,7 @@ const Details = ({ row }) => (
       <p><span className="font-medium text-slate-700">Raised by:</span> {row.requestedBy?.name} on {dateTime(row.createdAt)}</p>
       {row.decidedBy && <p><span className="font-medium text-slate-700">Decided by:</span> {row.decidedBy.name} on {dateTime(row.decidedAt)}</p>}
       {row.decisionComment && <p><span className="font-medium text-slate-700">Comment:</span> {row.decisionComment}</p>}
-      {row.storeIssues?.length > 0 && <p><span className="font-medium text-slate-700">Issued from stores:</span> {row.storeIssues.map((s) => `${s.issueNumber} (${number(s.quantity)} ${s.item.unit} ${s.item.name})`).join(", ")}</p>}
+      {row.storeIssues?.length > 0 && <p><span className="font-medium text-slate-700">Stock out from stores:</span> {row.storeIssues.map((s) => `${s.issueNumber} (${number(s.quantity)} ${s.item.unit} ${s.item.name})`).join(", ")}</p>}
       {row.purchaseOrders?.length > 0 && <p><span className="font-medium text-slate-700">Purchase orders:</span> {row.purchaseOrders.map((p) => p.poNumber).join(", ")}</p>}
     </div>
   </div>
@@ -66,7 +68,8 @@ const decision = (key, label, icon, variant, needsComment) => ({
 const config = (user, permissions) => ({
   resource: "requisitions",
   endpoint: "/requisitions",
-  title: "Requisitions",
+  title: "Requisitions to Accounts",
+  description: "Money and things to buy, such as dust coats. The head of Accounts or the General Manager approves, returns or rejects, and Accounts then fulfils it. (Stores items are asked for by word of mouth.)",
   singular: "Requisition",
   createLabel: "New requisition",
   formSize: "lg",
@@ -101,20 +104,32 @@ const config = (user, permissions) => ({
     decision("approve", "Approve", CheckCircle2, "primary", false),
     decision("return", "Return", CornerUpLeft, "secondary", true),
     decision("reject", "Reject", XCircle, "ghost", true),
-    { key: "fulfil", label: "Mark fulfilled", when: (r) => r.canFulfil, path: (r) => `/requisitions/${r.id}/fulfil`, confirm: (r) => `Mark ${r.requisitionNumber} as fulfilled? Use this once the items have been issued or bought.` },
+    { key: "fulfil", label: "Mark fulfilled", when: (r) => r.canFulfil, path: (r) => `/requisitions/${r.id}/fulfil`, confirm: (r) => `Mark ${r.requisitionNumber} as fulfilled? Use this once the items have been bought or paid for.` },
     { key: "cancel", label: "Cancel", variant: "ghost", when: (r) => r.canCancel, path: (r) => `/requisitions/${r.id}/cancel`, confirm: (r) => `Cancel ${r.requisitionNumber}?`, submitLabel: "Cancel requisition" },
   ],
   user,
 });
 
+/**
+ * Requisitions, with a section for each kind of request (see navigation.js):
+ * to Accounts; products Sales asks MVA for; products the administration asks
+ * Sales for (office use).
+ */
 const RequisitionsPage = () => {
   const { user, permissions } = useAuth();
   return (
-    <div>
-      <PageHeader icon={ClipboardList} eyebrow="Workflow" title="Requisitions" description="Departments request what they need. The head of Accounts or the General Manager approves, returns or rejects. Stores or Accounts then fulfils it." />
-      {permissions?.requisitions?.decide && <Alert tone="info" className="mb-4">You can approve requisitions. You cannot decide on a requisition you raised yourself.</Alert>}
-      <ResourcePage config={config(user, permissions)} />
-    </div>
+    <ModulePage
+      sections={{
+        accounts: () => (
+          <>
+            {permissions?.requisitions?.decide && <Alert tone="info" className="mb-4">You can approve requisitions. You cannot decide on a requisition you raised yourself.</Alert>}
+            <ResourcePage config={config(user, permissions)} />
+          </>
+        ),
+        mva: () => <ResourcePage config={productRequestsConfig("mva", permissions)} />,
+        sales: () => <ResourcePage config={productRequestsConfig("sales", permissions)} />,
+      }}
+    />
   );
 };
 

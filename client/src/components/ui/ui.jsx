@@ -250,7 +250,7 @@ const STATUS_TONE = {
   with_finance: "amber", filled: "green", shortlisted: "blue", interview: "amber", passed: "blue", hired: "green",
   active: "green", approved: "blue", paid: "green", received: "green", reconciled: "green", fulfilled: "green", recovered: "green", milking: "green", cleared: "green", closed: "gray",
   pending: "amber", draft: "amber", sent: "amber", dispatched: "amber", returned: "amber", partial: "amber", partially_received: "amber", ordered: "blue", open: "amber", under_treatment: "amber", credit: "red", awaiting_fertiliser: "amber",
-  rejected: "red", cancelled: "gray", voided: "gray", terminated: "red", resigned: "gray", retired: "gray", dead: "red", died: "red", inactive: "gray", suspended: "red", sold: "gray", culled: "gray", dry: "gray", succeeded: "gray", deceased: "gray", expired: "gray", posted: "green",
+  rejected: "red", declined: "red", issued: "green", cancelled: "gray", voided: "gray", terminated: "red", resigned: "gray", retired: "gray", dead: "red", died: "red", inactive: "gray", suspended: "red", sold: "gray", culled: "gray", dry: "gray", succeeded: "gray", deceased: "gray", expired: "gray", posted: "green",
 };
 
 /** Status pill: dot + label, so state never relies on colour alone. */

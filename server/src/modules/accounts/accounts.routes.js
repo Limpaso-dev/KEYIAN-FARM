@@ -335,54 +335,8 @@ poRouter.post("/", allow("purchaseOrders", "write"), async (req, res) => {
   ok(res, order, 201);
 });
 
-// Stores confirms delivery; quantities go into the store items.
-poRouter.post("/:id/receive", allow("purchaseOrders", "receive"), async (req, res) => {
-  const { date, deliveryNote } = parseBody({ date: "date!", deliveryNote: "string" }, req.body);
-  const lines = parseItems(req.body.items, { itemId: "id!", quantity: "decimal" }, { label: "received lines" })
-    .filter((line) => line.quantity > 0);
-  if (!lines.length) throw badRequest("Enter the quantity received for at least one line");
-  const order = await inTransaction(async (tx) => {
-    const existing = await tx.purchaseOrder.findUnique({ where: { id: req.params.id }, include: { items: true } });
-    if (!existing) throw notFound("Purchase order");
-    if (["received", "cancelled"].includes(existing.status)) throw conflict(`This order is already ${existing.status}`);
-    for (const line of lines) {
-      const item = existing.items.find((i) => i.id === line.itemId);
-      if (!item) throw badRequest("A received line does not belong to this order");
-      const outstanding = Number(item.quantity) - Number(item.quantityReceived);
-      if (line.quantity > outstanding + 0.001) throw badRequest(`Only ${outstanding} of "${item.description}" is still expected`);
-      await tx.purchaseOrderItem.update({ where: { id: item.id }, data: { quantityReceived: { increment: line.quantity } } });
-      if (item.storeItemId) {
-        await tx.storeReceipt.create({
-          data: {
-            receiptNumber: await nextNumber(tx, "GRN", date),
-            date,
-            itemId: item.storeItemId,
-            quantity: line.quantity,
-            unitCost: item.unitPrice,
-            source: "purchase",
-            supplierId: existing.supplierId,
-            purchaseOrderId: existing.id,
-            deliveryNote,
-          },
-        });
-        await tx.storeItem.update({
-          where: { id: item.storeItemId },
-          data: { quantityOnHand: { increment: line.quantity }, unitCost: item.unitPrice },
-        });
-      }
-    }
-    const items = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId: existing.id } });
-    const complete = items.every((i) => Number(i.quantityReceived) >= Number(i.quantity) - 0.001);
-    const updated = await tx.purchaseOrder.update({
-      where: { id: existing.id },
-      data: { status: complete ? "received" : "partially_received" },
-      include: poInclude,
-    });
-    await audit(tx, { user: req.user, action: "receive", entity: "purchaseOrder", entityId: existing.id, metadata: { lines, deliveryNote } });
-    return updated;
-  });
-  ok(res, order);
-});
+// Stores does not use purchase orders, so deliveries are not received against
+// them: goods come into the store through Stores' own Goods received.
 
 poRouter.post("/:id/pay", allow("purchaseOrders", "pay"), async (req, res) => {
   const data = parseBody({ accountId: "id!", date: "date!", amount: "decimal!", category: "string" }, req.body);

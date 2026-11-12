@@ -32,28 +32,30 @@ enum Role {
 }
 
 model User {
-  id                          String        @id @default(uuid())
+  id                          String           @id @default(uuid())
   name                        String
-  email                       String        @unique
+  email                       String           @unique
   phone                       String?
   password                    String
   role                        Role
   department                  Department?
-  employeeId                  String?       @unique
-  isActive                    Boolean       @default(true)
-  mustChangePassword          Boolean       @default(true)
+  employeeId                  String?          @unique
+  isActive                    Boolean          @default(true)
+  mustChangePassword          Boolean          @default(true)
   lastLoginAt                 DateTime?
-  emailVerified               Boolean       @default(true)
+  emailVerified               Boolean          @default(true)
   emailVerificationCodeHash   String?
   emailVerificationExpiresAt  DateTime?
-  emailVerificationAttempts   Int           @default(0)
+  emailVerificationAttempts   Int              @default(0)
   emailVerificationLastSentAt DateTime?
-  createdAt                   DateTime      @default(now())
-  updatedAt                   DateTime      @updatedAt
-  employee                    Employee?     @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  createdAt                   DateTime         @default(now())
+  updatedAt                   DateTime         @updatedAt
+  employee                    Employee?        @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   auditLogs                   AuditLog[]
-  requisitions                Requisition[] @relation("RequisitionRequestedBy")
-  requisitionsDecided         Requisition[] @relation("RequisitionDecidedBy")
+  requisitions                Requisition[]    @relation("RequisitionRequestedBy")
+  requisitionsDecided         Requisition[]    @relation("RequisitionDecidedBy")
+  productRequests             ProductRequest[] @relation("ProductRequestedBy")
+  productRequestsHandled      ProductRequest[] @relation("ProductRequestHandledBy")
   transactions                Transaction[]
 
   @@index([role, department, isActive])
@@ -513,6 +515,7 @@ model ProductTransfer {
   updatedAt      DateTime              @updatedAt
   items          ProductTransferItem[]
   allocation     MilkAllocation?       @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  request        ProductRequest?
 
   @@index([date, status])
 }
@@ -543,6 +546,7 @@ model Product {
   movements         StockMovement[]
   processingOutputs ProcessingOutput[]
   transferItems     ProductTransferItem[]
+  requestItems      ProductRequestItem[]
   saleItems         SaleItem[]
   dispatchItems     DispatchItem[]
   damages           DamageReplacement[]
@@ -642,6 +646,7 @@ model VehicleDispatch {
   expectedAmount  Decimal             @default(0) @db.Decimal(18, 2)
   cashReturned    Decimal             @default(0) @db.Decimal(18, 2)
   mpesaReturned   Decimal             @default(0) @db.Decimal(18, 2)
+  bankDeposit     Decimal             @default(0) @db.Decimal(18, 2)
   variance        Decimal             @default(0) @db.Decimal(18, 2)
   reconciledAt    DateTime?
   notes           String?
@@ -684,8 +689,52 @@ model DamageReplacement {
   createdAt    DateTime         @default(now())
   product      Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
   dispatch     VehicleDispatch? @relation(fields: [dispatchId], references: [id], onDelete: Restrict)
+  /// Office use given out against a request from the administration.
+  requestId    String?
+  request      ProductRequest?  @relation(fields: [requestId], references: [id], onDelete: SetNull)
 
   @@index([date, recordType])
+}
+
+/// A request for products from another department's stock. Sales asks MVA,
+/// and MVA answers by sending the products to Sales (a product transfer,
+/// which Sales receives as usual). The administration asks Sales, and Sales
+/// gives the products out as office use: off Sales stock, not paid for.
+model ProductRequest {
+  id             String               @id @default(uuid())
+  requestNumber  String               @unique
+  date           DateTime             @db.Date
+  /// The department asking; empty when the administration asks.
+  fromDepartment Department?
+  toDepartment   Department
+  /// pending | sent | received (to MVA) | issued (to Sales) | declined | cancelled
+  status         String               @default("pending")
+  purpose        String?
+  requestedById  String
+  handledById    String?
+  handledAt      DateTime?
+  declineReason  String?
+  transferId     String?              @unique
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  items          ProductRequestItem[]
+  officeRecords  DamageReplacement[]
+  requestedBy    User                 @relation("ProductRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  handledBy      User?                @relation("ProductRequestHandledBy", fields: [handledById], references: [id], onDelete: SetNull)
+  transfer       ProductTransfer?     @relation(fields: [transferId], references: [id], onDelete: SetNull)
+
+  @@index([toDepartment, status, date])
+}
+
+model ProductRequestItem {
+  id            String         @id @default(uuid())
+  requestId     String
+  productId     String
+  quantity      Decimal        @db.Decimal(10, 2)
+  /// What was sent or given out against it.
+  quantityGiven Decimal        @default(0) @db.Decimal(10, 2)
+  request       ProductRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  product       Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
 }
 
 // =====================================================================
@@ -693,20 +742,25 @@ model DamageReplacement {
 // =====================================================================
 
 model StoreItem {
-  id             String              @id @default(uuid())
-  code           String              @unique
-  name           String
-  category       String
-  unit           String
-  quantityOnHand Decimal             @default(0) @db.Decimal(12, 2)
-  reorderLevel   Decimal             @default(0) @db.Decimal(12, 2)
-  unitCost       Decimal             @default(0) @db.Decimal(12, 2)
-  isActive       Boolean             @default(true)
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  receipts       StoreReceipt[]
-  issues         StoreIssue[]
-  orderItems     PurchaseOrderItem[]
+  id              String              @id @default(uuid())
+  code            String              @unique
+  name            String
+  category        String
+  unit            String
+  quantityOnHand  Decimal             @default(0) @db.Decimal(12, 2)
+  /// What the item held when it was added, and the day it was counted.
+  /// With the receipts and issues since, this gives the stock on any day.
+  openingQuantity Decimal             @default(0) @db.Decimal(12, 2)
+  openingDate     DateTime?           @db.Date
+  reorderLevel    Decimal             @default(0) @db.Decimal(12, 2)
+  /// Not recorded by Stores; kept for purchase-order history in Accounts.
+  unitCost        Decimal             @default(0) @db.Decimal(12, 2)
+  isActive        Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  receipts        StoreReceipt[]
+  issues          StoreIssue[]
+  orderItems      PurchaseOrderItem[]
 
   @@index([category])
 }

@@ -347,15 +347,18 @@ if (!url) {
     assert.equal(stock.find((s) => s.code === "MALA").unit, "pieces");
     assert.equal(stock.find((s) => s.code === "YOGHURT_500").onHand, 374);
     assert.equal(stock.find((s) => s.code === "RAW_MILK").onHand, 18);
+    // Raw milk is measured in kg; fresh milk is packed in 250 ml packets, which go into stock.
+    assert.equal(stock.find((s) => s.code === "RAW_MILK").unit, "kg");
+    assert.deepEqual(["name", "unit", "onHand"].map((k) => stock.find((s) => s.code === "FRESH_MILK")[k]), ["Fresh milk 250 ml", "packets", 520]);
     await call("root", "DELETE", `/mva/processing-batches/${made.id}`);
     assert.equal((await call("mva", "GET", "/stock/mva")).find((s) => s.code === "MALA").onHand, 0);
+    assert.equal((await call("mva", "GET", "/stock/mva")).find((s) => s.code === "FRESH_MILK").onHand, 0);
     await call("mva", "POST", "/mva/processing-batches", output);
 
-    // Finished products go across by hand. Fresh milk stock here comes from a count.
-    await call("root", "POST", "/stock/mva/adjustments", { productId: freshId, quantity: 60, date: today, reason: "Opening count" });
+    // Finished products go across by hand.
     const transfer = await call("mva", "POST", "/mva/product-transfers", { date: today, items: [{ productId: freshId, quantity: 50 }] });
     stock = await call("mva", "GET", "/stock/mva");
-    assert.equal(stock.find((s) => s.code === "FRESH_MILK").onHand, 10);
+    assert.equal(stock.find((s) => s.code === "FRESH_MILK").onHand, 470);
     await call("sales", "POST", `/mva/product-transfers/${transfer.id}/receive`, {});
     const sales = await call("sales", "GET", "/stock/sales");
     assert.equal(sales.find((s) => s.code === "FRESH_MILK").onHand, 50);
@@ -372,6 +375,8 @@ if (!url) {
 
   test("Sales: two price lists, a day's trading, stock events at any time, and the registers", async () => {
     // Local sales and vehicles are priced separately; an unpriced product cannot be sold.
+    assert.equal((await call("sales", "GET", `/sales/products/${freshId}`)).localPrice, 0);
+    await call("sales", "PUT", `/sales/products/${freshId}`, { localPrice: 80 });
     await call("sales", "PUT", `/sales/products/${freshId}`, { vehiclePrice: 90 });
     assert.equal((await call("sales", "GET", `/sales/products/${freshId}`)).localPrice, 80);
     await call("sales", "POST", "/sales/sales", { date: today, paymentMethod: "cash", items: [{ productId: yoghurtId, quantity: 1 }] }, { expect: 400 });
@@ -416,7 +421,9 @@ if (!url) {
     // Evening: the form holds the trip's totals, so only the extra counts as new.
     const line = (fields) => [{ itemId: dispatch.items[0].id, ...fields }];
     await call("sales", "POST", `/sales/dispatches/${dispatch.id}/reconcile`, { cashReturned: 0, items: line({ quantityReturned: 1, quantityDamaged: 2, quantityReplaced: 1 }) }, { expect: 400 });
-    const reconciled = await call("sales", "POST", `/sales/dispatches/${dispatch.id}/reconcile`, { cashReturned: 2200, mpesaReturned: 600, items: line({ quantityReturned: 5, quantityDamaged: 2, quantityReplaced: 1 }) });
+    await call("sales", "POST", `/sales/dispatches/${dispatch.id}/reconcile`, { cashReturned: 2000, mpesaReturned: 600, bankDeposit: -200, items: line({ quantityReturned: 5, quantityDamaged: 2, quantityReplaced: 1 }) }, { expect: 400 });
+    const reconciled = await call("sales", "POST", `/sales/dispatches/${dispatch.id}/reconcile`, { cashReturned: 2000, mpesaReturned: 600, bankDeposit: 200, items: line({ quantityReturned: 5, quantityDamaged: 2, quantityReplaced: 1 }) });
+    assert.equal(reconciled.bankDeposit, 200);
     assert.equal(reconciled.items[0].quantitySold, 32);
     assert.equal(reconciled.expectedAmount, 2880);
     assert.equal(reconciled.variance, -80);
@@ -437,17 +444,21 @@ if (!url) {
     const day = await report(`period=day&date=${today}`);
     assert.deepEqual(table(day, "Vehicles").columns.map((c) => c.label), ["Date", "Product", "Dispatch", "Replacement", "Returns", "Damages", "Day sales", "Amount"]);
     const road = table(day, "Vehicles").rows[0];
-    assert.deepEqual([road.product, road.dispatched, road.replaced, road.returned, road.damaged, road.sold, road.amount], ["Fresh milk", 40, 1, 5, 2, 32, 2880]);
+    assert.deepEqual([road.product, road.dispatched, road.replaced, road.returned, road.damaged, road.sold, road.amount], ["Fresh milk 250 ml", 40, 1, 5, 2, 32, 2880]);
+    const trip = table(day, "Vehicle trips and money").rows.find((r) => r.dispatchNumber === dispatch.dispatchNumber);
+    assert.deepEqual([trip.cash, trip.mpesa, trip.bank, trip.handedIn, trip.variance], [2000, 600, 200, 2800, -80]);
+    assert.equal(day.summary.find((s) => s.label === "Vehicle money handed in (cash, M-Pesa, bank)").value, 2800);
+    assert.equal(day.summary.find((s) => s.label === "Of which banked").value, 200);
     assert.deepEqual(table(day, "Store").columns.map((c) => c.label), ["Date", "Product", "Production", "Opening Stock", "Packed", "Local sales", "Office", "Damages & replacements", "Return", "Closing stock"]);
-    const fresh = table(day, "Store").rows.find((r) => r.product === "Fresh milk");
+    const fresh = table(day, "Store").rows.find((r) => r.product === "Fresh milk 250 ml");
     assert.deepEqual([fresh.production, fresh.opening, fresh.packed, fresh.local, fresh.office, fresh.damages, fresh.returned, fresh.closing], [50, 0, 40, 2, 2, 2, 5, 9]);
-    assert.deepEqual(table(day, "Local sales").columns.map((c) => c.label), ["Date", "Mala", "Raw milk", "Yoghurt 500 ml", "Yoghurt 250 ml", "Yoghurt 150 ml", "Fresh milk", "Amount", "Ref. Number"]);
+    assert.deepEqual(table(day, "Local sales").columns.map((c) => c.label), ["Date", "Mala", "Raw milk", "Yoghurt 500 ml", "Yoghurt 250 ml", "Yoghurt 150 ml", "Fresh milk 250 ml", "Amount", "Ref. Number"]);
     const local = table(day, "Local sales");
     assert.equal(local.rows[0].RAW_MILK, 5);
     assert.equal(local.rows[0].reference, "RCPT-1");
     assert.equal(local.totals.amount, 460);
     const month = await report(`period=month&date=${today}`);
-    assert.equal(table(month, "Store totals for the period").rows.find((r) => r.product === "Fresh milk").closing, 9);
+    assert.equal(table(month, "Store totals for the period").rows.find((r) => r.product === "Fresh milk 250 ml").closing, 9);
     assert.ok(table(day, "Store").rows.some((r) => r.product === "Yoghurt 500 ml"));
     assert.ok(!table(day, "Store totals for the period"));
   });
@@ -483,8 +494,134 @@ if (!url) {
     assert.ok(!(await call("sales", "GET", "/sales/products")).some((p) => p.code === "YOGHURT_150"));
   });
 
-  test("Requisitions and Stores issues", async () => {
-    const feeds = await call("stores", "POST", "/stores/items", { name: "Dairy meal", category: "animal_feeds", unit: "bags", quantityOnHand: 20, reorderLevel: 5 });
+  test("Product requests: Sales asks MVA and MVA sends; the administration asks Sales, given out as office use", async () => {
+    // Who may ask whom.
+    await call("mva", "POST", "/product-requests", { to: "mva", items: [{ productId: malaId, quantity: 1 }] }, { expect: 403 });
+    await call("sales", "POST", "/product-requests", { to: "sales", items: [{ productId: malaId, quantity: 1 }] }, { expect: 403 });
+    await call("hrHead", "POST", "/product-requests", { to: "mva", items: [{ productId: malaId, quantity: 1 }] }, { expect: 403 });
+    await call("sales", "POST", "/product-requests", { to: "mva", items: [{ productId: rawMilkId, quantity: 1 }] }, { expect: 400 });
+    await call("sales", "POST", "/product-requests", { to: "mva", items: [] }, { expect: 400 });
+
+    // Sales asks MVA; MVA sees it, other departments do not.
+    const ask = await call("sales", "POST", "/product-requests", { to: "mva", purpose: "Weekend orders", items: [{ productId: malaId, quantity: 30 }, { productId: freshId, quantity: 20 }] });
+    assert.equal(ask.status, "pending");
+    assert.match(ask.requestNumber, /^PRQ-\d{4}-\d{4}$/);
+    assert.equal(ask.fromDepartment, "sales");
+    assert.ok((await call("mva", "GET", "/product-requests?to=mva&status=pending")).some((r) => r.id === ask.id && r.canSend));
+    assert.equal((await call("mva", "GET", "/dashboard")).productRequests.toHandle, 1);
+    await call("hrHead", "GET", `/product-requests/${ask.id}`, null, { expect: 404 });
+    const lineOf = (request, productId) => request.items.find((i) => i.productId === productId).id;
+    await call("sales", "POST", `/product-requests/${ask.id}/send`, { date: today, items: [{ itemId: lineOf(ask, malaId), quantity: 30 }] }, { expect: 403 });
+
+    // MVA sends (here less fresh milk than asked): a transfer to Sales, out of MVA stock.
+    const mvaStock = async (code) => (await call("mva", "GET", "/stock/mva")).find((s) => s.code === code).onHand;
+    const malaAtMva = await mvaStock("MALA");
+    await call("mva", "POST", `/product-requests/${ask.id}/send`, { date: today, items: [{ itemId: lineOf(ask, malaId), quantity: 31 }] }, { expect: 400 });
+    const sent = await call("mva", "POST", `/product-requests/${ask.id}/send`, { date: today, items: [{ itemId: lineOf(ask, malaId), quantity: 30 }, { itemId: lineOf(ask, freshId), quantity: 15 }] });
+    assert.equal(sent.status, "sent");
+    assert.equal((await call("mva", "GET", `/mva/product-transfers/${sent.transferId}`)).notes, `For request ${ask.requestNumber}`);
+    assert.equal(await mvaStock("MALA"), malaAtMva - 30);
+    assert.deepEqual(sent.items.map((i) => [i.productId, i.quantityGiven]).sort(), [[malaId, 30], [freshId, 15]].sort());
+    await call("mva", "POST", `/product-requests/${ask.id}/send`, { date: today, items: [{ itemId: lineOf(ask, malaId), quantity: 1 }] }, { expect: 409 });
+    assert.equal((await call("sales", "GET", "/product-requests?to=mva&status=sent")).length, 1);
+
+    // Sales receives it under From MVA, as any transfer; that closes the request.
+    await call("sales", "POST", `/mva/product-transfers/${sent.transferId}/receive`, {});
+    assert.equal((await call("sales", "GET", `/product-requests/${ask.id}`)).status, "received");
+    const salesStock = async (code) => (await call("sales", "GET", "/stock/sales")).find((s) => s.code === code).onHand;
+    assert.equal(await salesStock("MALA"), 30);
+
+    // A transfer deleted before Sales receives it puts the request back; MVA may decline, Sales may cancel.
+    const again = await call("sales", "POST", "/product-requests", { to: "mva", items: [{ productId: malaId, quantity: 5 }] });
+    const out = await call("mva", "POST", `/product-requests/${again.id}/send`, { date: today, items: [{ itemId: again.items[0].id, quantity: 5 }] });
+    await call("root", "DELETE", `/mva/product-transfers/${out.transferId}`);
+    const reopened = await call("sales", "GET", `/product-requests/${again.id}`);
+    assert.deepEqual([reopened.status, reopened.transferId, reopened.items[0].quantityGiven], ["pending", null, 0]);
+    await call("mva", "POST", `/product-requests/${again.id}/decline`, { reason: "" }, { expect: 400 });
+    await call("mva", "POST", `/product-requests/${again.id}/cancel`, {}, { expect: 403 });
+    const declined = await call("mva", "POST", `/product-requests/${again.id}/decline`, { reason: "No Mala left today" });
+    assert.deepEqual([declined.status, declined.declineReason], ["declined", "No Mala left today"]);
+    const third = await call("sales", "POST", "/product-requests", { to: "mva", items: [{ productId: freshId, quantity: 2 }] });
+    assert.equal((await call("sales", "POST", `/product-requests/${third.id}/cancel`, {})).status, "cancelled");
+
+    // The administration asks Sales; Sales gives the products out as office use - off stock, not paid for.
+    const office = await call("root", "POST", "/product-requests", { to: "sales", purpose: "Board meeting", items: [{ productId: malaId, quantity: 4 }] });
+    assert.equal(office.fromDepartment, null);
+    await call("mva", "GET", `/product-requests/${office.id}`, null, { expect: 404 });
+    assert.equal((await call("sales", "GET", "/dashboard")).productRequests.toHandle, 1);
+    await call("sales", "POST", `/product-requests/${office.id}/issue`, { date: today, items: [{ itemId: office.items[0].id, quantity: 40 }] }, { expect: 400 });
+    const salesBefore = (await call("sales", "GET", "/sales/sales")).length;
+    const given = await call("sales", "POST", `/product-requests/${office.id}/issue`, { date: today, items: [{ itemId: office.items[0].id, quantity: 4 }] });
+    assert.equal(given.status, "issued");
+    assert.equal(await salesStock("MALA"), 26);
+    assert.equal(given.officeRecords.length, 1);
+    assert.equal((await call("sales", "GET", "/sales/sales")).length, salesBefore);
+    const record = (await call("sales", "GET", "/sales/damages?recordType=office")).find((r) => r.id === given.officeRecords[0].id);
+    assert.deepEqual([record.quantity, record.reason], [4, `Office request ${office.requestNumber}: Board meeting`]);
+    const storeDay = (await call("sales", "GET", `/reports/department?department=sales&part=store&period=day&date=${today}`)).reports[0];
+    assert.equal(storeDay.sections.find((s) => s.title === "Store").rows.find((r) => r.product === "Mala").office, 4);
+    // The General Manager sees every request, but handles none.
+    const all = await call("gm", "GET", "/product-requests");
+    assert.ok(all.some((r) => r.id === ask.id) && all.some((r) => r.id === office.id) && all.every((r) => !r.canSend && !r.canIssue));
+  });
+
+  test("Stores: quantities only, goods received and issued, its three reports; requisitions and purchase orders without Stores", async () => {
+    const shift = (days) => new Date(Date.parse(today) + days * 86400000).toISOString().slice(0, 10);
+    // Items carry no cost; the opening quantity is counted on a given day.
+    const feeds = await call("stores", "POST", "/stores/items", { name: "Dairy meal", category: "animal_feeds", unit: "bags", openingQuantity: 20, openingDate: shift(-2), reorderLevel: 5, unitCost: 2500 });
+    assert.deepEqual([feeds.quantityOnHand, feeds.openingQuantity, feeds.unitCost], [20, 20, 0]);
+    await call("stores", "POST", "/stores/items", { name: "Rope", category: "other", unit: "pieces", openingQuantity: -1 }, { expect: 400 });
+
+    // Goods received: no supplier, cost or delivery note, and opening stock is not something received.
+    const grn = await call("stores", "POST", "/stores/receipts", { date: today, itemId: feeds.id, quantity: 30, source: "purchase", unitCost: 2400, deliveryNote: "DN-1", supplierId: feeds.id });
+    assert.deepEqual([grn.unitCost, grn.deliveryNote, grn.supplierId], [0, null, null]);
+    await call("stores", "POST", "/stores/receipts", { date: today, itemId: feeds.id, quantity: 5, source: "opening" }, { expect: 400 });
+
+    // Stock out when a department asks, with no requisition. Numbered SO-year-number.
+    await call("stores", "POST", "/stores/issues", { date: today, itemId: feeds.id, quantity: 60, department: "livestock", issuedTo: "Herdsman" }, { expect: 409 });
+    const issue = await call("stores", "POST", "/stores/issues", { date: today, itemId: feeds.id, quantity: 10, department: "livestock", issuedTo: "Herdsman", purpose: "Dairy meal for the week", requisitionId: feeds.id });
+    assert.equal(issue.requisitionId, null);
+    assert.match(issue.issueNumber, /^SO-\d{4}-\d{4}$/);
+    assert.equal((await call("stores", "GET", `/stores/items/${feeds.id}`)).quantityOnHand, 40);
+    await call("livestock", "GET", "/stores/items", null, { expect: 403 });
+    await call("livestock", "GET", "/stores/issues", null, { expect: 403 });
+
+    // The reports: goods issued, goods received and stock remaining (opening + received - issued) for any period.
+    const storesReport = async (query) => (await call("stores", "GET", `/reports/department?department=stores&${query}`)).reports[0];
+    const feedsLine = (report) => {
+      const line = report.sections.find((s) => s.part === "stock").rows.find((r) => r.item === "Dairy meal");
+      return line && [line.opening, line.received, line.out, line.remaining, line.note];
+    };
+    const day = await storesReport(`period=day&date=${today}`);
+    assert.deepEqual(day.sections.map((s) => s.title.replace(/ at .+$/, "")), ["Stock out", "Goods received", "Stock remaining"]);
+    assert.deepEqual(day.parts.map((p) => p.title), ["Stock out", "Goods received", "Stock remaining"]);
+    assert.deepEqual(day.sections.find((s) => s.part === "stock").columns.map((c) => c.label).slice(4, 8), ["Opening", "Received", "Stock out", "Remaining"]);
+    assert.equal(day.sections[0].rows.find((r) => r.issueNumber === issue.issueNumber).purpose, "Dairy meal for the week");
+    assert.equal(day.sections[1].rows.find((r) => r.receiptNumber === grn.receiptNumber).source, "Purchase");
+    assert.deepEqual(feedsLine(day), [20, 30, 10, 40, ""]);
+    assert.deepEqual(feedsLine(await storesReport(`period=day&date=${shift(-1)}`)), [20, 0, 0, 20, ""]);
+    assert.equal(feedsLine(await storesReport(`period=day&date=${shift(-3)}`)), undefined);
+    assert.deepEqual(feedsLine(await storesReport(`period=custom&from=${shift(-1)}&to=${today}`)), [20, 30, 10, 40, ""]);
+    await call("stores", "POST", "/stores/issues", { date: today, itemId: feeds.id, quantity: 36, department: "crops", issuedTo: "Farm hand" });
+    assert.deepEqual(feedsLine(await storesReport(`period=day&date=${today}`)), [20, 30, 46, 4, "Reorder"]);
+    const year = await storesReport(`period=year&date=${today}`);
+    const byDepartment = year.sections.find((s) => s.title === "Stock out by department");
+    assert.deepEqual(byDepartment.rows.map((r) => [r.department, r.count, r.quantity]), [["Crops", 1, 36], ["Livestock", 1, 10]]);
+
+    // Each report prints on its own.
+    const only = await call("stores", "GET", `/reports/department?department=stores&part=stock&period=day&date=${today}`);
+    assert.equal(only.reports[0].heading, `Stores: Stock remaining - ${only.period.label}`);
+    assert.equal(only.reports[0].sections.length, 1);
+    assert.ok(only.reports[0].summary.length && only.reports[0].summary.every((s) => s.part === "stock"));
+    const pdf = await call("stores", "GET", `/reports/department?department=stores&part=out&period=month&date=${today}&format=pdf`, null, { raw: true });
+    assert.equal(pdf.headers.get("content-type"), "application/pdf");
+    assert.match(pdf.headers.get("content-disposition"), /keiyian-stores-stock-out-report-\d{4}-\d{2}\.pdf/);
+    await call("stores", "GET", "/reports/department?department=stores&part=costs&period=day", null, { expect: 400 });
+    await call("hrHead", "GET", "/reports/department?department=hr&part=stock&period=day", null, { expect: 400 });
+
+    // Stores has no requisitions: departments ask by word of mouth. Accounts fulfils approved ones.
+    assert.deepEqual((await call("stores", "GET", "/auth/me")).permissions.requisitions, { raise: false, seeAll: false, decide: false, fulfil: false });
+    await call("stores", "POST", "/requisitions", { title: "Gloves", purpose: "Store work", items: [{ description: "Gloves", quantity: 2 }] }, { expect: 403 });
     const req = await call("livestock", "POST", "/requisitions", { title: "Feeds", purpose: "Dairy meal for the week", items: [{ description: "Dairy meal", quantity: 10, unit: "bags", unitCost: 2500 }] });
     assert.equal(req.totalAmount, 25000);
     await call("accounts", "POST", `/requisitions/${req.id}/decision`, { decision: "approve" }, { expect: 403 });
@@ -493,19 +630,17 @@ if (!url) {
     await call("livestock", "PUT", `/requisitions/${req.id}`, { title: "Feeds", purpose: "Dairy meal", items: [{ description: "Dairy meal", quantity: 10, unitCost: 2400 }] });
     assert.equal((await call("gm", "GET", "/requisitions/inbox")).length, 1);
     await call("gm", "POST", `/requisitions/${req.id}/decision`, { decision: "approve" });
-
-    await call("stores", "POST", "/stores/issues", { date: today, itemId: feeds.id, quantity: 50, department: "livestock", issuedTo: "Herdsman" }, { expect: 409 });
-    await call("stores", "POST", "/stores/issues", { date: today, itemId: feeds.id, quantity: 10, department: "livestock", issuedTo: "Herdsman", requisitionId: req.id, markRequisitionFulfilled: true });
-    assert.equal((await call("stores", "GET", `/stores/items/${feeds.id}`)).quantityOnHand, 10);
+    await call("stores", "POST", `/requisitions/${req.id}/fulfil`, null, { expect: 403 });
+    await call("accounts", "POST", `/requisitions/${req.id}/fulfil`);
     assert.equal((await call("livestock", "GET", `/requisitions/${req.id}`)).status, "fulfilled");
     await call("crops", "GET", `/requisitions/${req.id}`, null, { expect: 404 });
 
+    // No purchase orders in Stores: Accounts raises and pays them, and nothing is received against them.
     const supplier = await call("accounts", "POST", "/accounts/suppliers", { name: "Unga Feeds Ltd" });
-    const po = await call("accounts", "POST", "/accounts/purchase-orders", { date: today, supplierId: supplier.id, items: [{ storeItemId: feeds.id, description: "Dairy meal", quantity: 30, unitPrice: 2400 }] });
-    await call("stores", "POST", `/accounts/purchase-orders/${po.id}/receive`, { date: today, items: [{ itemId: po.items[0].id, quantity: 20 }] });
-    const received = await call("stores", "POST", `/accounts/purchase-orders/${po.id}/receive`, { date: today, items: [{ itemId: po.items[0].id, quantity: 10 }] });
-    assert.equal(received.status, "received");
-    assert.equal((await call("stores", "GET", `/stores/items/${feeds.id}`)).quantityOnHand, 40);
+    const po = await call("accounts", "POST", "/accounts/purchase-orders", { date: today, supplierId: supplier.id, items: [{ description: "Dairy meal", quantity: 30, unitPrice: 2400 }] });
+    await call("stores", "GET", "/accounts/purchase-orders", null, { expect: 403 });
+    await call("stores", "GET", "/accounts/suppliers", null, { expect: 403 });
+    await call("root", "POST", `/accounts/purchase-orders/${po.id}/receive`, { date: today, items: [{ itemId: po.items[0].id, quantity: 30 }] }, { expect: 404 });
     await call("accounts", "POST", `/accounts/purchase-orders/${po.id}/pay`, { accountId: cashId, date: today, amount: 72000 });
     await call("accounts", "POST", `/accounts/purchase-orders/${po.id}/pay`, { accountId: cashId, date: today, amount: 1 }, { expect: 400 });
   });
@@ -636,6 +771,22 @@ if (!url) {
     assert.equal(byMonth.rows.length, Number(yearReport.period.asAt.slice(5, 7)));
     assert.equal(byMonth.totals.local, yearSales.summary.find((s) => s.label === "Local sales").value);
     assert.ok(!yearSales.sections.some((s) => s.title === "Local sales"));
+
+    // Sales and MVA print their sheets one at a time too; the sidebar reads the list from /meta.
+    const meta = await call("sales", "GET", "/meta");
+    assert.deepEqual(Object.fromEntries(Object.entries(meta.reportParts).map(([d, parts]) => [d, parts.map((p) => p.key)])), { mva: ["production", "output"], sales: ["vehicles", "store", "local"], stores: ["out", "received", "stock"] });
+    const salesPart = async (part) => (await call("sales", "GET", `/reports/department?department=sales&part=${part}&period=day&date=${today}`)).reports[0];
+    assert.deepEqual((await salesPart("vehicles")).sections.map((s) => s.title), ["Vehicles", "Vehicle trips and money"]);
+    assert.deepEqual((await salesPart("store")).sections.map((s) => s.title), ["Store"]);
+    assert.deepEqual((await salesPart("local")).sections.map((s) => s.title), ["Local sales"]);
+    assert.equal((await salesPart("local")).heading, `Sales: Local sales register - ${(await call("sales", "GET", `/reports/department?department=sales&period=day&date=${today}`)).period.label}`);
+    assert.deepEqual((await salesPart("local")).summary.map((s) => s.label), ["Local sales", "Collected at counter"]);
+    const mvaPart = async (part) => (await call("mva", "GET", `/reports/department?department=mva&part=${part}&period=month&date=${today}`)).reports[0];
+    assert.deepEqual((await mvaPart("production")).sections.map((s) => s.title), ["Production report"]);
+    assert.deepEqual((await mvaPart("output")).sections.map((s) => s.title), ["Product output"]);
+    assert.ok((await mvaPart("production")).summary.some((s) => s.label === "Total intake"));
+    // The full report still carries everything.
+    assert.ok((await call("sales", "GET", `/reports/department?department=sales&period=day&date=${today}`)).reports[0].sections.some((s) => s.title.startsWith("Damages")));
 
     // The old daily address still works; access rules and bad periods are enforced.
     const { reports } = await call("gm", "GET", `/reports/daily?department=all&date=${today}`);

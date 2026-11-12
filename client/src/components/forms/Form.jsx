@@ -8,7 +8,7 @@ import { fetchCached } from "../../lib/useFetch";
 import { Alert, Button, FieldWrap, Input, Kbd, Modal, Select, Spinner, Textarea } from "../ui/ui";
 
 // Field definition:
-//   { name, label, type, required, options | ref, span, help, placeholder,
+//   { name, label, type, required, options | ref, span (2: full width, "third"), help, placeholder,
 //     showIf(values), readOnly, step, min, columns (items), fixedRows }
 // type: text | email | tel | number | date | month | textarea | select |
 //       checkbox | items | display
@@ -203,18 +203,19 @@ const validate = (fields, values) => {
 };
 
 export const FormFields = ({ fields, values, setValue, errors = {} }) => (
-  <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2">
+  // Six columns: a field takes half the row, a third (span: "third") or all of it (span: 2, text areas and item lists).
+  <div className="grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-6">
     {fields.filter((f) => !f.showIf || f.showIf(values)).map((field, index) => {
       if (field.type === "section") {
         return (
-          <div key={field.name || `section-${index}`} className={cx("sm:col-span-2", index > 0 && "border-t border-slate-100 pt-5")}>
+          <div key={field.name || `section-${index}`} className={cx("sm:col-span-6", index > 0 && "border-t border-slate-100 pt-5")}>
             <h3 className="text-sm font-semibold text-slate-900">{field.label}</h3>
             {field.help && <p className="mt-0.5 text-xs text-slate-500">{field.help}</p>}
           </div>
         );
       }
       const id = `field-${field.name}`;
-      const span = field.span === 2 || ["textarea", "items"].includes(field.type) ? "sm:col-span-2" : "";
+      const span = field.span === 2 || ["textarea", "items"].includes(field.type) ? "sm:col-span-6" : field.span === "third" ? "sm:col-span-2" : "sm:col-span-3";
       const error = errors[field.name];
       return (
         <FieldWrap key={field.name} label={field.type === "checkbox" ? null : field.label} htmlFor={id} required={field.required} help={field.help} error={error} className={span}>

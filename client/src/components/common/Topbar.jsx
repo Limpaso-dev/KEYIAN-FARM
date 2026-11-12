@@ -8,7 +8,9 @@ import { currentSection, findNavItem, NAV_GROUPS } from "../../navigation";
 import { cx } from "../../lib/cx";
 import { Kbd } from "../ui/ui";
 
-/** Requisitions needing this user's attention. */
+const productLines = (items) => (items || []).map((i) => `${i.product?.name} ${Number(i.quantity)}`).join(", ");
+
+/** Requisitions and product requests needing this user's attention. */
 const useNotifications = (user, permissions) => {
   const [items, setItems] = useState([]);
   const [failed, setFailed] = useState(false);
@@ -20,10 +22,19 @@ const useNotifications = (user, permissions) => {
         user.department ? get("/requisitions", { status: "returned" }) : [],
       ]);
       const toFulfil = permissions?.requisitions?.fulfil ? await get("/requisitions", { status: "approved" }) : [];
+      // Product requests: those waiting for this user's department, and products MVA has sent to Sales on request.
+      const handles = permissions?.productRequests?.handles || [];
+      const [toHandle, sent] = await Promise.all([
+        Promise.all(handles.map((to) => get("/product-requests", { to, status: "pending" }))).then((lists) => lists.flat()),
+        permissions?.productRequests?.raiseTo?.includes("mva") ? get("/product-requests", { to: "mva", status: "sent" }) : [],
+      ]);
+      const toAccounts = "/requisitions?tab=accounts";
       setItems([
-        ...inbox.map((r) => ({ id: `d-${r.id}`, title: "Requisition waiting for your approval", detail: `${r.requisitionNumber} · ${r.title}`, amount: r.totalAmount, at: r.createdAt })),
-        ...mine.filter((r) => r.requestedById === user.id).map((r) => ({ id: `r-${r.id}`, title: "Your requisition was returned", detail: `${r.requisitionNumber} · ${r.decisionComment || r.title}`, at: r.decidedAt })),
-        ...toFulfil.map((r) => ({ id: `f-${r.id}`, title: "Approved requisition to fulfil", detail: `${r.requisitionNumber} · ${r.title} (${r.department})`, amount: r.totalAmount, at: r.decidedAt })),
+        ...inbox.map((r) => ({ id: `d-${r.id}`, title: "Requisition waiting for your approval", detail: `${r.requisitionNumber} · ${r.title}`, amount: r.totalAmount, at: r.createdAt, to: toAccounts })),
+        ...mine.filter((r) => r.requestedById === user.id).map((r) => ({ id: `r-${r.id}`, title: "Your requisition was returned", detail: `${r.requisitionNumber} · ${r.decisionComment || r.title}`, at: r.decidedAt, to: toAccounts })),
+        ...toFulfil.map((r) => ({ id: `f-${r.id}`, title: "Approved requisition to fulfil", detail: `${r.requisitionNumber} · ${r.title} (${r.department})`, amount: r.totalAmount, at: r.decidedAt, to: toAccounts })),
+        ...toHandle.map((r) => ({ id: `p-${r.id}`, title: r.toDepartment === "mva" ? "Sales asked for products" : "Office request from the administration", detail: `${r.requestNumber} · ${productLines(r.items)}`, at: r.createdAt, to: `/requisitions?tab=${r.toDepartment}` })),
+        ...sent.map((r) => ({ id: `s-${r.id}`, title: "MVA sent the products you asked for", detail: `${r.requestNumber} · receive them under From MVA`, at: r.handledAt, to: "/sales?tab=received" })),
       ].sort((a, b) => new Date(b.at) - new Date(a.at)));
       setFailed(false);
     } catch {
@@ -102,7 +113,7 @@ const Breadcrumbs = () => {
         <>
           <span className="truncate text-slate-500">{item.label}</span>
           {chevron}
-          <span className="truncate font-medium text-slate-800" aria-current="page">{section.label}</span>
+          <span className="truncate font-medium text-slate-800" aria-current="page">{section.crumb || section.label}</span>
         </>
       ) : (
         <span className="truncate font-medium text-slate-800" aria-current="page">{item.label}</span>
@@ -139,7 +150,7 @@ const Notifications = () => {
             <ul className="scrollbar-thin max-h-96 divide-y divide-slate-100 overflow-y-auto">
               {items.slice(0, 15).map((item) => (
                 <li key={item.id}>
-                  <button type="button" onClick={() => { setOpen(false); navigate("/requisitions"); }} className="flex w-full gap-3 px-4 py-3 text-left transition hover:bg-slate-50">
+                  <button type="button" onClick={() => { setOpen(false); navigate(item.to || "/requisitions"); }} className="flex w-full gap-3 px-4 py-3 text-left transition hover:bg-slate-50">
                     <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-50 text-primary-700"><ClipboardList size={15} /></span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium text-slate-800">{item.title}</span>
@@ -154,7 +165,7 @@ const Notifications = () => {
             <div className="px-4 py-10 text-center">
               <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><CheckCheck size={20} /></span>
               <p className="mt-3 text-sm font-medium text-slate-700">{failed ? "Could not load notifications" : "You're all caught up"}</p>
-              <p className="mt-0.5 text-xs text-slate-500">Requisitions that need you will appear here.</p>
+              <p className="mt-0.5 text-xs text-slate-500">Requisitions and requests that need you will appear here.</p>
             </div>
           )}
         </section>

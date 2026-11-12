@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CornerDownLeft, KeyRound, LogOut, Search } from "lucide-react";
 import { useAuth } from "../../context/useAuth";
-import { NAV_GROUPS, navigation, sectionPath, sectionsFor } from "../../navigation";
+import { linksOf, NAV_GROUPS, navigation, sectionPath, sectionsFor } from "../../navigation";
 import { cx } from "../../lib/cx";
 import { Kbd } from "../ui/ui";
 
@@ -27,9 +27,9 @@ const CommandPalette = ({ open, onClose }) => {
         text: `${item.label} ${item.short || ""} ${item.hint} ${NAV_GROUPS.find((g) => g.key === item.group)?.label}`,
         run: () => navigate(item.path),
       })),
-      ...pages.flatMap((item) => sectionsFor(item, auth).map((section) => ({
-        id: `${item.path}/${section.key}`, label: section.label, hint: item.label, icon: item.icon, section: true,
-        text: `${section.label} ${item.label} ${item.short || ""}`,
+      ...pages.flatMap((item) => linksOf(sectionsFor(item, auth)).map((section) => ({
+        id: `${item.path}/${section.key}`, label: section.crumb || section.label, hint: item.label, icon: item.icon, section: true,
+        text: `${section.crumb || section.label} ${item.label} ${item.short || ""}`,
         run: () => navigate(sectionPath(item, section)),
       }))),
       { id: "password", label: "Change password", hint: "Account", icon: KeyRound, text: "Change password Account", run: () => navigate("/change-password") },

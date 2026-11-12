@@ -171,7 +171,7 @@ const DispatchDetails = ({ row }) => (
       ))}
     </tbody>
     {row.status === "reconciled" && (
-      <tfoot className="font-medium"><tr><td className="pt-2" colSpan={8}>Cash {money(row.cashReturned)} + M-Pesa {money(row.mpesaReturned)} against {money(row.expectedAmount)} expected: {row.variance < 0 ? <Badge tone="red">Short {money(-row.variance)}</Badge> : row.variance > 0 ? <Badge tone="blue">Over {money(row.variance)}</Badge> : <Badge tone="green">Balanced</Badge>}</td></tr></tfoot>
+      <tfoot className="font-medium"><tr><td className="pt-2" colSpan={8}>Cash {money(row.cashReturned)} + M-Pesa {money(row.mpesaReturned)} + bank {money(row.bankDeposit)} against {money(row.expectedAmount)} expected: {row.variance < 0 ? <Badge tone="red">Short {money(-row.variance)}</Badge> : row.variance > 0 ? <Badge tone="blue">Over {money(row.variance)}</Badge> : <Badge tone="green">Balanced</Badge>}</td></tr></tfoot>
     )}
   </table>
 );
@@ -182,7 +182,7 @@ const soldOnTrip = (r) => r.loaded - blankToZero(r.quantityReturned) - blankToZe
 const TripMoney = ({ row }) => (
   <>
     <span className="block">Expected {money(row.expectedAmount)}</span>
-    {row.status === "reconciled" && <span className="block text-slate-500">Handed in {money(row.cashReturned + row.mpesaReturned)}</span>}
+    {row.status === "reconciled" && <span className="block text-slate-500">Handed in {money(row.cashReturned + row.mpesaReturned + row.bankDeposit)}</span>}
     {row.status === "reconciled" && row.variance !== 0 && <span className={`block font-medium ${row.variance < 0 ? "text-rose-700" : "text-sky-700"}`}>{row.variance < 0 ? "Short" : "Over"} {money(Math.abs(row.variance))}</span>}
   </>
 );
@@ -246,13 +246,14 @@ const dispatches = {
         total: (r) => soldOnTrip(r) * r.unitPrice,
         formatTotal: (t) => `Expected: ${money(t)}`,
       },
-      { name: "cashReturned", label: "Cash handed in (KES)", type: "number", required: true },
-      { name: "mpesaReturned", label: "M-Pesa received (KES)", type: "number" },
+      { name: "cashReturned", label: "Cash handed in (KES)", type: "number", required: true, span: "third" },
+      { name: "mpesaReturned", label: "M-Pesa received (KES)", type: "number", span: "third" },
+      { name: "bankDeposit", label: "Bank deposit (KES)", type: "number", span: "third" },
       { name: "notes", label: "Notes", type: "textarea" },
     ],
     intro: () => <p className="text-sm text-slate-600">Anything already recorded during the day is filled in. Add what is left. Whatever was not returned, replaced or damaged counts as sold.</p>,
     initial: (r) => ({ items: r.items.map((i) => ({ itemId: i.id, product: i.product?.name, loaded: i.quantityDispatched, unitPrice: i.unitPrice, quantityReturned: i.quantityReturned || "", quantityReplaced: i.quantityReplaced || "", quantityDamaged: i.quantityDamaged || "" })) }),
-    toPayload: (v) => ({ cashReturned: v.cashReturned, mpesaReturned: v.mpesaReturned || 0, notes: v.notes, items: v.items.map((i) => ({ itemId: i.itemId, quantityReturned: blankToZero(i.quantityReturned), quantityReplaced: blankToZero(i.quantityReplaced), quantityDamaged: blankToZero(i.quantityDamaged) })) }),
+    toPayload: (v) => ({ cashReturned: v.cashReturned, mpesaReturned: v.mpesaReturned || 0, bankDeposit: v.bankDeposit || 0, notes: v.notes, items: v.items.map((i) => ({ itemId: i.itemId, quantityReturned: blankToZero(i.quantityReturned), quantityReplaced: blankToZero(i.quantityReplaced), quantityDamaged: blankToZero(i.quantityDamaged) })) }),
     success: (d) => (d.variance < 0 ? `Reconciled. The crew is short by ${money(-d.variance)}.` : "Reconciled and returned stock added back"),
   }],
   toolbar: (ctx) => ctx.can("dispatches", "write") && (

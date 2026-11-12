@@ -5,15 +5,20 @@ import { audit } from "../../lib/audit.js";
 import { crud, inTransaction } from "../../lib/crud.js";
 import { badRequest, conflict, notFound, ok } from "../../lib/http.js";
 import { nextNumber } from "../../lib/numbers.js";
+import { nairobiToday } from "../../lib/periods.js";
 import { takeStoreItem } from "../../lib/stock.js";
 import { parseBody } from "../../lib/validate.js";
+
+// Stores keeps quantities only: no costs, suppliers, delivery notes or
+// purchase orders. Departments ask for items by word of mouth, so stock out
+// is not tied to requisitions.
 
 const router = express.Router();
 const itemBrief = { select: { id: true, code: true, name: true, unit: true, category: true } };
 
 // ---------------------------------------------------------------------
-// Items. Quantity on hand changes only through receipts and issues;
-// the opening quantity can be set when the item is created.
+// Items. Quantity on hand changes only through goods received and stock out; the
+// opening quantity, and the day it was counted, are set when the item is added.
 // ---------------------------------------------------------------------
 router.get("/items/low-stock", allow("storeItems", "read"), async (req, res) => {
   const items = await prisma.storeItem.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
@@ -29,11 +34,17 @@ router.use("/items", crud({
     name: "string!",
     category: "option:storeCategories!",
     unit: "string!",
-    quantityOnHand: "decimal",
+    openingQuantity: "decimal",
+    openingDate: "date",
     reorderLevel: "decimal",
-    unitCost: "decimal",
   },
-  updateFields: { name: "string!", category: "option:storeCategories!", unit: "string!", reorderLevel: "decimal", unitCost: "decimal", isActive: "bool" },
+  updateFields: { name: "string!", category: "option:storeCategories!", unit: "string!", reorderLevel: "decimal", isActive: "bool" },
+  prepare: (data, { existing }) => {
+    if (existing) return data;
+    const opening = data.openingQuantity || 0;
+    if (opening < 0) throw badRequest("The opening quantity cannot be negative");
+    return { ...data, openingQuantity: opening, quantityOnHand: opening, openingDate: data.openingDate || nairobiToday() };
+  },
   search: ["code", "name"],
   filters: ["category", "isActive"],
   orderBy: [{ category: "asc" }, { name: "asc" }],
@@ -53,10 +64,7 @@ receiptRouter.post("/", allow("storeReceipts", "write"), async (req, res) => {
     date: "date!",
     itemId: "id!",
     quantity: "decimal!",
-    unitCost: "decimal",
     source: "option:receiptSources!",
-    supplierId: "id",
-    deliveryNote: "string",
     notes: "text",
   }, req.body);
   if (!(data.quantity > 0)) throw badRequest("Quantity must be more than zero");
@@ -64,13 +72,10 @@ receiptRouter.post("/", allow("storeReceipts", "write"), async (req, res) => {
     const item = await tx.storeItem.findUnique({ where: { id: data.itemId } });
     if (!item) throw notFound("Store item");
     const created = await tx.storeReceipt.create({
-      data: { ...data, unitCost: data.unitCost ?? item.unitCost, receiptNumber: await nextNumber(tx, "GRN", data.date) },
-      include: { item: itemBrief, supplier: { select: { id: true, name: true } } },
+      data: { ...data, receiptNumber: await nextNumber(tx, "GRN", data.date) },
+      include: { item: itemBrief },
     });
-    await tx.storeItem.update({
-      where: { id: item.id },
-      data: { quantityOnHand: { increment: data.quantity }, ...(data.unitCost ? { unitCost: data.unitCost } : {}) },
-    });
+    await tx.storeItem.update({ where: { id: item.id }, data: { quantityOnHand: { increment: data.quantity } } });
     await audit(tx, { user: req.user, action: "create", entity: "storeReceipt", entityId: created.id, after: created });
     return created;
   });
@@ -81,9 +86,9 @@ router.use("/receipts", crud({
   resource: "storeReceipts",
   model: "storeReceipt",
   fields: {},
-  include: { item: itemBrief, supplier: { select: { id: true, name: true } }, purchaseOrder: { select: { id: true, poNumber: true } } },
+  include: { item: itemBrief },
   dateField: "date",
-  filters: ["itemId", "source", "supplierId"],
+  filters: ["itemId", "source"],
   orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   create: false,
   update: false,
@@ -91,8 +96,8 @@ router.use("/receipts", crud({
 }));
 
 // ---------------------------------------------------------------------
-// Issues to departments (feeds to Livestock, tools to MVA, fertiliser to
-// Crops, ...). Optionally against an approved requisition.
+// Stock out: items handed to departments (feeds to Livestock, tools to
+// MVA, fertiliser to Crops, ...). Numbered SO-year-number.
 // ---------------------------------------------------------------------
 const issueRouter = express.Router();
 issueRouter.post("/", allow("storeIssues", "write"), async (req, res) => {
@@ -102,26 +107,14 @@ issueRouter.post("/", allow("storeIssues", "write"), async (req, res) => {
     quantity: "decimal!",
     department: "option:departments!",
     issuedTo: "string!",
-    requisitionId: "id",
     purpose: "text",
-    markRequisitionFulfilled: "bool",
   }, req.body);
   if (!(data.quantity > 0)) throw badRequest("Quantity must be more than zero");
-  const { markRequisitionFulfilled, ...fields } = data;
   const issue = await inTransaction(async (tx) => {
-    if (fields.requisitionId) {
-      const requisition = await tx.requisition.findUnique({ where: { id: fields.requisitionId } });
-      if (!requisition) throw notFound("Requisition");
-      if (requisition.status !== "approved") throw conflict("Only approved requisitions can be issued against");
-      if (requisition.department !== fields.department) throw badRequest("The requisition belongs to a different department");
-      if (markRequisitionFulfilled) {
-        await tx.requisition.update({ where: { id: requisition.id }, data: { status: "fulfilled", fulfilledAt: new Date() } });
-      }
-    }
-    await takeStoreItem(tx, fields.itemId, fields.quantity);
+    await takeStoreItem(tx, data.itemId, data.quantity);
     const created = await tx.storeIssue.create({
-      data: { ...fields, issueNumber: await nextNumber(tx, "ISS", fields.date) },
-      include: { item: itemBrief, requisition: { select: { id: true, requisitionNumber: true } } },
+      data: { ...data, issueNumber: await nextNumber(tx, "SO", data.date) },
+      include: { item: itemBrief },
     });
     await audit(tx, { user: req.user, action: "create", entity: "storeIssue", entityId: created.id, after: created });
     return created;
@@ -133,7 +126,7 @@ router.use("/issues", crud({
   resource: "storeIssues",
   model: "storeIssue",
   fields: {},
-  include: { item: itemBrief, requisition: { select: { id: true, requisitionNumber: true } } },
+  include: { item: itemBrief },
   dateField: "date",
   filters: ["itemId", "department"],
   orderBy: [{ date: "desc" }, { createdAt: "desc" }],

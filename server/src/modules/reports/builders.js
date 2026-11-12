@@ -1,4 +1,4 @@
-import { optionLabel, optionValues } from "../../config/catalog.js";
+import { optionLabel, optionValues, REPORT_PARTS } from "../../config/catalog.js";
 import { bucketsOf, dayText } from "../../lib/periods.js";
 import { stockSummary } from "../../lib/stock.js";
 import { round2 } from "../../lib/validate.js";
@@ -22,6 +22,9 @@ const name = (person) => (person ? `${person.firstName} ${person.lastName}` : ""
 const col = (key, label, type) => ({ key, label, ...(type ? { type } : {}) });
 const within = (range) => ({ gte: range.from, lt: range.to });
 const listsEachRecord = (range) => range.bucket === "day";
+
+/** Marks a section (or a summary figure) as belonging to one of the department's parts (config/catalog.js REPORT_PARTS). */
+const inPart = (part, item) => item && { ...item, part };
 
 const section = (title, columns, rows, totalKeys = []) => ({
   title,
@@ -232,20 +235,21 @@ const mva = async (db, range) => {
   }
   return {
     title: "Milk Value Addition",
+    parts: REPORT_PARTS.mva,
     summary: [
-      { label: "Milk from Livestock (litres)", value: fromLivestock },
-      { label: "Milk from farmers (litres)", value: fromFarmers },
-      { label: "Farmers delivering", value: perFarmer.size },
-      { label: "Total intake", value: sum(days, "total") },
-      { label: "Milk allocated", value: sum(days, "allocated") },
-      { label: "Production variance (L)", value: sum(days, "variance") },
-      { label: "Product output variance (L)", value: round2(sum(figures, "malaVariance") + sum(figures, "yoghurtVariance")) },
+      inPart("production", { label: "Milk from Livestock (litres)", value: fromLivestock }),
+      inPart("production", { label: "Milk from farmers (litres)", value: fromFarmers }),
+      inPart("production", { label: "Farmers delivering", value: perFarmer.size }),
+      inPart("production", { label: "Total intake", value: sum(days, "total") }),
+      inPart("production", { label: "Milk allocated", value: sum(days, "allocated") }),
+      inPart("production", { label: "Production variance (L)", value: sum(days, "variance") }),
+      inPart("output", { label: "Product output variance (L)", value: round2(sum(figures, "malaVariance") + sum(figures, "yoghurtVariance")) }),
       { label: "Transfers to Sales", value: outgoing.length },
       { label: "Farmer milk value", value: sum(deliveries, "amount"), type: "money" },
     ],
     sections: [
-      productionRegister(range, days),
-      outputRegister(range, figures),
+      inPart("production", productionRegister(range, days)),
+      inPart("output", outputRegister(range, figures)),
       section("Farmer deliveries", [col("number", "No."), col("farmer", "Farmer"), col("morning", "Morning", "number"), col("midday", "Midday", "number"), col("evening", "Evening", "number"), col("litres", "Litres", "number"), col("amount", "Value", "money")],
         [...perFarmer.values()], ["morning", "midday", "evening", "litres", "amount"]),
       listsEachRecord(range) && section("Received from Livestock", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("dairy", "Dairy"), col("session", "Session"), col("sent", "Sent", "number"), col("received", "Received", "number")],
@@ -383,7 +387,9 @@ const sales = async (db, range) => {
   ]);
 
   const reconciled = dispatches.filter((d) => d.status === "reconciled");
-  const handedIn = (rows) => round2(sum(rows, "cashReturned") + sum(rows, "mpesaReturned"));
+  // Money a crew hands in: cash, M-Pesa and bank deposits.
+  const moneyIn = (d) => round2(Number(d.cashReturned) + Number(d.mpesaReturned) + Number(d.bankDeposit));
+  const handedIn = (rows) => round2(rows.reduce((total, d) => total + moneyIn(d), 0));
   const localTotal = sum(localSales, "totalAmount");
   const vehicleExpected = sum(reconciled, "expectedAmount");
   const vehicleCollected = handedIn(reconciled);
@@ -392,35 +398,38 @@ const sales = async (db, range) => {
 
   const perVehicle = new Map();
   for (const d of reconciled) {
-    const entry = perVehicle.get(d.vehicleId) || { vehicle: d.vehicle.registrationNumber, trips: 0, expected: 0, handedIn: 0, variance: 0 };
+    const entry = perVehicle.get(d.vehicleId) || { vehicle: d.vehicle.registrationNumber, trips: 0, expected: 0, bank: 0, handedIn: 0, variance: 0 };
+    entry.bank = round2(entry.bank + Number(d.bankDeposit));
     entry.trips += 1;
     entry.expected = round2(entry.expected + Number(d.expectedAmount));
-    entry.handedIn = round2(entry.handedIn + Number(d.cashReturned) + Number(d.mpesaReturned));
+    entry.handedIn = round2(entry.handedIn + moneyIn(d));
     entry.variance = round2(entry.variance + Number(d.variance));
     perVehicle.set(d.vehicleId, entry);
   }
 
   return {
     title: "Sales",
+    parts: REPORT_PARTS.sales,
     summary: [
-      { label: "Local sales", value: localTotal, type: "money" },
-      { label: "Collected at counter", value: collectedLocal, type: "money" },
-      { label: "Vehicle sales (expected)", value: vehicleExpected, type: "money" },
-      { label: "Vehicle money handed in", value: vehicleCollected, type: "money" },
-      { label: "Vehicle shortage / excess", value: round2(vehicleCollected - vehicleExpected), type: "money" },
-      { label: "Vehicles not yet reconciled", value: dispatches.length - reconciled.length },
-      { label: "Damage / replacement value", value: sum(losses, "value"), type: "money" },
+      inPart("local", { label: "Local sales", value: localTotal, type: "money" }),
+      inPart("local", { label: "Collected at counter", value: collectedLocal, type: "money" }),
+      inPart("vehicles", { label: "Vehicle sales (expected)", value: vehicleExpected, type: "money" }),
+      inPart("vehicles", { label: "Vehicle money handed in (cash, M-Pesa, bank)", value: vehicleCollected, type: "money" }),
+      inPart("vehicles", { label: "Of which banked", value: sum(reconciled, "bankDeposit"), type: "money" }),
+      inPart("vehicles", { label: "Vehicle shortage / excess", value: round2(vehicleCollected - vehicleExpected), type: "money" }),
+      inPart("vehicles", { label: "Vehicles not yet reconciled", value: dispatches.length - reconciled.length }),
+      inPart("store", { label: "Damage / replacement value", value: sum(losses, "value"), type: "money" }),
     ],
     sections: [
-      vehicleRegister(range, dispatches),
-      ...storeRegister(range, products, movements),
-      localRegister(range, localSales, products),
+      inPart("vehicles", vehicleRegister(range, dispatches)),
+      ...storeRegister(range, products, movements).map((s) => inPart("store", s)),
+      inPart("local", localRegister(range, localSales, products)),
       breakdown(range, "Sales", [col("local", "Local sales", "money"), col("collected", "Collected at counter", "money"), col("expected", "Vehicle sales (expected)", "money"), col("handedIn", "Vehicle money handed in", "money")],
         { sales: { rows: localSales, date: "date" }, payments: { rows: payments, date: "date" }, vehicles: { rows: reconciled, date: "date" } },
         (r) => ({ local: sum(r.sales, "totalAmount"), collected: sum(r.payments, "amount"), expected: sum(r.vehicles, "expectedAmount"), handedIn: handedIn(r.vehicles) }),
         ["local", "collected", "expected", "handedIn"]),
-      listsEachRecord(range)
-        ? section("Vehicle trips and money", [col("date", "Date", "date"), col("dispatchNumber", "Dispatch"), col("vehicle", "Vehicle"), col("crew", "Crew"), col("status", "Status"), col("expected", "Expected", "money"), col("handedIn", "Handed in", "money"), col("variance", "Variance", "money")],
+      inPart("vehicles", listsEachRecord(range)
+        ? section("Vehicle trips and money", [col("date", "Date", "date"), col("dispatchNumber", "Dispatch"), col("vehicle", "Vehicle"), col("crew", "Crew"), col("status", "Status"), col("expected", "Expected", "money"), col("cash", "Cash", "money"), col("mpesa", "M-Pesa", "money"), col("bank", "Bank deposit", "money"), col("handedIn", "Handed in", "money"), col("variance", "Variance", "money")],
           dispatches.map((d) => ({
             date: d.date,
             dispatchNumber: d.dispatchNumber,
@@ -428,11 +437,14 @@ const sales = async (db, range) => {
             crew: `${d.driverName} / ${d.salesPersonName}`,
             status: optionLabel("dispatchStatus", d.status),
             expected: Number(d.expectedAmount),
-            handedIn: round2(Number(d.cashReturned) + Number(d.mpesaReturned)),
+            cash: Number(d.cashReturned),
+            mpesa: Number(d.mpesaReturned),
+            bank: Number(d.bankDeposit),
+            handedIn: moneyIn(d),
             variance: Number(d.variance),
-          })), ["expected", "handedIn", "variance"])
-        : section("Vehicle trips and money", [col("vehicle", "Vehicle"), col("trips", "Trips reconciled", "number"), col("expected", "Expected", "money"), col("handedIn", "Handed in", "money"), col("variance", "Variance", "money")],
-          [...perVehicle.values()], ["trips", "expected", "handedIn", "variance"]),
+          })), ["expected", "cash", "mpesa", "bank", "handedIn", "variance"])
+        : section("Vehicle trips and money", [col("vehicle", "Vehicle"), col("trips", "Trips reconciled", "number"), col("expected", "Expected", "money"), col("bank", "Banked", "money"), col("handedIn", "Handed in", "money"), col("variance", "Variance", "money")],
+          [...perVehicle.values()], ["trips", "expected", "bank", "handedIn", "variance"])),
       section("Damages, replacements, returns and office use", [col("date", "Date", "date"), col("recordNumber", "Record"), col("type", "Type"), col("where", "Where"), col("product", "Product"), col("quantity", "Qty", "number"), col("customer", "Customer"), col("reason", "Reason"), col("value", "Value", "money")],
         records.map((r) => ({
           date: r.date,
@@ -450,59 +462,81 @@ const sales = async (db, range) => {
 };
 
 // ---------------------------------------------------------------------
+// Stores: stock out, goods received and stock remaining, which print together
+// or one at a time (?part=out|received|stock). Quantities only - no costs.
+
+/**
+ * Each item's stock over the period: opening (what it held when the period
+ * began, plus its opening quantity if it was added during the period), what
+ * came in and went out, and what remains. Items added after the period, and
+ * retired items with nothing to show, are left out.
+ */
+const storeStock = (range, items, receipts, issues, receivedBefore, issuedBefore) => {
+  const before = (rows, itemId) => Number(rows.find((row) => row.itemId === itemId)?._sum.quantity || 0);
+  const during = (rows, itemId) => rows.filter((row) => row.itemId === itemId).reduce((total, row) => total + Number(row.quantity), 0);
+  return items.flatMap((item) => {
+    const added = !item.openingDate || item.openingDate < range.to;
+    const opening = round2((added ? Number(item.openingQuantity) : 0) + before(receivedBefore, item.id) - before(issuedBefore, item.id));
+    const received = round2(during(receipts, item.id));
+    const out = round2(during(issues, item.id));
+    if (!(item.isActive && added) && !opening && !received && !out) return [];
+    const remaining = round2(opening + received - out);
+    const note = remaining <= 0 ? "Out of stock" : remaining <= Number(item.reorderLevel) ? "Reorder" : "";
+    return [{ code: item.code, item: item.name, category: optionLabel("storeCategories", item.category), unit: item.unit, opening, received, out, remaining, note }];
+  });
+};
+
+/** Long periods: one line per item (or department and item) instead of every record. */
+const storeTotals = (rows, keyOf, start) => {
+  const map = new Map();
+  for (const row of rows) {
+    const key = keyOf(row);
+    const entry = map.get(key) || start(row);
+    entry.count += 1;
+    entry.quantity = round2(entry.quantity + Number(row.quantity));
+    map.set(key, entry);
+  }
+  return [...map.values()];
+};
+
 const stores = async (db, range) => {
   const span = within(range);
-  const [receipts, issues, items] = await Promise.all([
-    db.storeReceipt.findMany({ where: { date: span }, include: { item: true, supplier: true }, orderBy: { date: "asc" } }),
-    db.storeIssue.findMany({ where: { date: span }, include: { item: true, requisition: true }, orderBy: { date: "asc" } }),
-    db.storeItem.findMany({ where: { isActive: true }, orderBy: [{ category: "asc" }, { name: "asc" }] }),
+  const [receipts, issues, items, receivedBefore, issuedBefore] = await Promise.all([
+    db.storeReceipt.findMany({ where: { date: span }, include: { item: true }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+    db.storeIssue.findMany({ where: { date: span }, include: { item: true }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
+    db.storeItem.findMany({ orderBy: [{ category: "asc" }, { name: "asc" }] }),
+    db.storeReceipt.groupBy({ by: ["itemId"], where: { date: { lt: range.from } }, _sum: { quantity: true } }),
+    db.storeIssue.groupBy({ by: ["itemId"], where: { date: { lt: range.from } }, _sum: { quantity: true } }),
   ]);
-  const low = items.filter((i) => Number(i.quantityOnHand) <= Number(i.reorderLevel));
-  const value = (r) => round2(Number(r.quantity) * Number(r.unitCost));
-  const receivedValue = round2(receipts.reduce((t, r) => t + value(r), 0));
+  const stock = storeStock(range, items, receipts, issues, receivedBefore, issuedBefore);
+  const category = (item) => optionLabel("storeCategories", item.category);
+  const department = (issue) => optionLabel("departments", issue.department);
+  const each = listsEachRecord(range);
 
-  // Long periods: totals per item instead of every delivery and issue.
-  const totals = (rows, keyOf, start) => {
-    const map = new Map();
-    for (const row of rows) {
-      const key = keyOf(row);
-      const entry = map.get(key) || start(row);
-      entry.quantity = round2(entry.quantity + Number(row.quantity));
-      if (entry.value !== undefined) entry.value = round2(entry.value + value(row));
-      entry.count += 1;
-      map.set(key, entry);
-    }
-    return [...map.values()];
-  };
+  const stockOut = each
+    ? section("Stock out", [col("date", "Date", "date"), col("issueNumber", "No."), col("department", "Department"), col("item", "Item"), col("quantity", "Quantity", "number"), col("unit", "Unit"), col("issuedTo", "Received by"), col("purpose", "Purpose")],
+      issues.map((i) => ({ date: i.date, issueNumber: i.issueNumber, department: department(i), item: i.item.name, quantity: Number(i.quantity), unit: i.item.unit, issuedTo: i.issuedTo, purpose: i.purpose || "" })))
+    : section("Stock out by department", [col("department", "Department"), col("item", "Item"), col("unit", "Unit"), col("count", "Entries", "number"), col("quantity", "Quantity", "number")],
+      storeTotals(issues, (i) => `${i.department}:${i.itemId}`, (i) => ({ department: department(i), item: i.item.name, unit: i.item.unit, count: 0, quantity: 0 }))
+        .sort((a, b) => a.department.localeCompare(b.department) || a.item.localeCompare(b.item)), ["count"]);
+  const received = each
+    ? section("Goods received", [col("date", "Date", "date"), col("receiptNumber", "GRN No."), col("item", "Item"), col("category", "Category"), col("quantity", "Quantity", "number"), col("unit", "Unit"), col("source", "Source"), col("notes", "Notes")],
+      receipts.map((r) => ({ date: r.date, receiptNumber: r.receiptNumber, item: r.item.name, category: category(r.item), quantity: Number(r.quantity), unit: r.item.unit, source: optionLabel("receiptSources", r.source), notes: r.notes || "" })))
+    : section("Goods received by item", [col("item", "Item"), col("category", "Category"), col("unit", "Unit"), col("count", "Deliveries", "number"), col("quantity", "Quantity", "number")],
+      storeTotals(receipts, (r) => r.itemId, (r) => ({ item: r.item.name, category: category(r.item), unit: r.item.unit, count: 0, quantity: 0 })), ["count"]);
+  const remaining = section(`Stock remaining at ${dayText(range.asAt)}`, [col("code", "Code"), col("item", "Item"), col("category", "Category"), col("unit", "Unit"), col("opening", "Opening", "number"), col("received", "Received", "number"), col("out", "Stock out", "number"), col("remaining", "Remaining", "number"), col("note", "Note")], stock);
 
   return {
     title: "Stores",
+    parts: REPORT_PARTS.stores,
     summary: [
-      { label: "Goods received (lines)", value: receipts.length },
-      { label: "Value received", value: receivedValue, type: "money" },
-      { label: "Issues to departments", value: issues.length },
-      { label: "Items at or below reorder level", value: low.length },
+      inPart("out", { label: "Stock out entries", value: issues.length }),
+      inPart("out", { label: "Departments supplied", value: new Set(issues.map((i) => i.department)).size }),
+      inPart("received", { label: "Deliveries received", value: receipts.length }),
+      inPart("stock", { label: "Items in stock", value: stock.filter((row) => row.remaining > 0).length }),
+      inPart("stock", { label: "Items low or out of stock", value: stock.filter((row) => row.note).length }),
     ],
-    sections: [
-      breakdown(range, "Stores movements", [col("receipts", "Goods received (lines)", "number"), col("value", "Value received", "money"), col("issues", "Issues to departments", "number")],
-        { receipts: { rows: receipts, date: "date" }, issues: { rows: issues, date: "date" } },
-        (r) => ({ receipts: r.receipts.length, value: round2(r.receipts.reduce((t, x) => t + value(x), 0)), issues: r.issues.length }),
-        ["receipts", "value", "issues"]),
-      listsEachRecord(range)
-        ? section("Goods received", [col("date", "Date", "date"), col("receiptNumber", "GRN"), col("item", "Item"), col("category", "Category"), col("quantity", "Qty", "number"), col("source", "Source"), col("supplier", "Supplier"), col("value", "Value", "money")],
-          receipts.map((r) => ({ date: r.date, receiptNumber: r.receiptNumber, item: r.item.name, category: optionLabel("storeCategories", r.item.category), quantity: Number(r.quantity), source: optionLabel("receiptSources", r.source), supplier: r.supplier?.name || "", value: value(r) })), ["value"])
-        : section("Goods received by item", [col("item", "Item"), col("category", "Category"), col("count", "Deliveries", "number"), col("quantity", "Qty", "number"), col("value", "Value", "money")],
-          totals(receipts, (r) => r.itemId, (r) => ({ item: `${r.item.name} (${r.item.unit})`, category: optionLabel("storeCategories", r.item.category), count: 0, quantity: 0, value: 0 })), ["value"]),
-      listsEachRecord(range)
-        ? section("Issued to departments", [col("date", "Date", "date"), col("issueNumber", "Issue"), col("department", "Department"), col("item", "Item"), col("quantity", "Qty", "number"), col("issuedTo", "Received by"), col("requisition", "Requisition")],
-          issues.map((i) => ({ date: i.date, issueNumber: i.issueNumber, department: optionLabel("departments", i.department), item: `${i.item.name} (${i.item.unit})`, quantity: Number(i.quantity), issuedTo: i.issuedTo, requisition: i.requisition?.requisitionNumber || "" })))
-        : section("Issued by department and item", [col("department", "Department"), col("item", "Item"), col("count", "Issues", "number"), col("quantity", "Qty", "number")],
-          totals(issues, (i) => `${i.department}:${i.itemId}`, (i) => ({ department: optionLabel("departments", i.department), item: `${i.item.name} (${i.item.unit})`, count: 0, quantity: 0 }))),
-      section("Low stock", [col("code", "Code"), col("name", "Item"), col("category", "Category"), col("onHand", "On hand", "number"), col("reorderLevel", "Reorder level", "number")],
-        low.map((i) => ({ code: i.code, name: i.name, category: optionLabel("storeCategories", i.category), onHand: Number(i.quantityOnHand), reorderLevel: Number(i.reorderLevel) }))),
-      section("Stock on hand", [col("code", "Code"), col("name", "Item"), col("category", "Category"), col("unit", "Unit"), col("onHand", "On hand", "number")],
-        items.map((i) => ({ code: i.code, name: i.name, category: optionLabel("storeCategories", i.category), unit: i.unit, onHand: Number(i.quantityOnHand) }))),
-    ].filter(Boolean),
+    sections: [inPart("out", stockOut), inPart("received", received), inPart("stock", remaining)],
   };
 };
 

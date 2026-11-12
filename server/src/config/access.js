@@ -53,10 +53,10 @@ export const RESOURCES = {
   dispatches: { dept: "sales", actions: { reconcile: { depts: ["sales"] } } },
   damages: { dept: "sales" },
 
-  // Stores
-  storeItems: { dept: "stores", read: ALL },
+  // Stores (Accounts can pick a store item on a purchase order line)
+  storeItems: { dept: "stores", read: ["accounts"] },
   storeReceipts: { dept: "stores" },
-  storeIssues: { dept: "stores", read: ALL },
+  storeIssues: { dept: "stores" },
 
   // Crops
   cropFarms: { dept: "crops" },
@@ -68,12 +68,9 @@ export const RESOURCES = {
   milkPayments: { dept: "accounts", actions: { pay: { depts: ["accounts"] } } },
   farmerDetails: { dept: "accounts" },
   memberPayments: { dept: "accounts", read: ["hr"] },
-  suppliers: { dept: "accounts", read: ["stores"] },
-  purchaseOrders: {
-    dept: "accounts",
-    read: ["stores"],
-    actions: { receive: { depts: ["stores"] }, pay: { depts: ["accounts"] } },
-  },
+  // Stores does not use purchase orders or suppliers.
+  suppliers: { dept: "accounts" },
+  purchaseOrders: { dept: "accounts", actions: { pay: { depts: ["accounts"] } } },
 };
 
 export const isSystemAdmin = (user) => ["super_admin", "admin"].includes(user?.role);
@@ -105,16 +102,30 @@ export const can = (user, resource, action = "read") => {
   return named.depts.includes(dept) && (!named.headOnly || isHead(user));
 };
 
-// Requisitions are raised by any department and decided by the head of
-// Accounts or the General Manager. They are not tied to one department, so
-// they have their own rules.
+// Requisitions are raised by the departments and decided by the head of
+// Accounts or the General Manager; Accounts fulfils them. Stores takes
+// requests for its items by word of mouth, so it has no requisitions.
+// They are not tied to one department, so they have their own rules.
 export const requisitionRules = {
-  canRaise: (user) => Boolean(user?.isActive && user.department),
+  canRaise: (user) => Boolean(user?.isActive && user.department && user.department !== "stores"),
   canSeeAll: (user) => isSystemAdmin(user) || isGeneralManager(user) || user?.department === "accounts",
   canDecide: (user) =>
     Boolean(user?.isActive && (isGeneralManager(user) || (user.department === "accounts" && isHead(user)))),
-  canFulfil: (user) =>
-    Boolean(user?.isActive && (isSystemAdmin(user) || ["stores", "accounts"].includes(user.department))),
+  canFulfil: (user) => Boolean(user?.isActive && (isSystemAdmin(user) || user.department === "accounts")),
+};
+
+// Product requests. Sales asks MVA for products, and MVA sends them. The
+// administrators ask Sales for products, which Sales gives out as office use
+// (not paid for). The department asked handles the request; the General
+// Manager and administrators see every request.
+export const productRequestRules = {
+  raiseTo: (user) => {
+    if (!user?.isActive) return [];
+    if (isSystemAdmin(user)) return ["sales"];
+    return user.department === "sales" ? ["mva"] : [];
+  },
+  handles: (user) => (user?.isActive && ["mva", "sales"].includes(user.department) ? [user.department] : []),
+  seeAll: (user) => Boolean(user?.isActive && (isSystemAdmin(user) || isGeneralManager(user))),
 };
 
 // A department's screens and reports: its own staff; the General Manager and
@@ -147,6 +158,11 @@ export const permissionsFor = (user) => {
       seeAll: requisitionRules.canSeeAll(user),
       decide: requisitionRules.canDecide(user),
       fulfil: requisitionRules.canFulfil(user),
+    },
+    productRequests: {
+      raiseTo: productRequestRules.raiseTo(user),
+      handles: productRequestRules.handles(user),
+      seeAll: productRequestRules.seeAll(user),
     },
     departments: ALL.filter((department) => canOpenDepartment(user, department)),
     reports: ALL.filter((department) => canReadReport(user, department)),

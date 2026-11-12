@@ -10,10 +10,10 @@ import { isoDay } from "../../lib/periods.js";
 import { moveStock, productByCode } from "../../lib/stock.js";
 import { parseBody, parseItems, round2 } from "../../lib/validate.js";
 import { outputFigures, productionDays } from "./production.js";
+import { productBrief, sendToSales, transferInclude } from "./transfers.js";
 
 const router = express.Router();
 const supplierBrief = { select: { id: true, supplierNumber: true, firstName: true, lastName: true } };
-const productBrief = { select: { id: true, code: true, name: true, unit: true } };
 
 // The first farmer number when none exist yet. Farmers are known by
 // numbers like 130, 131, 132.
@@ -260,9 +260,9 @@ router.use("/milk-allocations", allocationRouter);
 
 // ---------------------------------------------------------------------
 // Product output: kilograms processed and the pieces made from them. The
-// milk has already left raw stock when it was allocated. Fresh 250 ml packs
-// are made from the School allocation and go to the schools, so they are
-// counted but do not enter stock.
+// milk has already left raw stock when it was allocated. Every pack made -
+// Mala, the three yoghurt sizes and fresh milk in 250 ml packets - goes into
+// MVA stock, ready to send to Sales.
 // ---------------------------------------------------------------------
 const batchInclude = { outputs: { include: { product: productBrief } } };
 const batchRouter = express.Router();
@@ -275,10 +275,10 @@ batchRouter.get("/", allow("processingBatches", "read"), async (req, res) => {
 
 batchRouter.post("/", allow("processingBatches", "write"), async (req, res) => {
   const data = parseBody({ date: "date!", malaKg: "decimal", malaPieces: "int", yoghurtKg: "decimal", yoghurt500: "int", yoghurt250: "int", yoghurt150: "int", fresh250: "int", notes: "text" }, req.body);
-  const packed = [["MALA", data.malaPieces], ["YOGHURT_500", data.yoghurt500], ["YOGHURT_250", data.yoghurt250], ["YOGHURT_150", data.yoghurt150]];
-  if ([...packed.map(([, pieces]) => pieces), data.fresh250].some((pieces) => pieces < 0)) throw badRequest("The number of pieces cannot be negative");
+  const packed = [["MALA", data.malaPieces], ["YOGHURT_500", data.yoghurt500], ["YOGHURT_250", data.yoghurt250], ["YOGHURT_150", data.yoghurt150], ["FRESH_MILK", data.fresh250]];
+  if (packed.some(([, pieces]) => pieces < 0)) throw badRequest("The number of pieces cannot be negative");
   const made = packed.filter(([, pieces]) => pieces > 0);
-  if (!made.length && !data.malaKg && !data.yoghurtKg && !data.fresh250) throw badRequest("Enter at least one figure");
+  if (!made.length && !data.malaKg && !data.yoghurtKg) throw badRequest("Enter at least one figure");
 
   const batch = await inTransaction(async (tx) => {
     const products = await tx.product.findMany({ where: { code: { in: made.map(([code]) => code) } } });
@@ -331,34 +331,14 @@ router.use("/processing-batches", crud({
 // ---------------------------------------------------------------------
 // Transfers of products (including unprocessed raw milk) to Sales.
 // ---------------------------------------------------------------------
-const transferInclude = { items: { include: { product: productBrief } } };
 const transferRouter = express.Router();
 
 transferRouter.post("/", allow("productTransfers", "write"), async (req, res) => {
   const data = parseBody({ date: "date!", notes: "text" }, req.body);
   const items = parseItems(req.body.items, { productId: "id!", quantity: "decimal!" }, { label: "products" })
     .filter((line) => line.quantity > 0);
-  if (!items.length) throw badRequest("Enter a quantity for at least one product");
-  if (new Set(items.map((i) => i.productId)).size !== items.length) throw badRequest("List each product only once");
   const transfer = await inTransaction(async (tx) => {
-    const rawMilk = await productByCode(tx, RAW_MILK);
-    if (items.some((line) => line.productId === rawMilk.id)) throw badRequest("Raw milk goes to Sales through the L.Sale allocation");
-    const created = await tx.productTransfer.create({
-      data: { ...data, transferNumber: await nextNumber(tx, "PTR", data.date), items: { create: items } },
-      include: transferInclude,
-    });
-    for (const line of items) {
-      await moveStock(tx, {
-        productId: line.productId,
-        location: "mva",
-        quantity: -line.quantity,
-        movementType: "transfer_to_sales",
-        referenceType: "productTransfer",
-        referenceId: created.id,
-        date: data.date,
-        notes: created.transferNumber,
-      });
-    }
+    const created = await sendToSales(tx, { ...data, items });
     await audit(tx, { user: req.user, action: "create", entity: "productTransfer", entityId: created.id, after: created });
     return created;
   });
@@ -393,6 +373,7 @@ transferRouter.post("/:id/receive", allow("productTransfers", "receive"), async 
       },
       include: transferInclude,
     });
+    await tx.productRequest.updateMany({ where: { transferId: existing.id, status: "sent" }, data: { status: "received" } });
     await audit(tx, { user: req.user, action: "receive", entity: "productTransfer", entityId: existing.id });
     return updated;
   });
@@ -413,6 +394,12 @@ router.use("/product-transfers", crud({
   beforeDelete: async (transfer, { tx }) => {
     if (transfer.status !== "sent") throw conflict("A received transfer cannot be deleted");
     if (transfer.allocationId) throw conflict("This came from the day's L.Sale allocation. Change the allocation instead.");
+    // A transfer that answered a request from Sales puts the request back in the queue.
+    const request = await tx.productRequest.findUnique({ where: { transferId: transfer.id } });
+    if (request) {
+      await tx.productRequest.update({ where: { id: request.id }, data: { status: "pending", transferId: null, handledById: null, handledAt: null } });
+      await tx.productRequestItem.updateMany({ where: { requestId: request.id }, data: { quantityGiven: 0 } });
+    }
     const items = await tx.productTransferItem.findMany({ where: { transferId: transfer.id } });
     for (const line of items) {
       await moveStock(tx, {

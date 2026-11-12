@@ -136,7 +136,8 @@ export const OPTIONS = {
     ["construction_materials", "Construction materials"],
     ["other", "Other"],
   ]),
-  receiptSources: list([["purchase", "Purchase"], ["donation", "Donation"], ["return", "Returned by department"], ["opening", "Opening stock"]]),
+  // An item's opening stock is entered with the item, not received.
+  receiptSources: list([["purchase", "Purchase"], ["donation", "Donation"], ["return", "Returned by department"]]),
 
   cropTypes: list([["sugarcane", "Sugarcane"], ["tea", "Tea"], ["coffee", "Coffee"], ["fodder", "Fodder"]]),
   reportPeriods: list([["month", "Monthly"], ["quarter", "Quarterly"], ["half", "Half-yearly"], ["year", "Annual"]]),
@@ -163,7 +164,26 @@ export const OPTIONS = {
     ["cancelled", "Cancelled"],
   ]),
   priorities: list([["low", "Low"], ["normal", "Normal"], ["urgent", "Urgent"]]),
+  productRequestStatus: list([
+    ["pending", "Waiting"],
+    ["sent", "Sent"],
+    ["received", "Received"],
+    ["issued", "Given out"],
+    ["declined", "Declined"],
+    ["cancelled", "Cancelled"],
+  ]),
   purchaseOrderStatus: list([["ordered", "Ordered"], ["partially_received", "Partly received"], ["received", "Received"], ["cancelled", "Cancelled"]]),
+};
+
+/**
+ * Departments whose report comes in several parts, each printable on its own
+ * (the paper sheets they keep). Left out, the parts print together with the
+ * rest of the department's report.
+ */
+export const REPORT_PARTS = {
+  mva: [{ key: "production", title: "Production report" }, { key: "output", title: "Product output" }],
+  sales: [{ key: "vehicles", title: "Vehicles register" }, { key: "store", title: "Store register" }, { key: "local", title: "Local sales register" }],
+  stores: [{ key: "out", title: "Stock out" }, { key: "received", title: "Goods received" }, { key: "stock", title: "Stock remaining" }],
 };
 
 export const optionValues = (name) => {
@@ -177,8 +197,9 @@ export const optionLabel = (name, value) =>
 
 /// Products MVA makes and Sales sells. Seeded on start-up if missing.
 export const DEFAULT_PRODUCTS = [
-  { code: "RAW_MILK", name: "Raw milk", unit: "litres", localPrice: 60, vehiclePrice: 60 },
-  { code: "FRESH_MILK", name: "Fresh milk", unit: "litres", localPrice: 80, vehiclePrice: 80 },
+  // Raw milk is sold by the kilogram; fresh milk always in 250 ml packets.
+  { code: "RAW_MILK", name: "Raw milk", unit: "kg", localPrice: 60, vehiclePrice: 60 },
+  { code: "FRESH_MILK", name: "Fresh milk 250 ml", unit: "packets", localPrice: 0, vehiclePrice: 0 },
   { code: "MALA", name: "Mala", unit: "pieces", localPrice: 120, vehiclePrice: 120 },
   // Yoghurt is sold by pack size. Sales sets these prices under Prices.
   { code: "YOGHURT_500", name: "Yoghurt 500 ml", unit: "pieces", localPrice: 0, vehiclePrice: 0 },

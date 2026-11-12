@@ -3,12 +3,13 @@ import { refs } from "../../lib/refs";
 
 const blank = (v) => (v === "" || v == null ? 0 : Number(v));
 
-// Shared by Accounts (raise, pay) and Stores (receive deliveries).
+// Accounts raises and pays purchase orders. Stores does not use them, so
+// deliveries are no longer received against an order.
 export const purchaseOrdersConfig = {
   resource: "purchaseOrders",
   endpoint: "/accounts/purchase-orders",
   title: "Purchase orders (LPOs)",
-  description: "Accounts raises orders, Stores receives the goods, Accounts pays the supplier.",
+  description: "Accounts raises orders and pays the supplier.",
   singular: "Purchase order",
   createLabel: "New purchase order",
   formSize: "lg",
@@ -26,9 +27,9 @@ export const purchaseOrdersConfig = {
   ],
   expand: (row) => (
     <table className="w-full max-w-3xl text-sm">
-      <thead className="text-left text-xs uppercase text-slate-500"><tr><th className="py-1">Item</th><th className="text-right">Ordered</th><th className="text-right">Received</th><th className="text-right">Price</th><th className="text-right">Total</th></tr></thead>
+      <thead className="text-left text-xs uppercase text-slate-500"><tr><th className="py-1">Item</th><th className="text-right">Ordered</th><th className="text-right">Price</th><th className="text-right">Total</th></tr></thead>
       <tbody className="divide-y divide-slate-200">
-        {row.items.map((i) => <tr key={i.id}><td className="py-1.5">{i.description}{i.storeItem ? ` (${i.storeItem.code})` : ""}</td><td className="text-right">{number(i.quantity)}</td><td className="text-right">{number(i.quantityReceived)}</td><td className="text-right">{money(i.unitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}
+        {row.items.map((i) => <tr key={i.id}><td className="py-1.5">{i.description}{i.storeItem ? ` (${i.storeItem.code})` : ""}</td><td className="text-right">{number(i.quantity)}</td><td className="text-right">{money(i.unitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}
       </tbody>
     </table>
   ),
@@ -53,27 +54,6 @@ export const purchaseOrdersConfig = {
   createInitial: () => ({ date: today(), items: [{ storeItemId: "", description: "", quantity: "", unitPrice: "" }] }),
   toPayload: (v) => ({ ...v, requisitionId: v.requisitionId || undefined, items: v.items.map((i) => ({ ...i, storeItemId: i.storeItemId || undefined })) }),
   actions: [
-    {
-      key: "receive", label: "Receive delivery", variant: "primary",
-      allowed: (c) => c.can("purchaseOrders", "receive"), when: (r) => ["ordered", "partially_received"].includes(r.status),
-      path: (r) => `/accounts/purchase-orders/${r.id}/receive`, title: (r) => `Receive ${r.poNumber} from ${r.supplier?.name}`,
-      size: "lg",
-      fields: [
-        { name: "date", label: "Date received", type: "date", required: true },
-        { name: "deliveryNote", label: "Delivery note no." },
-        {
-          name: "items", label: "Quantities received", type: "items", fixedRows: true,
-          columns: [
-            { name: "description", label: "Item", type: "display" },
-            { name: "outstanding", label: "Still expected", type: "display", width: 120 },
-            { name: "quantity", label: "Received now", type: "number", width: 140 },
-          ],
-        },
-      ],
-      initial: (r) => ({ date: today(), items: r.items.map((i) => ({ itemId: i.id, description: `${i.description}${i.storeItem ? "" : " (not stocked)"}`, outstanding: number(i.quantity - i.quantityReceived), quantity: i.quantity - i.quantityReceived })) }),
-      toPayload: (v) => ({ date: v.date, deliveryNote: v.deliveryNote, items: v.items.map((i) => ({ itemId: i.itemId, quantity: blank(i.quantity) })) }),
-      success: () => "Delivery received into stores",
-    },
     {
       key: "pay", label: "Pay supplier",
       allowed: (c) => c.can("purchaseOrders", "pay"), when: (r) => r.status !== "cancelled" && r.amountPaid < r.totalAmount,

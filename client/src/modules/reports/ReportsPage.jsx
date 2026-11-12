@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { FileBarChart2, FileDown, FileSpreadsheet, Printer } from "lucide-react";
 import { PeriodPicker } from "../../components/reports/PeriodPicker";
 import { PrintArea, ReportDocument } from "../../components/reports/ReportDocument";
-import { Alert, Button, Card, PageHeader, Select, Spinner } from "../../components/ui/ui";
+import { Alert, Button, Card, PageHeader, Spinner } from "../../components/ui/ui";
 import { useAuth } from "../../context/useAuth";
+import { currentSection, defaultReportDepartment, findNavItem, linksOf, sectionsFor } from "../../navigation";
 import { download, errorMessage } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { today } from "../../lib/format";
@@ -18,28 +19,31 @@ import { useFetch } from "../../lib/useFetch";
  * the report; PDF and CSV (Excel) downloads carry the same layout.
  */
 const ReportsPage = () => {
-  const { permissions, user, meta } = useAuth();
+  const auth = useAuth();
+  const { permissions, meta } = auth;
   const allowed = permissions?.reports || [];
+  // The report shown is the one in the address (?department=stores&part=out): it is chosen from the Reports dropdown in the sidebar.
   const [params] = useSearchParams();
-  const requested = params.get("department");
-  const [department, setDepartment] = useState(
-    requested && allowed.includes(requested) ? requested : user?.department && allowed.includes(user.department) ? user.department : allowed[0] || "",
-  );
+  const { search } = useLocation();
+  const navItem = findNavItem("/reports");
+  const shown = currentSection(navItem, auth, search);
+  const several = linksOf(sectionsFor(navItem, auth)).length > 1;
+  const asked = params.get("department");
+  const department = asked && (allowed.includes(asked) || (asked === "all" && allowed.length > 1)) ? asked : defaultReportDepartment(auth);
+  // Some departments' reports come in parts (Stores: stock out, goods received, stock remaining), printed alone or together.
+  const parts = department && department !== "all" ? meta?.reportParts?.[department] || [] : [];
+  const part = parts.find((p) => p.key === params.get("part"));
   const [period, setPeriod] = useState(() => ({ period: "day", date: today() }));
   const [busy, setBusy] = useState("");
-  const query = { department, ...periodParams(period) };
+  const query = { department, ...(part ? { part: part.key } : {}), ...periodParams(period) };
   const { data, loading, error: loadError } = useFetch(department ? "/reports/department" : null, query);
   const reports = data?.reports || [];
-
-  const options = [
-    ...(meta?.departments || []).filter((d) => allowed.includes(d.value)),
-    ...(allowed.length > 1 ? [{ value: "all", label: "All departments" }] : []),
-  ];
 
   const get = async (format) => {
     setBusy(format);
     try {
-      await download("/reports/department", { ...query, format }, `keiyian-${department}-report-${data?.period?.slug || "report"}.${format}`);
+      const name = part ? `${part.title.toLowerCase().replace(/\s+/g, "-")}-` : "";
+      await download("/reports/department", { ...query, format }, `keiyian-${department}-${name}report-${data?.period?.slug || "report"}.${format}`);
     } catch (err) {
       showError(errorMessage(err, "The report could not be downloaded. Please try again."), "Download failed");
     } finally {
@@ -51,15 +55,11 @@ const ReportsPage = () => {
     <div>
       <PageHeader
         icon={FileBarChart2}
-        eyebrow="Workflow"
-        title="Reports"
-        description="Department reports for a day, a week, two weeks, a month, a quarter, a half year or a year. Print them, or download them as PDF or for Excel."
+        eyebrow="Reports"
+        title={shown?.crumb || "Reports"}
+        description={`For a day, a week, two weeks, a month, a quarter, a half year or a year. Print it, or download it as PDF or for Excel.${several ? " Other reports are under Reports in the sidebar." : ""}`}
       />
       <Card className="mb-6 space-y-4 p-4 sm:p-5">
-        <label className="block max-w-xs text-xs font-medium text-slate-500">
-          Department
-          <Select className="mt-1 block" options={options} placeholder="Choose..." value={department} onChange={(e) => setDepartment(e.target.value)} />
-        </label>
         <PeriodPicker value={period} onChange={setPeriod} />
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
           <p className="text-sm text-slate-600">

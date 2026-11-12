@@ -25,6 +25,71 @@ export const NAV_GROUPS = [
   { key: "admin", label: "Administration" },
 ];
 
+/**
+ * The Requisitions dropdown: requests to Accounts (money and things to buy),
+ * and product requests - Sales asks MVA, the administration asks Sales (office
+ * use). Each is named from where the user stands. Those who decide
+ * requisitions see them first.
+ */
+const requisitionSections = (auth) => {
+  const req = auth.permissions?.requisitions || {};
+  const products = auth.permissions?.productRequests || {};
+  const asks = (department) => Boolean(products.raiseTo?.includes(department));
+  const handles = (department) => Boolean(products.handles?.includes(department));
+  const accounts = req.raise || req.seeAll || req.decide || req.fulfil ? [{ key: "accounts", label: req.seeAll ? "Requisitions" : "To Accounts" }] : [];
+  const fromMva = asks("mva") || handles("mva") || products.seeAll ? [{ key: "mva", label: handles("mva") ? "Requests from Sales" : asks("mva") ? "Products from MVA" : "Sales requests to MVA" }] : [];
+  const fromSales = asks("sales") || handles("sales") || products.seeAll ? [{ key: "sales", label: asks("sales") ? "Products from Sales" : "Office requests" }] : [];
+  return req.decide || req.seeAll ? [...accounts, ...fromMva, ...fromSales] : [...fromMva, ...fromSales, ...accounts];
+};
+
+/** Where the Reports page opens when no report is named: the user's own department; all departments for those who see several. */
+export const defaultReportDepartment = (auth) => {
+  const allowed = auth.permissions?.reports || [];
+  if (auth.user?.department && allowed.includes(auth.user.department)) return auth.user.department;
+  return allowed.length > 1 ? "all" : allowed[0] || "";
+};
+
+const reportPath = (department, part) => `/reports?department=${department}${part ? `&part=${part}` : ""}`;
+
+/**
+ * The Reports dropdown: every report this user can open. A department whose
+ * report comes in parts (Stores: stock out, goods received, stock remaining)
+ * lists each part, then its full report. With several departments, those
+ * come under the department's name, after the departments with one report.
+ */
+const reportSections = (auth) => {
+  const departments = auth.permissions?.reports || [];
+  const several = departments.length > 1;
+  const nameOf = (department) => {
+    const item = navForDepartment(department);
+    return item?.short || item?.label || department;
+  };
+  const single = [];
+  const grouped = [];
+  for (const department of departments) {
+    const name = nameOf(department);
+    const parts = auth.meta?.reportParts?.[department] || [];
+    if (!parts.length) {
+      single.push({ key: department, label: several ? name : `${name} report`, crumb: `${name} report`, to: reportPath(department) });
+      continue;
+    }
+    if (several) grouped.push({ key: `heading-${department}`, heading: true, label: name });
+    for (const part of parts) {
+      grouped.push({ key: `${department}:${part.key}`, label: part.title, crumb: several ? `${name}: ${part.title}` : part.title, to: reportPath(department, part.key) });
+    }
+    grouped.push({ key: department, label: "Full report", crumb: `${name} report`, to: reportPath(department) });
+  }
+  const all = several ? [{ key: "all", label: "All departments", crumb: "All departments", to: reportPath("all") }] : [];
+  return [...all, ...single, ...grouped];
+};
+
+/** The report on screen, as the key of its entry in the Reports dropdown. */
+const reportKey = (params, auth) => {
+  const department = params.get("department") || defaultReportDepartment(auth);
+  const part = params.get("part");
+  return part && department !== "all" ? `${department}:${part}` : department;
+};
+
 // Sidebar and dashboard links. A department appears to its own staff, and to
 // the General Manager and administrators (permissions come from the server).
 // Its sections open from a dropdown under it in the sidebar, and each user
@@ -83,12 +148,11 @@ export const navigation = [
     ],
   },
   {
-    label: "Stores", path: "/stores", icon: Warehouse, group: "departments", department: "stores", hint: "Items, receipts, issues", visible: member("stores"),
+    label: "Stores", path: "/stores", icon: Warehouse, group: "departments", department: "stores", hint: "Items, goods received, stock out", visible: member("stores"),
     sections: [
       { key: "items", label: "Items", show: can("storeItems") },
-      { key: "issues", label: "Issues", show: can("storeIssues") },
       { key: "receipts", label: "Goods received", show: can("storeReceipts") },
-      { key: "orders", label: "Purchase orders", show: can("purchaseOrders", "receive") },
+      { key: "issues", label: "Stock out", show: can("storeIssues") },
     ],
   },
   {
@@ -112,8 +176,9 @@ export const navigation = [
       { key: "suppliers", label: "Suppliers", show: can("suppliers") },
     ],
   },
-  { label: "Requisitions", path: "/requisitions", icon: ClipboardList, group: "workflow", hint: "Request and approve", visible: (a) => Boolean(a.permissions?.requisitions?.raise || a.permissions?.requisitions?.seeAll || a.permissions?.requisitions?.fulfil) },
-  { label: "Reports", path: "/reports", icon: FileBarChart2, group: "workflow", hint: "Daily to annual reports, PDF / CSV", visible: (a) => Boolean(a.permissions?.reports?.length) },
+  { label: "Requisitions", path: "/requisitions", icon: ClipboardList, group: "workflow", hint: "Request and approve; product requests", visible: (a) => requisitionSections(a).length > 0, sections: requisitionSections },
+  // Reports open from a dropdown of every report the user can see; its entries are worked out from their permissions.
+  { label: "Reports", path: "/reports", icon: FileBarChart2, group: "workflow", hint: "Daily to annual reports, PDF / CSV", visible: (a) => Boolean(a.permissions?.reports?.length), sections: reportSections, keyOf: reportKey },
   { label: "User accounts", path: "/users", icon: Users, group: "admin", hint: "Create and manage logins", visible: (a) => Boolean(a.permissions?.manageUsers) },
 ];
 
@@ -122,15 +187,28 @@ export const findNavItem = (pathname) =>
 
 export const navForDepartment = (department) => navigation.find((item) => item.department === department);
 
-/** The sections of a department this user can open, in sidebar order. */
-export const sectionsFor = (item, auth) => (item?.sections || []).filter((section) => section.show(auth));
+/** The sections of a page this user can open, in sidebar order (a list, or worked out from the user). */
+export const sectionsFor = (item, auth) => {
+  const sections = typeof item?.sections === "function" ? item.sections(auth) : item?.sections || [];
+  return sections.filter((section) => !section.show || section.show(auth));
+};
 
-/** The section on screen: the one named in ?tab= when this user can open it, otherwise their first. */
+/** The sections that open something, leaving out the headings that group them. */
+export const linksOf = (sections) => sections.filter((section) => !section.heading);
+
+/**
+ * The section on screen: for a department, the one named in ?tab= when this
+ * user can open it, otherwise their first; for Reports, the report shown.
+ */
 export const currentSection = (item, auth, search = "") => {
-  const sections = sectionsFor(item, auth);
-  const key = new URLSearchParams(search).get("tab");
-  return sections.find((section) => section.key === key) || sections[0] || null;
+  const sections = linksOf(sectionsFor(item, auth));
+  const params = new URLSearchParams(search);
+  if (item?.keyOf) return sections.find((section) => section.key === item.keyOf(params, auth)) || null;
+  return sections.find((section) => section.key === params.get("tab")) || sections[0] || null;
 };
 
 /** The address that opens a section. */
-export const sectionPath = (item, section) => `${item.path}?tab=${section.key}`;
+export const sectionPath = (item, section) => section.to || `${item.path}?tab=${section.key}`;
+
+/** What identifies a page with a dropdown in the sidebar: its department, or its address. */
+export const groupOf = (item) => item?.department || item?.path.slice(1) || null;
