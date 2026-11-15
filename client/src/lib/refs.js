@@ -21,7 +21,10 @@ export const refs = {
   openTrips: { path: "/sales/dispatches", params: { status: "dispatched" }, label: (d) => `${d.vehicle?.registrationNumber} - ${d.dispatchNumber}` },
   vehicles: { path: "/sales/vehicles", params: { status: "active" }, label: (v) => `${v.registrationNumber} - ${v.driverName} / ${v.salesPersonName}` },
 
-  storeItems: { path: "/stores/items", params: { isActive: "true" }, label: (i) => `${i.code} - ${i.name} (${Number(i.quantityOnHand)} ${i.unit})` },
+  // Items are known by name; their unit is shown beside the quantity, not in the list.
+  storeItems: { path: "/stores/items", params: { isActive: "true" }, label: (i) => i.name },
+  // What a department can ask Stores for (names only; quantities stay with Stores).
+  requestableStoreItems: { path: "/store-requests/items", label: (i) => i.name },
   farms: { path: "/crops/farms", label: (f) => `${f.farmNumber} - ${f.location}` },
 
   moneyAccounts: { path: "/accounts/accounts/balances", label: (a) => `${a.name} (${money(a.balance)})`, filter: (a) => a.isActive },

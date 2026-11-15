@@ -42,7 +42,7 @@ const ReportsPage = () => {
   const get = async (format) => {
     setBusy(format);
     try {
-      const name = part ? `${part.title.toLowerCase().replace(/\s+/g, "-")}-` : "";
+      const name = part ? `${part.title.toLowerCase().replace(/\s+report$/, "").replace(/\s+/g, "-")}-` : "";
       await download("/reports/department", { ...query, format }, `keiyian-${department}-${name}report-${data?.period?.slug || "report"}.${format}`);
     } catch (err) {
       showError(errorMessage(err, "The report could not be downloaded. Please try again."), "Download failed");

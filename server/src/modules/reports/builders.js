@@ -1,5 +1,5 @@
-import { optionLabel, optionValues, REPORT_PARTS } from "../../config/catalog.js";
-import { bucketsOf, dayText } from "../../lib/periods.js";
+import { DAIRY_SESSIONS, optionLabel, optionValues, REPORT_PARTS } from "../../config/catalog.js";
+import { addDays, bucketsOf, dayText } from "../../lib/periods.js";
 import { stockSummary } from "../../lib/stock.js";
 import { round2 } from "../../lib/validate.js";
 import { outputFigures, productionDays } from "../mva/production.js";
@@ -95,69 +95,222 @@ const hr = async (db, range) => {
 };
 
 // ---------------------------------------------------------------------
+// Livestock: the herd, milk, calvings, vaccinations and health, which print
+// together or one at a time (?part=herd|milk|calvings|vaccinations|health).
+// Milk is in kilograms.
+
+/** Under a year old is a calf. */
+const CALF_DAYS = 365;
+/** A cow with no calving on record counts as milking if milked in the last week. */
+const RECENTLY_MILKED_DAYS = 7;
+const HERD_CLASSES = [
+  ["milking", "Milking cows", "Milking cow"],
+  ["dry", "Dry cows", "Dry cow"],
+  ["heifer", "Heifers", "Heifer"],
+  ["femaleCalf", "Female calves", "Female calf"],
+  ["bull", "Bulls", "Bull"],
+  ["maleCalf", "Male calves", "Male calf"],
+];
+const CLASS_NAME = Object.fromEntries(HERD_CLASSES.map(([key, , one]) => [key, one]));
+
+const tagOf = (animal) => (animal ? `${animal.tagNumber}${animal.name ? ` ${animal.name}` : ""}` : "");
+
+/** When an animal joined the herd: born on the farm, or bought / received. Not known: it has always been there. */
+const joinedOn = (animal) => (animal.source === "born_on_farm" ? animal.dateOfBirth : animal.acquiredDate) || null;
+
+/** Whether the animal was in the herd at the end of the day before `end`. */
+const inHerdAt = (animal, end) => {
+  const joined = joinedOn(animal);
+  if (joined && joined >= end) return false;
+  if (animal.exitDate) return animal.exitDate >= end;
+  return animal.status === "active";
+};
+
+/** Milking cow, dry cow, heifer, bull or calf, at the end of the day before `end`. */
+const herdClass = (animal, end, calvings, lastMilked) => {
+  const calf = animal.dateOfBirth && (end - animal.dateOfBirth) / DAY_MS <= CALF_DAYS;
+  if (animal.sex === "male") return calf ? "maleCalf" : "bull";
+  if (calf) return "femaleCalf";
+  const calved = calvings.filter((c) => c.calvingDate < end);
+  if (calved.length) {
+    const latest = calved[calved.length - 1];
+    return !latest.dryOffDate || latest.dryOffDate >= end ? "milking" : "dry";
+  }
+  if (lastMilked) return (end - lastMilked) / DAY_MS <= RECENTLY_MILKED_DAYS ? "milking" : "dry";
+  return "heifer";
+};
+
+/** "3 yr 2 mo", "5 mo", "12 days" */
+const ageText = (born, asAt) => {
+  if (!born || born > asAt) return "";
+  let months = (asAt.getUTCFullYear() - born.getUTCFullYear()) * 12 + asAt.getUTCMonth() - born.getUTCMonth();
+  if (asAt.getUTCDate() < born.getUTCDate()) months -= 1;
+  if (months < 1) {
+    const days = Math.round((asAt - born) / DAY_MS);
+    return `${days} day${days === 1 ? "" : "s"}`;
+  }
+  const years = Math.floor(months / 12);
+  return [years && `${years} yr`, months % 12 && `${months % 12} mo`].filter(Boolean).join(" ");
+};
+
+const JOINED = { born_on_farm: "Born", purchased: "Bought", donated: "Donated" };
+const LEFT = { sold: "Sold", dead: "Died", culled: "Culled" };
+
 const livestock = async (db, range) => {
   const span = within(range);
-  const [milk, transfers, lactations, vaccinations, health, herd] = await Promise.all([
+  const end = addDays(range.asAt, 1);
+  const inPeriod = (date) => Boolean(date) && date >= range.from && date < end;
+  const [milk, transfers, lactations, vaccinations, health, animals, calvingHistory, lastMilk] = await Promise.all([
     db.milkRecord.findMany({ where: { date: span }, include: { animal: true }, orderBy: [{ date: "asc" }, { animal: { tagNumber: "asc" } }] }),
     db.milkTransfer.findMany({ where: { date: span }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
-    db.lactation.findMany({ where: { calvingDate: span }, include: { animal: true }, orderBy: { calvingDate: "asc" } }),
+    db.lactation.findMany({ where: { calvingDate: span }, include: { animal: true, calf: { include: { sire: true } }, twinCalf: true }, orderBy: { calvingDate: "asc" } }),
     db.vaccination.findMany({ where: { date: span }, include: { animal: true }, orderBy: { date: "asc" } }),
     db.healthRecord.findMany({ where: { date: span }, include: { animal: true }, orderBy: { date: "asc" } }),
-    db.animal.groupBy({ by: ["sex"], where: { status: "active" }, _count: true }),
+    db.animal.findMany({ include: { dam: true, sire: true }, orderBy: { tagNumber: "asc" } }),
+    db.lactation.findMany({ where: { calvingDate: { lt: end } }, select: { animalId: true, calvingDate: true, dryOffDate: true }, orderBy: { calvingDate: "asc" } }),
+    db.milkRecord.groupBy({ by: ["animalId"], where: { date: { lt: end } }, _max: { date: true } }),
   ]);
-  const sessions = ["morning", "midday", "evening"];
-  const bySession = sessions.map((session) => {
-    const records = milk.filter((m) => m.session === session);
+  const dairies = optionValues("dairies");
+  const dairyName = (dairy) => optionLabel("dairies", dairy);
+
+  // ---- Herd: as it stood at the end of the period, and what changed in it.
+  const calvingsOf = new Map();
+  for (const calving of calvingHistory) calvingsOf.set(calving.animalId, [...(calvingsOf.get(calving.animalId) || []), calving]);
+  const lastMilkedOn = new Map(lastMilk.map((row) => [row.animalId, row._max.date]));
+  const herd = animals.filter((a) => inHerdAt(a, end))
+    .map((animal) => ({ animal, cls: herdClass(animal, end, calvingsOf.get(animal.id) || [], lastMilkedOn.get(animal.id)) }))
+    .sort((a, b) => a.animal.dairy.localeCompare(b.animal.dairy) || a.animal.tagNumber.localeCompare(b.animal.tagNumber));
+  const count = (rows, cls) => rows.filter((row) => row.cls === cls).length;
+  const byDairy = dairies.map((dairy) => {
+    const rows = herd.filter((row) => row.animal.dairy === dairy);
+    return { dairy: dairyName(dairy), ...Object.fromEntries(HERD_CLASSES.map(([key]) => [key, count(rows, key)])), total: rows.length };
+  });
+  const joined = animals.filter((a) => inPeriod(joinedOn(a))).map((a) => ({ date: joinedOn(a), change: JOINED[a.source] || "Joined", animal: a }));
+  const left = animals.filter((a) => inPeriod(a.exitDate)).map((a) => ({ date: a.exitDate, change: LEFT[a.status] || "Left", animal: a }));
+  const changes = [...joined, ...left].sort((a, b) => a.date - b.date || a.animal.tagNumber.localeCompare(b.animal.tagNumber));
+
+  // ---- Milk: by dairy and milking, per day (or month), per cow, and what went to MVA.
+  const sessionRows = dairies.flatMap((dairy) => DAIRY_SESSIONS[dairy].map((session) => {
+    const records = milk.filter((m) => m.dairy === dairy && m.session === session);
     return {
+      dairy: dairyName(dairy),
       session: optionLabel("milkSessions", session),
       cows: new Set(records.map((m) => m.animalId)).size,
-      litres: sum(records, "litres"),
-      sent: sum(transfers.filter((t) => t.session === session), "litres"),
+      kg: sum(records, "kg"),
+      sent: sum(transfers.filter((t) => t.dairy === dairy && t.session === session), "kg"),
     };
-  }).filter((row) => row.cows || row.sent);
+  }));
   const perCow = new Map();
   for (const record of milk) {
-    const entry = perCow.get(record.animalId) || { tag: record.animal.tagNumber, name: record.animal.name || "", morning: 0, midday: 0, evening: 0, total: 0 };
-    entry[record.session] = round2(entry[record.session] + Number(record.litres));
-    entry.total = round2(entry.total + Number(record.litres));
-    perCow.set(record.animalId, entry);
+    const key = `${record.animalId}|${record.dairy}`;
+    const sessions = DAIRY_SESSIONS[record.dairy] || [];
+    const entry = perCow.get(key) || {
+      tag: record.animal.tagNumber,
+      name: record.animal.name || "",
+      dairy: dairyName(record.dairy),
+      ...Object.fromEntries(["morning", "midday", "evening"].map((s) => [s, sessions.includes(s) ? 0 : ""])),
+      total: 0,
+    };
+    entry[record.session] = round2(Number(entry[record.session] || 0) + Number(record.kg));
+    entry.total = round2(entry.total + Number(record.kg));
+    perCow.set(key, entry);
   }
-  const totalMilk = sum(milk, "litres");
-  const totalSent = sum(transfers, "litres");
-  const calvings = await Promise.all(lactations.map(async (l) => {
-    const calf = l.calfId ? await db.animal.findUnique({ where: { id: l.calfId } }) : null;
-    return { date: l.calvingDate, dam: `${l.animal.tagNumber} ${l.animal.name || ""}`.trim(), lactation: l.lactationNumber, calf: calf ? `${calf.tagNumber} (${calf.sex})` : "", sire: calf?.sireDetails || "" };
-  }));
+  const totalMilk = sum(milk, "kg");
+  const totalSent = sum(transfers, "kg");
+  const milkAt = (dairy) => sum(milk.filter((m) => m.dairy === dairy), "kg");
+
+  // ---- Calvings, vaccinations, health.
+  const calfText = (calf) => (calf ? `${calf.tagNumber} (${optionLabel("animalSex", calf.sex)})` : "");
+  const twins = lactations.filter((l) => l.twinCalfId).length;
+  const vaccineName = (vaccine) => optionLabel("vaccines", vaccine);
+  // Every vaccine on the list, then any other name typed before the list existed.
+  const vaccineRows = [...new Set([...optionValues("vaccines"), ...vaccinations.map((v) => v.vaccine)])].map((vaccine) => {
+    const given = vaccinations.filter((v) => v.vaccine === vaccine);
+    return { vaccine: vaccineName(vaccine), given: given.length, animals: new Set(given.map((v) => v.animalId)).size };
+  });
+  const diseaseRows = [...new Set(health.filter((h) => h.disease).map((h) => h.disease))]
+    .sort((a, b) => optionValues("diseases").indexOf(a) - optionValues("diseases").indexOf(b))
+    .map((disease) => {
+      const cases = health.filter((h) => h.disease === disease);
+      const outcome = (value) => cases.filter((h) => h.outcome === value).length;
+      return { disease: optionLabel("diseases", disease), cases: cases.length, treating: outcome("under_treatment"), recovered: outcome("recovered"), died: outcome("died"), cost: sum(cases, "cost") };
+    });
+  const healthCases = health.filter((h) => h.recordType === "disease");
+
   return {
     title: "Livestock",
+    parts: REPORT_PARTS.livestock,
     summary: [
-      { label: "Milk recorded (litres)", value: totalMilk },
-      { label: "Sent to MVA (litres)", value: totalSent },
-      { label: "Not yet sent (litres)", value: round2(totalMilk - totalSent) },
-      { label: "Calvings", value: lactations.length },
-      { label: "Vaccinations", value: vaccinations.length },
-      { label: "Health records", value: health.length },
-      { label: "Active herd", value: herd.reduce((t, r) => t + r._count, 0) },
+      inPart("herd", { label: "Animals in the herd", value: herd.length }),
+      inPart("herd", { label: "Milking cows", value: count(herd, "milking") }),
+      inPart("herd", { label: "Dry cows", value: count(herd, "dry") }),
+      inPart("herd", { label: "Joined the herd", value: joined.length }),
+      inPart("herd", { label: "Left the herd", value: left.length }),
+      inPart("milk", { label: "Milk recorded (kg)", value: totalMilk }),
+      ...dairies.map((dairy) => inPart("milk", { label: `${dairyName(dairy)} (kg)`, value: milkAt(dairy) })),
+      inPart("milk", { label: "Sent to MVA (kg)", value: totalSent }),
+      inPart("milk", { label: "Not yet sent (kg)", value: round2(totalMilk - totalSent) }),
+      inPart("calvings", { label: "Calvings", value: lactations.length }),
+      inPart("calvings", { label: "Calves born", value: lactations.filter((l) => l.calfId).length + twins }),
+      inPart("calvings", { label: "Twin births", value: twins }),
+      inPart("vaccinations", { label: "Vaccinations given", value: vaccinations.length }),
+      inPart("vaccinations", { label: "Animals vaccinated", value: new Set(vaccinations.map((v) => v.animalId)).size }),
+      inPart("health", { label: "Health records", value: health.length }),
+      inPart("health", { label: "Disease cases", value: healthCases.length }),
+      inPart("health", { label: "Treatment cost", value: sum(health, "cost"), type: "money" }),
     ],
     sections: [
-      section("Milk by session", [col("session", "Session"), col("cows", "Cows milked", "number"), col("litres", "Litres", "number"), col("sent", "Sent to MVA", "number")], bySession, ["litres", "sent"]),
-      breakdown(range, "Milk", [col("morning", "Morning", "number"), col("midday", "Midday", "number"), col("evening", "Evening", "number"), col("total", "Total", "number"), col("sent", "Sent to MVA", "number")],
+      inPart("herd", section(`Herd at ${dayText(range.asAt)}`, [col("dairy", "Dairy"), ...HERD_CLASSES.map(([key, label]) => col(key, label, "number")), col("total", "Total", "number")],
+        byDairy, [...HERD_CLASSES.map(([key]) => key), "total"])),
+      inPart("herd", section("Herd register", [col("tag", "Tag"), col("name", "Name"), col("dairy", "Dairy"), col("cls", "Class"), col("breed", "Breed"), col("born", "Born", "date"), col("age", "Age"), col("mother", "Mother"), col("father", "Father"), { ...col("calvings", "Calvings", "number"), weight: 1.5 }],
+        herd.map(({ animal: a, cls }) => ({
+          tag: a.tagNumber,
+          name: a.name || "",
+          dairy: dairyName(a.dairy),
+          cls: CLASS_NAME[cls],
+          breed: a.breed || "",
+          born: a.dateOfBirth,
+          age: ageText(a.dateOfBirth, range.asAt),
+          mother: tagOf(a.dam),
+          father: tagOf(a.sire) || a.sireDetails || "",
+          calvings: (calvingsOf.get(a.id) || []).length,
+        })))),
+      inPart("herd", section("Joined and left the herd", [col("date", "Date", "date"), col("change", "Change"), col("tag", "Tag"), col("name", "Name"), col("dairy", "Dairy"), col("sex", "Sex"), col("mother", "Mother")],
+        changes.map(({ date, change, animal: a }) => ({ date, change, tag: a.tagNumber, name: a.name || "", dairy: dairyName(a.dairy), sex: optionLabel("animalSex", a.sex), mother: change === "Born" ? tagOf(a.dam) : "" })))),
+
+      inPart("milk", section("Milk by dairy and session (kg)", [col("dairy", "Dairy"), col("session", "Session"), col("cows", "Cows milked", "number"), col("kg", "Kg", "number"), col("sent", "Sent to MVA (kg)", "number")], sessionRows, ["kg", "sent"])),
+      inPart("milk", breakdown(range, "Milk (kg)", [...dairies.map((dairy) => col(dairy, dairyName(dairy), "number")), col("total", "Total", "number"), col("sent", "Sent to MVA", "number")],
         { milk: { rows: milk, date: "date" }, sent: { rows: transfers, date: "date" } },
         ({ milk: records, sent }) => ({
-          ...Object.fromEntries(sessions.map((s) => [s, sum(records.filter((m) => m.session === s), "litres")])),
-          total: sum(records, "litres"),
-          sent: sum(sent, "litres"),
-        }), ["morning", "midday", "evening", "total", "sent"]),
-      section("Milk per cow", [col("tag", "Tag"), col("name", "Name"), col("morning", "Morning", "number"), col("midday", "Midday", "number"), col("evening", "Evening", "number"), col("total", "Total", "number")],
-        [...perCow.values()], ["morning", "midday", "evening", "total"]),
-      listsEachRecord(range) && section("Transfers to MVA", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("session", "Session"), col("litres", "Litres sent", "number"), col("received", "Received by MVA", "number"), col("status", "Status")],
-        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, session: optionLabel("milkSessions", t.session), litres: Number(t.litres), received: t.receivedLitres == null ? "" : Number(t.receivedLitres), status: optionLabel("transferStatus", t.status) })), ["litres"]),
-      section("Calvings", [col("date", "Date", "date"), col("dam", "Mother"), col("lactation", "Lactation no.", "number"), col("calf", "Calf"), col("sire", "Sire details")], calvings),
-      section("Vaccinations", [col("date", "Date", "date"), col("animal", "Animal"), col("vaccine", "Vaccine"), col("dose", "Dose"), col("nextDue", "Next due", "date")],
-        vaccinations.map((v) => ({ date: v.date, animal: v.animal.tagNumber, vaccine: v.vaccine, dose: v.dose || "", nextDue: v.nextDueDate }))),
-      section("Disease and herd health", [col("date", "Date", "date"), col("animal", "Animal"), col("type", "Type"), col("condition", "Condition"), col("treatment", "Treatment"), col("outcome", "Outcome"), col("cost", "Cost", "money")],
-        health.map((h) => ({ date: h.date, animal: h.animal?.tagNumber || "Whole herd", type: optionLabel("healthRecordTypes", h.recordType), condition: h.condition, treatment: h.treatment || "", outcome: optionLabel("healthOutcomes", h.outcome), cost: Number(h.cost) })), ["cost"]),
-    ].filter(Boolean),
+          ...Object.fromEntries(dairies.map((dairy) => [dairy, sum(records.filter((m) => m.dairy === dairy), "kg")])),
+          total: sum(records, "kg"),
+          sent: sum(sent, "kg"),
+        }), [...dairies, "total", "sent"])),
+      inPart("milk", section("Milk per cow (kg)", [col("tag", "Tag"), col("name", "Name"), col("dairy", "Dairy"), col("morning", "Morning", "number"), col("midday", "Midday", "number"), col("evening", "Evening", "number"), col("total", "Total", "number")],
+        [...perCow.values()].sort((a, b) => a.dairy.localeCompare(b.dairy) || a.tag.localeCompare(b.tag)), ["morning", "midday", "evening", "total"])),
+      inPart("milk", listsEachRecord(range) && section("Milk sent to MVA", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("dairy", "Dairy"), col("session", "Session"), col("kg", "Kg sent", "number"), col("received", "Received by MVA", "number"), col("status", "Status")],
+        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, dairy: dairyName(t.dairy), session: optionLabel("milkSessions", t.session), kg: Number(t.kg), received: t.receivedKg == null ? "" : Number(t.receivedKg), status: optionLabel("transferStatus", t.status) })), ["kg"])),
+
+      inPart("calvings", section("Calvings", [col("date", "Date", "date"), col("dam", "Mother"), col("dairy", "Dairy"), col("lactation", "Lactation no.", "number"), col("calf", "Calf"), col("twin", "Twin"), col("sire", "Father")],
+        lactations.map((l) => ({
+          date: l.calvingDate,
+          dam: tagOf(l.animal),
+          dairy: dairyName(l.animal.dairy),
+          lactation: l.lactationNumber,
+          calf: calfText(l.calf),
+          twin: calfText(l.twinCalf),
+          sire: tagOf(l.calf?.sire) || l.calf?.sireDetails || "",
+        })))),
+
+      inPart("vaccinations", section("Vaccinations by vaccine", [col("vaccine", "Vaccine"), col("given", "Doses given", "number"), col("animals", "Animals", "number")], vaccineRows, ["given"])),
+      inPart("vaccinations", listsEachRecord(range) && section("Vaccinations", [col("date", "Date", "date"), col("animal", "Animal"), col("vaccine", "Vaccine"), col("dose", "Dose"), col("by", "Given by"), col("nextDue", "Next due", "date")],
+        vaccinations.map((v) => ({ date: v.date, animal: tagOf(v.animal), vaccine: vaccineName(v.vaccine), dose: v.dose || "", by: v.administeredBy || "", nextDue: v.nextDueDate })))),
+
+      inPart("health", section("Cases by disease", [col("disease", "Disease"), col("cases", "Records", "number"), col("treating", "Under treatment", "number"), col("recovered", "Recovered", "number"), col("died", "Died", "number"), col("cost", "Cost", "money")],
+        diseaseRows, ["cases", "treating", "recovered", "died", "cost"])),
+      inPart("health", section("Disease and herd health", [col("date", "Date", "date"), col("animal", "Animal"), col("type", "Type"), col("disease", "Disease"), col("details", "Details"), col("treatment", "Treatment"), col("outcome", "Outcome"), col("cost", "Cost", "money")],
+        health.map((h) => ({ date: h.date, animal: h.animal ? tagOf(h.animal) : "Whole herd", type: optionLabel("healthRecordTypes", h.recordType), disease: h.disease ? optionLabel("diseases", h.disease) : "", details: h.condition || "", treatment: h.treatment || "", outcome: optionLabel("healthOutcomes", h.outcome), cost: Number(h.cost) })), ["cost"])),
+    ].filter((s) => s && s.title),
   };
 };
 
@@ -215,7 +368,7 @@ const mva = async (db, range) => {
     stockSummary(db, "mva", { upTo: range.asAt }),
   ]);
   const figures = batches.map((batch) => ({ date: batch.date, ...outputFigures(batch) }));
-  const fromLivestock = sum(transfers, "receivedLitres");
+  const fromLivestock = sum(transfers, "receivedKg");
   const fromFarmers = sum(deliveries, "litres");
   const perFarmer = new Map();
   for (const d of deliveries) {
@@ -237,7 +390,7 @@ const mva = async (db, range) => {
     title: "Milk Value Addition",
     parts: REPORT_PARTS.mva,
     summary: [
-      inPart("production", { label: "Milk from Livestock (litres)", value: fromLivestock }),
+      inPart("production", { label: "Milk from Livestock (kg)", value: fromLivestock }),
       inPart("production", { label: "Milk from farmers (litres)", value: fromFarmers }),
       inPart("production", { label: "Farmers delivering", value: perFarmer.size }),
       inPart("production", { label: "Total intake", value: sum(days, "total") }),
@@ -252,8 +405,8 @@ const mva = async (db, range) => {
       inPart("output", outputRegister(range, figures)),
       section("Farmer deliveries", [col("number", "No."), col("farmer", "Farmer"), col("morning", "Morning", "number"), col("midday", "Midday", "number"), col("evening", "Evening", "number"), col("litres", "Litres", "number"), col("amount", "Value", "money")],
         [...perFarmer.values()], ["morning", "midday", "evening", "litres", "amount"]),
-      listsEachRecord(range) && section("Received from Livestock", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("dairy", "Dairy"), col("session", "Session"), col("sent", "Sent", "number"), col("received", "Received", "number")],
-        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, dairy: optionLabel("dairies", t.dairy), session: optionLabel("milkSessions", t.session), sent: Number(t.litres), received: Number(t.receivedLitres) })), ["sent", "received"]),
+      listsEachRecord(range) && section("Received from Livestock", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("dairy", "Dairy"), col("session", "Session"), col("sent", "Sent (kg)", "number"), col("received", "Received (kg)", "number")],
+        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, dairy: optionLabel("dairies", t.dairy), session: optionLabel("milkSessions", t.session), sent: Number(t.kg), received: Number(t.receivedKg) })), ["sent", "received"]),
       section("Products made and sent to Sales", [col("product", "Product"), col("made", "Made", "number"), col("sent", "Sent to Sales", "number")],
         [...new Set([...outputs.keys(), ...sent.keys()])].map((product) => ({ product, made: outputs.get(product) || 0, sent: sent.get(product) || 0 }))),
       section(`MVA stock at ${dayText(range.asAt)}`, [col("name", "Product"), col("unit", "Unit"), col("onHand", "On hand", "number")], stock),
@@ -482,7 +635,7 @@ const storeStock = (range, items, receipts, issues, receivedBefore, issuedBefore
     if (!(item.isActive && added) && !opening && !received && !out) return [];
     const remaining = round2(opening + received - out);
     const note = remaining <= 0 ? "Out of stock" : remaining <= Number(item.reorderLevel) ? "Reorder" : "";
-    return [{ code: item.code, item: item.name, category: optionLabel("storeCategories", item.category), unit: item.unit, opening, received, out, remaining, note }];
+    return [{ item: item.name, category: optionLabel("storeCategories", item.category), unit: item.unit, opening, received, out, remaining, note }];
   });
 };
 
@@ -524,7 +677,7 @@ const stores = async (db, range) => {
       receipts.map((r) => ({ date: r.date, receiptNumber: r.receiptNumber, item: r.item.name, category: category(r.item), quantity: Number(r.quantity), unit: r.item.unit, source: optionLabel("receiptSources", r.source), notes: r.notes || "" })))
     : section("Goods received by item", [col("item", "Item"), col("category", "Category"), col("unit", "Unit"), col("count", "Deliveries", "number"), col("quantity", "Quantity", "number")],
       storeTotals(receipts, (r) => r.itemId, (r) => ({ item: r.item.name, category: category(r.item), unit: r.item.unit, count: 0, quantity: 0 })), ["count"]);
-  const remaining = section(`Stock remaining at ${dayText(range.asAt)}`, [col("code", "Code"), col("item", "Item"), col("category", "Category"), col("unit", "Unit"), col("opening", "Opening", "number"), col("received", "Received", "number"), col("out", "Stock out", "number"), col("remaining", "Remaining", "number"), col("note", "Note")], stock);
+  const remaining = section(`Stock remaining at ${dayText(range.asAt)}`, [col("item", "Item"), col("category", "Category"), col("unit", "Unit"), col("opening", "Opening", "number"), col("received", "Received", "number"), col("out", "Stock out", "number"), col("remaining", "Remaining", "number"), col("note", "Note")], stock);
 
   return {
     title: "Stores",

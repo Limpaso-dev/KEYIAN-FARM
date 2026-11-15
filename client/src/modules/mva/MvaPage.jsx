@@ -120,7 +120,7 @@ const deliveries = {
 const fromLivestock = {
   ...milkTransfers,
   title: "Milk from Livestock",
-  description: "Confirm what arrived from the Livestock department. Received milk is added to MVA raw milk stock.",
+  description: "Confirm what arrived from the Livestock department, in kilograms. Received milk is added to MVA raw milk stock (kg).",
   defaultQuery: { status: "sent" },
 };
 

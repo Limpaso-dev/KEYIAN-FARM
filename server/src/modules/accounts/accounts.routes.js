@@ -299,7 +299,7 @@ router.use("/suppliers", crud({
 const poInclude = {
   supplier: { select: { id: true, name: true } },
   requisition: { select: { id: true, requisitionNumber: true, department: true, title: true } },
-  items: { include: { storeItem: { select: { id: true, code: true, name: true, unit: true } } } },
+  items: { include: { storeItem: { select: { id: true, name: true, unit: true } } } },
 };
 const poRouter = express.Router();
 

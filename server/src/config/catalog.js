@@ -117,7 +117,26 @@ export const OPTIONS = {
     ["deworming", "Deworming"],
     ["dipping", "Dipping / spraying"],
   ]),
+  // Disease cases and treatments name the disease; "Other" is written in the details.
+  diseases: list([
+    ["ecf", "ECF"],
+    ["trypanosomiasis", "Trypanosomiasis"],
+    ["mastitis", "Mastitis"],
+    ["anaplasmosis", "Anaplasmosis"],
+    ["pneumonia", "Pneumonia"],
+    ["ephemeral_fever", "Ephemeral fever"],
+    ["foot_rot", "Foot rot"],
+    ["injuries", "Injuries"],
+    ["retained_afterbirth", "Retained afterbirth"],
+    ["abortions", "Abortions"],
+    ["pink_eye", "Pink eye"],
+    ["abscess", "Abscess"],
+    ["prolapse", "Prolapse"],
+    ["other", "Other"],
+  ]),
+  vaccines: list([["fmd", "FMD"], ["lsd", "LSD"], ["blanthax", "Blanthax"]]),
   healthOutcomes: list([["under_treatment", "Under treatment"], ["recovered", "Recovered"], ["died", "Died"], ["not_applicable", "N/A"]]),
+  // Each dairy's milking times are in DAIRY_SESSIONS below.
   milkSessions: list([["morning", "Morning"], ["midday", "Midday"], ["evening", "Evening"]]),
   transferStatus: list([["sent", "Sent"], ["received", "Received"]]),
 
@@ -128,14 +147,15 @@ export const OPTIONS = {
   damageTypes: list([["damage", "Damage"], ["replacement", "Customer replacement"], ["vehicle_return", "Return from vehicle"], ["office", "Office use"]]),
 
   storeCategories: list([
+    ["transport_construction", "Transport & construction"],
+    ["crops", "Crops"],
     ["animal_feeds", "Animal feeds"],
     ["mva_tools", "MVA processing tools"],
-    ["farm_tools", "Farm tools"],
-    ["fertilisers", "Fertilisers"],
-    ["transport_materials", "Transport materials"],
-    ["construction_materials", "Construction materials"],
     ["other", "Other"],
   ]),
+  storeRequestStatus: list([["pending", "Waiting"], ["issued", "Dispatched"], ["declined", "Declined"], ["cancelled", "Cancelled"]]),
+  // The Stock page: everything, or only what needs restocking.
+  stockStates: list([["low", "Low or out of stock"], ["out", "Out of stock"]]),
   // An item's opening stock is entered with the item, not received.
   receiptSources: list([["purchase", "Purchase"], ["donation", "Donation"], ["return", "Returned by department"]]),
 
@@ -184,7 +204,23 @@ export const REPORT_PARTS = {
   mva: [{ key: "production", title: "Production report" }, { key: "output", title: "Product output" }],
   sales: [{ key: "vehicles", title: "Vehicles register" }, { key: "store", title: "Store register" }, { key: "local", title: "Local sales register" }],
   stores: [{ key: "out", title: "Stock out" }, { key: "received", title: "Goods received" }, { key: "stock", title: "Stock remaining" }],
+  livestock: [
+    { key: "herd", title: "Herd report" },
+    { key: "milk", title: "Milk report" },
+    { key: "calvings", title: "Calvings report" },
+    { key: "vaccinations", title: "Vaccination report" },
+    { key: "health", title: "Health report" },
+  ],
 };
+
+/** When each dairy milks: Dairy A in the morning and evening, Dairy C also at midday. */
+export const DAIRY_SESSIONS = {
+  dairy_a: ["morning", "evening"],
+  dairy_c: ["morning", "midday", "evening"],
+};
+
+/** Health record types that name a disease (required for a disease case). */
+export const DISEASE_RECORD_TYPES = ["disease", "treatment"];
 
 export const optionValues = (name) => {
   const options = OPTIONS[name];

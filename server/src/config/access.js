@@ -103,8 +103,8 @@ export const can = (user, resource, action = "read") => {
 };
 
 // Requisitions are raised by the departments and decided by the head of
-// Accounts or the General Manager; Accounts fulfils them. Stores takes
-// requests for its items by word of mouth, so it has no requisitions.
+// Accounts or the General Manager; Accounts fulfils them. Stores raises
+// none: it answers the departments' store requests (see storeRequestRules).
 // They are not tied to one department, so they have their own rules.
 export const requisitionRules = {
   canRaise: (user) => Boolean(user?.isActive && user.department && user.department !== "stores"),
@@ -126,6 +126,16 @@ export const productRequestRules = {
   },
   handles: (user) => (user?.isActive && ["mva", "sales"].includes(user.department) ? [user.department] : []),
   seeAll: (user) => Boolean(user?.isActive && (isSystemAdmin(user) || isGeneralManager(user))),
+};
+
+// Store requests. Each department (other than Stores) asks Stores for items;
+// Stores dispatches them, which is recorded as stock out to that department.
+// A department sees its own requests; Stores, the General Manager and the
+// administrators see them all.
+export const storeRequestRules = {
+  canRaise: (user) => Boolean(user?.isActive && user.department && user.department !== "stores"),
+  handles: (user) => Boolean(user?.isActive && user.department === "stores"),
+  seeAll: (user) => Boolean(user?.isActive && (isSystemAdmin(user) || isGeneralManager(user) || user.department === "stores")),
 };
 
 // A department's screens and reports: its own staff; the General Manager and
@@ -163,6 +173,11 @@ export const permissionsFor = (user) => {
       raiseTo: productRequestRules.raiseTo(user),
       handles: productRequestRules.handles(user),
       seeAll: productRequestRules.seeAll(user),
+    },
+    storeRequests: {
+      raise: storeRequestRules.canRaise(user),
+      handle: storeRequestRules.handles(user),
+      seeAll: storeRequestRules.seeAll(user),
     },
     departments: ALL.filter((department) => canOpenDepartment(user, department)),
     reports: ALL.filter((department) => canReadReport(user, department)),

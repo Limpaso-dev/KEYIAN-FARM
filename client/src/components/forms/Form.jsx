@@ -10,13 +10,18 @@ import { Alert, Button, FieldWrap, Input, Kbd, Modal, Select, Spinner, Textarea 
 // Field definition:
 //   { name, label, type, required, options | ref, span (2: full width, "third"), help, placeholder,
 //     showIf(values), readOnly, step, min, columns (items), fixedRows }
+// required may be a function of the form's values; optionFilter(option, values, meta) narrows a list;
+// onSelect(row, values, meta) returns other values to set when the field changes.
 // type: text | email | tel | number | date | month | textarea | select |
 //       checkbox | items | display
 // options: name of a server option list (string) or [{ value, label }]
 // ref: { path, params, label(row), filter(row) } - options from records
 
+/** Whether a field must be filled in, given what else is on the form. */
+const isRequired = (field, values) => (typeof field.required === "function" ? Boolean(field.required(values || {})) : Boolean(field.required));
+
 /** Options for a field: from the server option lists or another endpoint. */
-const useOptions = (field) => {
+const useOptions = (field, values) => {
   const { meta } = useAuth();
   const [refOptions, setRefOptions] = useState(null);
   const ref = field.ref;
@@ -41,19 +46,19 @@ const useOptions = (field) => {
   if (ref) return refOptions;
   if (typeof field.options === "string") {
     const list = meta?.[field.options] || [];
-    return field.optionFilter ? list.filter(field.optionFilter) : list;
+    return field.optionFilter ? list.filter((option) => field.optionFilter(option, values || {}, meta)) : list;
   }
   return field.options || [];
 };
 
 const INVALID = "border-rose-400 hover:border-rose-500 focus:border-rose-500 focus:ring-rose-500/10";
 
-const Control = ({ field, value, onChange, id, invalid }) => {
-  const options = useOptions(field);
+const Control = ({ field, value, onChange, id, invalid, values }) => {
+  const options = useOptions(field, values);
   const common = {
     id,
     name: field.name,
-    required: field.required,
+    required: isRequired(field, values),
     disabled: field.readOnly,
     placeholder: field.placeholder,
     "aria-invalid": invalid || undefined,
@@ -121,7 +126,7 @@ const ItemsField = ({ field, value, onChange, invalid }) => {
                 <td key={c.name} className="px-2 py-1.5 align-top first:pl-3">
                   {c.type === "display"
                     ? <span className="block py-2 font-medium text-slate-800">{c.render ? c.render(row) : row[c.name]}</span>
-                    : <Control field={{ ...c, required: c.required }} value={row[c.name]} onChange={(next, picked) => update(index, c.name, next, picked)} id={`${field.name}-${index}-${c.name}`} />}
+                    : <Control field={{ ...c, required: c.required }} values={row} value={row[c.name]} onChange={(next, picked) => update(index, c.name, next, picked)} id={`${field.name}-${index}-${c.name}`} />}
                 </td>
               ))}
               {!field.fixedRows && (
@@ -190,7 +195,7 @@ const validate = (fields, values) => {
       continue;
     }
     if (isEmpty(v) || (typeof v === "string" && !v.trim())) {
-      if (f.required) errors[f.name] = `${f.label || "This field"} is required.`;
+      if (isRequired(f, values)) errors[f.name] = `${f.label || "This field"} is required.`;
       continue;
     }
     if (f.type === "email" && !EMAIL.test(String(v).trim())) errors[f.name] = "Enter a valid email address, like name@example.com.";
@@ -218,10 +223,10 @@ export const FormFields = ({ fields, values, setValue, errors = {} }) => (
       const span = field.span === 2 || ["textarea", "items"].includes(field.type) ? "sm:col-span-6" : field.span === "third" ? "sm:col-span-2" : "sm:col-span-3";
       const error = errors[field.name];
       return (
-        <FieldWrap key={field.name} label={field.type === "checkbox" ? null : field.label} htmlFor={id} required={field.required} help={field.help} error={error} className={span}>
+        <FieldWrap key={field.name} label={field.type === "checkbox" ? null : field.label} htmlFor={id} required={isRequired(field, values)} help={field.help} error={error} className={span}>
           {field.type === "items"
             ? <div data-invalid={error ? "true" : undefined}><ItemsField field={field} value={values[field.name]} invalid={Boolean(error)} onChange={(next) => setValue(field.name, next)} /></div>
-            : <Control field={field} id={id} invalid={Boolean(error)} value={values[field.name]} onChange={(next, row) => setValue(field.name, next, row, field)} />}
+            : <Control field={field} id={id} invalid={Boolean(error)} values={values} value={values[field.name]} onChange={(next, row) => setValue(field.name, next, row, field)} />}
         </FieldWrap>
       );
     })}
@@ -234,6 +239,7 @@ export const FormFields = ({ fields, values, setValue, errors = {} }) => (
  * dialog and the form stays open with everything the person typed.
  */
 export const FormModal = ({ open, title, subtitle, fields, initial, onSubmit, onClose, submitLabel = "Save", size = "md", intro, tone = "primary", icon }) => {
+  const { meta } = useAuth();
   const formRef = useRef(null);
   const [values, setValues] = useState({});
   const [ready, setReady] = useState(false);
@@ -273,7 +279,7 @@ export const FormModal = ({ open, title, subtitle, fields, initial, onSubmit, on
     setConfirmDiscard(false);
     setValues((previous) => {
       const updated = { ...previous, [name]: next };
-      if (field?.onSelect) Object.assign(updated, field.onSelect(row, updated) || {});
+      if (field?.onSelect) Object.assign(updated, field.onSelect(row, updated, meta) || {});
       return updated;
     });
   };

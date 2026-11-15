@@ -4,6 +4,7 @@ import { ResourcePage } from "../../components/resource/ResourcePage";
 import { Alert } from "../../components/ui/ui";
 import { useAuth } from "../../context/useAuth";
 import { dateTime, money, number } from "../../lib/format";
+import { storeRequestsConfig } from "../stores/storeRequests";
 import { productRequestsConfig } from "./productRequests";
 
 const blank = (v) => (v === "" || v == null ? 0 : Number(v));
@@ -69,7 +70,7 @@ const config = (user, permissions) => ({
   resource: "requisitions",
   endpoint: "/requisitions",
   title: "Requisitions to Accounts",
-  description: "Money and things to buy, such as dust coats. The head of Accounts or the General Manager approves, returns or rejects, and Accounts then fulfils it. (Stores items are asked for by word of mouth.)",
+  description: "Money and things to buy, such as dust coats. The head of Accounts or the General Manager approves, returns or rejects, and Accounts then fulfils it. (Ask Stores for its items under To Stores.)",
   singular: "Requisition",
   createLabel: "New requisition",
   formSize: "lg",
@@ -113,10 +114,11 @@ const config = (user, permissions) => ({
 /**
  * Requisitions, with a section for each kind of request (see navigation.js):
  * to Accounts; products Sales asks MVA for; products the administration asks
- * Sales for (office use).
+ * Sales for (office use); items the departments ask Stores for.
  */
 const RequisitionsPage = () => {
-  const { user, permissions } = useAuth();
+  const auth = useAuth();
+  const { user, permissions } = auth;
   return (
     <ModulePage
       sections={{
@@ -128,6 +130,7 @@ const RequisitionsPage = () => {
         ),
         mva: () => <ResourcePage config={productRequestsConfig("mva", permissions)} />,
         sales: () => <ResourcePage config={productRequestsConfig("sales", permissions)} />,
+        stores: () => <ResourcePage config={storeRequestsConfig(auth)} />,
       }}
     />
   );

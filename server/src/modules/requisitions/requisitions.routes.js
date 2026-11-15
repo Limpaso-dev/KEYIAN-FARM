@@ -12,7 +12,7 @@ import { parseBody, parseItems, round2 } from "../../lib/validate.js";
 //   Accounts head / GM -> approved | rejected | returned (with comment)
 //   requester          -> edits a returned one and resubmits (pending)
 //   Accounts           -> fulfilled (bought or paid for)
-// Stores takes requests for its items by word of mouth, so it has none.
+// Stores raises none: it answers the departments' store requests.
 
 const router = express.Router();
 const include = {
@@ -83,7 +83,7 @@ router.get("/:id", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  if (!requisitionRules.canRaise(req.user)) throw forbidden(req.user?.department === "stores" ? "Stores takes requests by word of mouth and does not raise requisitions" : "Only department staff can raise requisitions");
+  if (!requisitionRules.canRaise(req.user)) throw forbidden(req.user?.department === "stores" ? "Stores does not raise requisitions; departments ask Stores for items through store requests" : "Only department staff can raise requisitions");
   const data = parseBody({ title: "string!", purpose: "text!", priority: "option:priorities" }, req.body);
   const items = buildItems(req.body.items);
   const requisition = await inTransaction(async (tx) => {

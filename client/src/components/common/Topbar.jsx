@@ -9,9 +9,10 @@ import { cx } from "../../lib/cx";
 import { Kbd } from "../ui/ui";
 
 const productLines = (items) => (items || []).map((i) => `${i.product?.name} ${Number(i.quantity)}`).join(", ");
+const storeLines = (items) => (items || []).map((i) => `${i.item?.name} ${Number(i.quantity)} ${i.item?.unit || ""}`.trim()).join(", ");
 
-/** Requisitions and product requests needing this user's attention. */
-const useNotifications = (user, permissions) => {
+/** Requisitions, product requests and store requests needing this user's attention. */
+const useNotifications = (user, permissions, label) => {
   const [items, setItems] = useState([]);
   const [failed, setFailed] = useState(false);
   const refresh = useCallback(async () => {
@@ -24,9 +25,11 @@ const useNotifications = (user, permissions) => {
       const toFulfil = permissions?.requisitions?.fulfil ? await get("/requisitions", { status: "approved" }) : [];
       // Product requests: those waiting for this user's department, and products MVA has sent to Sales on request.
       const handles = permissions?.productRequests?.handles || [];
-      const [toHandle, sent] = await Promise.all([
+      // Store requests waiting for Stores to dispatch.
+      const [toHandle, sent, toDispatch] = await Promise.all([
         Promise.all(handles.map((to) => get("/product-requests", { to, status: "pending" }))).then((lists) => lists.flat()),
         permissions?.productRequests?.raiseTo?.includes("mva") ? get("/product-requests", { to: "mva", status: "sent" }) : [],
+        permissions?.storeRequests?.handle ? get("/store-requests", { status: "pending" }) : [],
       ]);
       const toAccounts = "/requisitions?tab=accounts";
       setItems([
@@ -35,12 +38,13 @@ const useNotifications = (user, permissions) => {
         ...toFulfil.map((r) => ({ id: `f-${r.id}`, title: "Approved requisition to fulfil", detail: `${r.requisitionNumber} · ${r.title} (${r.department})`, amount: r.totalAmount, at: r.decidedAt, to: toAccounts })),
         ...toHandle.map((r) => ({ id: `p-${r.id}`, title: r.toDepartment === "mva" ? "Sales asked for products" : "Office request from the administration", detail: `${r.requestNumber} · ${productLines(r.items)}`, at: r.createdAt, to: `/requisitions?tab=${r.toDepartment}` })),
         ...sent.map((r) => ({ id: `s-${r.id}`, title: "MVA sent the products you asked for", detail: `${r.requestNumber} · receive them under From MVA`, at: r.handledAt, to: "/sales?tab=received" })),
+        ...toDispatch.map((r) => ({ id: `q-${r.id}`, title: `${label("departments", r.department)} asked for items`, detail: `${r.requestNumber} · ${storeLines(r.items)}`, at: r.createdAt, to: "/stores?tab=requests" })),
       ].sort((a, b) => new Date(b.at) - new Date(a.at)));
       setFailed(false);
     } catch {
       setFailed(true);
     }
-  }, [user, permissions]);
+  }, [user, permissions, label]);
   useEffect(() => {
     const first = setTimeout(refresh, 0);
     const timer = setInterval(refresh, 60000);
@@ -123,11 +127,11 @@ const Breadcrumbs = () => {
 };
 
 const Notifications = () => {
-  const { user, permissions } = useAuth();
+  const { user, permissions, label } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const panel = useDismiss(open, setOpen);
-  const { items, failed, refresh } = useNotifications(user, permissions);
+  const { items, failed, refresh } = useNotifications(user, permissions, label);
   return (
     <div ref={panel} className="relative">
       <button

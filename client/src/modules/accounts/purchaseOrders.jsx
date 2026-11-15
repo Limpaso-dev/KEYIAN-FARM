@@ -29,7 +29,7 @@ export const purchaseOrdersConfig = {
     <table className="w-full max-w-3xl text-sm">
       <thead className="text-left text-xs uppercase text-slate-500"><tr><th className="py-1">Item</th><th className="text-right">Ordered</th><th className="text-right">Price</th><th className="text-right">Total</th></tr></thead>
       <tbody className="divide-y divide-slate-200">
-        {row.items.map((i) => <tr key={i.id}><td className="py-1.5">{i.description}{i.storeItem ? ` (${i.storeItem.code})` : ""}</td><td className="text-right">{number(i.quantity)}</td><td className="text-right">{money(i.unitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}
+        {row.items.map((i) => <tr key={i.id}><td className="py-1.5">{i.description}</td><td className="text-right">{number(i.quantity)}</td><td className="text-right">{money(i.unitPrice)}</td><td className="text-right">{money(i.total)}</td></tr>)}
       </tbody>
     </table>
   ),

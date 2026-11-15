@@ -43,6 +43,7 @@ const chartRows = (days, seriesMaps) =>
   }));
 
 const litres = (v) => `${number(v, 1)} L`;
+const kg = (v) => `${number(v, 1)} kg`;
 const summaryValue = (cards, department, label) => cards?.find((c) => c.department === department)?.summary.find((s) => s.label === label)?.value;
 const plural = (n, word) => `${word}${n === 1 ? "" : "s"}`;
 
@@ -165,6 +166,54 @@ const RecentActivity = ({ items, loading }) => (
   </Section>
 );
 
+const STOCK_ROWS = 12;
+const stockRank = (item) => (Number(item.quantityOnHand) <= 0 ? 0 : Number(item.quantityOnHand) <= Number(item.reorderLevel) ? 1 : 2);
+
+/**
+ * What the store holds now, for those who run Stores: one ruled line per
+ * item, those out of stock or due for reordering first.
+ */
+const StoreStock = ({ items, loading, label, className }) => {
+  const list = [...(items || [])].sort((a, b) => stockRank(a) - stockRank(b) || a.name.localeCompare(b.name));
+  const low = list.filter((item) => stockRank(item) < 2).length;
+  const shown = list.slice(0, STOCK_ROWS);
+  return (
+    <Section
+      className={className}
+      title="Stock in the store"
+      description={items ? `${list.length} ${plural(list.length, "item")}${low ? ` · ${low} low or out of stock` : ""}` : "What the store holds now"}
+      aside={<Link to="/stores?tab=stock" className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-primary-700 hover:text-primary-900 hover:underline">Open Stock <ArrowRight size={14} aria-hidden /></Link>}
+    >
+      {loading && !items ? <ListSkeleton rows={4} height="h-8" /> : list.length ? (
+        <table className="w-full text-sm">
+          <thead className="sr-only"><tr><th>Item</th><th>Category</th><th>In stock</th></tr></thead>
+          <tbody>
+            {shown.map((item) => {
+              const rank = stockRank(item);
+              return (
+                <tr key={item.id} className="border-b border-slate-200">
+                  <td className="py-2.5 pr-3 font-medium text-slate-800">{item.name}</td>
+                  <td className="hidden py-2.5 pr-3 text-[13px] text-slate-500 sm:table-cell">{label("storeCategories", item.category)}</td>
+                  <td className="py-2.5 text-right">
+                    <span className="inline-flex items-center justify-end gap-2">
+                      {rank === 0 && <Badge tone="red">Out of stock</Badge>}
+                      {rank === 1 && <Badge tone="amber">Reorder</Badge>}
+                      <span className={cx("font-semibold tabular-nums", rank === 0 ? "text-rose-700" : "text-slate-900")}>{number(item.quantityOnHand)} {item.unit}</span>
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <p className="border-b border-slate-200 py-3.5 text-sm text-slate-500">No items in the store yet. Add them under Stores, Items.</p>
+      )}
+      {list.length > STOCK_ROWS && <p className="pt-2.5 text-xs text-slate-500">And {list.length - STOCK_ROWS} more. <Link to="/stores?tab=stock" className="font-medium text-primary-700 hover:underline">See all in Stock</Link></p>}
+    </Section>
+  );
+};
+
 /**
  * Every department's end-of-day headline figures, one department at a time,
  * as a ruled two-column table.
@@ -236,8 +285,10 @@ const Dashboard = () => {
   const dispatches = useFetch(can("dispatches") ? "/sales/dispatches" : null, range);
   const ledger = useFetch(can("transactions") ? "/accounts/transactions" : null, range);
   const requisitions = useFetch(canRequisitions ? "/requisitions" : null);
-  // The reorder alert is for those who run Stores.
-  const lowStock = useFetch(opensDepartment(auth, "stores") ? "/stores/items/low-stock" : null);
+  // The store's stock and its reorder alert are for those who run Stores.
+  const runsStores = opensDepartment(auth, "stores");
+  const storeStock = useFetch(runsStores ? "/stores/stock" : null);
+  const lowStock = { data: storeStock.data?.filter((item) => stockRank(item) < 2) };
   const vaccinations = useFetch(can("vaccinations") ? "/livestock/vaccinations-due" : null, { days: 7 });
   const contracts = useFetch(can("contracts") ? "/hr/contracts-expiring" : null, { days: 30 });
   const salaries = useFetch(can("payroll", "pay") ? "/hr/payroll" : null, { status: "with_finance" });
@@ -247,7 +298,14 @@ const Dashboard = () => {
   const cards = data?.cards || [];
 
   // ---- Series ---------------------------------------------------------
-  const milkByDay = { herd: sumByDay(herd.data, "litres"), farmers: sumByDay(farmers.data, "litres") };
+  // The own herd's milk is weighed in kg, the farmers' measured in litres, so the two are never added together.
+  const milkByDay = { herd: sumByDay(herd.data, "kg"), farmers: sumByDay(farmers.data, "litres") };
+  const milkSeries = [
+    ...(herd.data ? [{ key: "herd", label: "Own herd", unit: "kg", as: kg }] : []),
+    ...(farmers.data ? [{ key: "farmers", label: "Local farmers", unit: "L", as: litres }] : []),
+  ];
+  const mixedMilk = milkSeries.length > 1;
+  const milkText = (pick, digits = 1) => milkSeries.map((s) => `${number(pick(milkByDay[s.key]), digits)} ${s.unit}`).join(" · ");
   const salesByDay = { local: sumByDay(sales.data, "totalAmount"), vehicles: sumByDay(dispatches.data, "expectedAmount", (d) => d.status !== "cancelled") };
   const posted = (type) => (row) => row.status === "posted" && row.type === type;
   const cashByDay = { income: sumByDay(ledger.data, "amount", posted("income")), expense: sumByDay(ledger.data, "amount", posted("expense")) };
@@ -262,7 +320,11 @@ const Dashboard = () => {
   const kpis = [];
   if (showMilk) {
     const t = on(milkByDay, day);
-    kpis.push({ label: "Milk collected today", value: litres(t), foot: <Change now={t} before={on(milkByDay, yesterday)} /> });
+    kpis.push({
+      label: "Milk collected today",
+      value: milkText((m) => m[day] || 0, mixedMilk ? 0 : 1),
+      foot: mixedMilk ? <span className="text-slate-500">Own herd in kg · farmers in litres</span> : <Change now={t} before={on(milkByDay, yesterday)} />,
+    });
   }
   if (showSales) {
     const t = on(salesByDay, day);
@@ -299,14 +361,15 @@ const Dashboard = () => {
       ? { key: "asked", severity: "medium", count: asked.toHandle, title: `${plural(asked.toHandle, "Product request")} from Sales`, detail: "Send the products to Sales", to: "/requisitions?tab=mva" }
       : { key: "asked", severity: "medium", count: asked.toHandle, title: `${plural(asked.toHandle, "Office request")} from the administration`, detail: "Give the products out as office use", to: "/requisitions?tab=sales" });
   }
-  if (lowStock.data?.length) attention.push({ key: "stock", severity: "high", count: lowStock.data.length, title: `Store ${plural(lowStock.data.length, "item")} at or below reorder level`, detail: lowStock.data.slice(0, 3).map((i) => i.name).join(", "), to: "/stores?tab=items" });
-  if (vaccinations.data?.length) attention.push({ key: "vacc", severity: "medium", count: vaccinations.data.length, title: `${plural(vaccinations.data.length, "Vaccination")} due within 7 days`, detail: vaccinations.data.slice(0, 3).map((v) => `${v.animal?.tagNumber || ""} ${v.vaccine || ""}`.trim()).join(", "), to: "/livestock?tab=vaccinations" });
+  if (data?.storeRequests?.toHandle > 0) attention.push({ key: "storeAsked", severity: "medium", count: data.storeRequests.toHandle, title: `${plural(data.storeRequests.toHandle, "Request")} for store items`, detail: "Dispatch the items to the departments", to: "/stores?tab=requests" });
+  if (lowStock.data?.length) attention.push({ key: "stock", severity: "high", count: lowStock.data.length, title: `Store ${plural(lowStock.data.length, "item")} at or below reorder level`, detail: lowStock.data.slice(0, 3).map((i) => i.name).join(", "), to: "/stores?tab=stock" });
+  if (vaccinations.data?.length) attention.push({ key: "vacc", severity: "medium", count: vaccinations.data.length, title: `${plural(vaccinations.data.length, "Vaccination")} due within 7 days`, detail: vaccinations.data.slice(0, 3).map((v) => `${v.animal?.tagNumber || ""} ${label("vaccines", v.vaccine)}`.trim()).join(", "), to: "/livestock?tab=vaccinations" });
   if (contracts.data?.length) attention.push({ key: "contracts", severity: "low", count: contracts.data.length, title: `${plural(contracts.data.length, "Contract")} ending within 30 days`, detail: contracts.data.slice(0, 3).map((c) => `${c.employee?.firstName || ""} ${c.employee?.lastName || ""}`.trim()).join(", "), to: "/hr?tab=contracts" });
   if (salaries.data?.length) attention.push({ key: "salaries", severity: "medium", count: salaries.data.length, title: `Staff ${salaries.data.length === 1 ? "salary" : "salaries"} to pay`, detail: `${money(salaries.data.reduce((sum, line) => sum + line.netPay, 0))} sent by HR`, to: "/accounts?tab=salaries" });
   const onRoad = (dispatches.data || []).filter((d) => d.status === "dispatched" && dayOf(d.date) < day).length;
   if (onRoad) attention.push({ key: "road", severity: "high", count: onRoad, title: `Vehicle ${plural(onRoad, "trip")} from earlier days not reconciled`, detail: "Reconcile the trip under Vehicle sales", to: "/sales?tab=vehicles-out" });
-  const unsent = summaryValue(cards, "livestock", "Not yet sent (litres)");
-  if (unsent > 0) attention.push({ key: "unsent", severity: "low", count: `${number(unsent, 0)} L`, title: "Today's milk not yet sent to MVA", to: "/livestock?tab=transfers" });
+  const unsent = summaryValue(cards, "livestock", "Not yet sent (kg)");
+  if (unsent > 0) attention.push({ key: "unsent", severity: "low", count: `${number(unsent, 0)} kg`, title: "Today's milk not yet sent to MVA", to: "/livestock?tab=transfers" });
   const variance = summaryValue(cards, "sales", "Vehicle shortage / excess");
   if (variance < 0) attention.push({ key: "variance", severity: "high", count: compactMoney(Math.abs(variance)), title: "Vehicle cash short today", detail: `Short by ${money(Math.abs(variance))}`, to: "/sales?tab=vehicles-out" });
 
@@ -354,16 +417,15 @@ const Dashboard = () => {
           {showMilk && (
             <ChartSection
               title="Milk intake"
-              description={`Litres per day, last ${DAYS} days`}
+              description={mixedMilk ? `Own herd in kilograms, local farmers in litres, last ${DAYS} days` : `${milkSeries[0]?.unit === "kg" ? "Kilograms" : "Litres"} per day, last ${DAYS} days`}
               loading={(herd.loading && !herd.data) || (farmers.loading && !farmers.data)}
-              total={{ value: litres(total(milkByDay.herd) + total(milkByDay.farmers)), label: `${DAYS}-day total` }}
+              total={{ value: milkText(total), label: `${DAYS}-day total` }}
             >
               <ColumnChart
                 title="Milk intake per day"
-                stacked
-                data={chartRows(days, { ...(herd.data ? { herd: milkByDay.herd } : {}), ...(farmers.data ? { farmers: milkByDay.farmers } : {}) })}
-                series={[...(herd.data ? [{ key: "herd", label: "Own herd" }] : []), ...(farmers.data ? [{ key: "farmers", label: "Local farmers" }] : [])]}
-                format={(v, full) => (full ? litres(v) : number(v, 0))}
+                summable={!mixedMilk}
+                data={chartRows(days, Object.fromEntries(milkSeries.map((s) => [s.key, milkByDay[s.key]])))}
+                series={milkSeries.map((s) => ({ key: s.key, label: mixedMilk ? `${s.label} (${s.unit})` : s.label, format: (v, full) => (full ? s.as(v) : number(v, 0)) }))}
               />
             </ChartSection>
           )}
@@ -394,7 +456,10 @@ const Dashboard = () => {
               )}
             </div>
           )}
+          {/* Stores staff see the store's stock first; for those who see every department it follows their figures. */}
+          {runsStores && user?.department === "stores" && <StoreStock items={storeStock.data} loading={storeStock.loading} label={label} />}
           {cards.length > 0 ? <DepartmentsToday cards={cards} hide={kpis.slice(0, 4).map((k) => k.label)} /> : !hasCharts && summary.loading && <Skeleton className="h-72" />}
+          {runsStores && user?.department !== "stores" && <StoreStock items={storeStock.data} loading={storeStock.loading} label={label} />}
         </div>
 
         {/* Side column: what needs doing, and what just happened. */}

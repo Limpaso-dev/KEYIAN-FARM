@@ -41,9 +41,12 @@ const useWidth = () => {
 
 /**
  * data:   [{ key, label, sublabel?, values: { [seriesKey]: number } }]
- * series: [{ key, label }]  (colours follow SERIES_COLORS in order)
+ * series: [{ key, label, format? }]  (colours follow SERIES_COLORS in order; format overrides the chart's for that series)
+ * summable: false when the series are in different units, so no total is shown.
  */
-export const ColumnChart = ({ data, series, stacked = false, format = (v) => compact(v), height = 240, title }) => {
+export const ColumnChart = ({ data, series, stacked = false, summable = true, format = (v) => compact(v), height = 240, title }) => {
+  const formatOf = (s) => s.format || format;
+  const withTotal = series.length > 1 && summable;
   const [ref, width] = useWidth();
   const [hover, setHover] = useState(null);
   const [asTable, setAsTable] = useState(false);
@@ -98,11 +101,11 @@ export const ColumnChart = ({ data, series, stacked = false, format = (v) => com
         <div className="scrollbar-thin overflow-auto rounded-lg border border-slate-200" style={{ maxHeight: height }}>
           <table className="w-full text-xs">
             <thead className="sticky top-0 bg-slate-50 text-left text-slate-500">
-              <tr><th className="px-3 py-2 font-semibold">Date</th>{series.map((s) => <th key={s.key} className="px-3 py-2 text-right font-semibold">{s.label}</th>)}{series.length > 1 && <th className="px-3 py-2 text-right font-semibold">Total</th>}</tr>
+              <tr><th className="px-3 py-2 font-semibold">Date</th>{series.map((s) => <th key={s.key} className="px-3 py-2 text-right font-semibold">{s.label}</th>)}{withTotal && <th className="px-3 py-2 text-right font-semibold">Total</th>}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100 tabular-nums text-slate-700">
               {[...data].reverse().map((d) => (
-                <tr key={d.key}><td className="px-3 py-1.5">{d.sublabel ? `${d.sublabel} ${d.label}` : d.label}</td>{series.map((s) => <td key={s.key} className="px-3 py-1.5 text-right">{format(d.values[s.key] || 0, true)}</td>)}{series.length > 1 && <td className="px-3 py-1.5 text-right font-medium">{format(series.reduce((t, s) => t + (Number(d.values[s.key]) || 0), 0), true)}</td>}</tr>
+                <tr key={d.key}><td className="px-3 py-1.5">{d.sublabel ? `${d.sublabel} ${d.label}` : d.label}</td>{series.map((s) => <td key={s.key} className="px-3 py-1.5 text-right">{formatOf(s)(d.values[s.key] || 0, true)}</td>)}{withTotal && <td className="px-3 py-1.5 text-right font-medium">{format(series.reduce((t, s) => t + (Number(d.values[s.key]) || 0), 0), true)}</td>}</tr>
               ))}
             </tbody>
           </table>
@@ -171,10 +174,10 @@ export const ColumnChart = ({ data, series, stacked = false, format = (v) => com
               {series.map((s, i) => (
                 <p key={s.key} className="flex items-center justify-between gap-4 text-slate-600">
                   <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: colors[i] }} aria-hidden />{s.label}</span>
-                  <span className="font-medium tabular-nums text-slate-900">{format(tip.values[s.key] || 0, true)}</span>
+                  <span className="font-medium tabular-nums text-slate-900">{formatOf(s)(tip.values[s.key] || 0, true)}</span>
                 </p>
               ))}
-              {series.length > 1 && stacked && (
+              {withTotal && stacked && (
                 <p className={cx("mt-1 flex justify-between gap-4 border-t border-slate-100 pt-1 text-slate-600")}><span>Total</span><span className="font-semibold tabular-nums text-slate-900">{format(totals[hover], true)}</span></p>
               )}
             </div>

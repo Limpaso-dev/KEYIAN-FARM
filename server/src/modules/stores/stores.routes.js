@@ -9,20 +9,67 @@ import { nairobiToday } from "../../lib/periods.js";
 import { takeStoreItem } from "../../lib/stock.js";
 import { parseBody } from "../../lib/validate.js";
 
-// Stores keeps quantities only: no costs, suppliers, delivery notes or
-// purchase orders. Departments ask for items by word of mouth, so stock out
-// is not tied to requisitions.
+// Stores keeps quantities only: no costs, suppliers, delivery notes,
+// purchase orders or item codes (items are known by name). Departments ask
+// for items through store requests (storeRequests.routes.js), or by word of
+// mouth; either way what is handed over is recorded as stock out.
 
 const router = express.Router();
-const itemBrief = { select: { id: true, code: true, name: true, unit: true, category: true } };
+export const itemBrief = { select: { id: true, name: true, unit: true, category: true } };
+
+/** "out" (nothing left), "low" (at or below the reorder level) or "ok". */
+export const stockState = (item) => {
+  const onHand = Number(item.quantityOnHand);
+  if (onHand <= 0) return "out";
+  return onHand <= Number(item.reorderLevel) ? "low" : "ok";
+};
+
+/** No two items share a name, since the name is what tells them apart. */
+const checkName = async (tx, name, id) => {
+  if (!name) return;
+  const same = await tx.storeItem.findFirst({ where: { name: { equals: name.trim(), mode: "insensitive" }, ...(id ? { id: { not: id } } : {}) } });
+  if (same) throw conflict(`There is already an item called "${same.name}"${same.isActive ? "" : " (inactive)"}`);
+};
 
 // ---------------------------------------------------------------------
 // Items. Quantity on hand changes only through goods received and stock out; the
 // opening quantity, and the day it was counted, are set when the item is added.
 // ---------------------------------------------------------------------
-router.get("/items/low-stock", allow("storeItems", "read"), async (req, res) => {
-  const items = await prisma.storeItem.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
-  ok(res, items.filter((item) => Number(item.quantityOnHand) <= Number(item.reorderLevel)));
+// The stock in the store now: every item in use, with what it holds.
+// ?state=low (low or out of stock) or ?state=out; ?category; ?search.
+router.get("/stock", allow("storeItems", "read"), async (req, res) => {
+  const where = { isActive: true };
+  if (req.query.category) where.category = String(req.query.category);
+  const term = String(req.query.search || "").trim();
+  if (term) where.name = { contains: term, mode: "insensitive" };
+  const items = await prisma.storeItem.findMany({ where, orderBy: [{ category: "asc" }, { name: "asc" }] });
+  const rows = items.map((item) => ({ ...item, state: stockState(item) }));
+  const state = req.query.state;
+  ok(res, state === "low" ? rows.filter((r) => r.state !== "ok") : state === "out" ? rows.filter((r) => r.state === "out") : rows);
+});
+
+// An item's stock card: the opening count, then every delivery and stock out
+// in date order, with the balance after each.
+router.get("/items/:id/card", allow("storeItems", "read"), async (req, res) => {
+  const item = await prisma.storeItem.findUnique({
+    where: { id: req.params.id },
+    include: {
+      receipts: { orderBy: [{ date: "asc" }, { createdAt: "asc" }] },
+      issues: { orderBy: [{ date: "asc" }, { createdAt: "asc" }], include: { request: { select: { requestNumber: true } } } },
+    },
+  });
+  if (!item) throw notFound("Store item");
+  const moves = [
+    ...item.receipts.map((r) => ({ date: r.date, at: r.createdAt, kind: "received", reference: r.receiptNumber, detail: r.notes || "", quantity: Number(r.quantity) })),
+    ...item.issues.map((i) => ({ date: i.date, at: i.createdAt, kind: "out", reference: i.issueNumber, department: i.department, detail: [i.issuedTo, i.request?.requestNumber].filter(Boolean).join(" · "), quantity: -Number(i.quantity) })),
+  ].sort((a, b) => a.date - b.date || a.at - b.at);
+  let balance = Number(item.openingQuantity);
+  const lines = [{ date: item.openingDate || item.createdAt, kind: "opening", reference: "", detail: "Counted when the item was added", quantity: balance, balance }];
+  for (const move of moves) {
+    balance = Math.round((balance + move.quantity) * 100) / 100;
+    lines.push({ ...move, at: undefined, balance });
+  }
+  ok(res, { id: item.id, name: item.name, unit: item.unit, quantityOnHand: Number(item.quantityOnHand), lines });
 });
 
 router.use("/items", crud({
@@ -30,7 +77,6 @@ router.use("/items", crud({
   model: "storeItem",
   label: "Store item",
   fields: {
-    code: "string",
     name: "string!",
     category: "option:storeCategories!",
     unit: "string!",
@@ -39,19 +85,20 @@ router.use("/items", crud({
     reorderLevel: "decimal",
   },
   updateFields: { name: "string!", category: "option:storeCategories!", unit: "string!", reorderLevel: "decimal", isActive: "bool" },
-  prepare: (data, { existing }) => {
+  prepare: async (data, { tx, existing }) => {
+    await checkName(tx, data.name, existing?.id);
     if (existing) return data;
     const opening = data.openingQuantity || 0;
     if (opening < 0) throw badRequest("The opening quantity cannot be negative");
     return { ...data, openingQuantity: opening, quantityOnHand: opening, openingDate: data.openingDate || nairobiToday() };
   },
-  search: ["code", "name"],
+  search: ["name"],
   filters: ["category", "isActive"],
   orderBy: [{ category: "asc" }, { name: "asc" }],
-  numbering: { field: "code", prefix: "ITM", yearly: false },
   beforeDelete: async (item, { tx }) => {
     const used = await tx.storeReceipt.count({ where: { itemId: item.id } }) + await tx.storeIssue.count({ where: { itemId: item.id } });
     if (used) throw conflict("This item has stock history. Mark it inactive instead.");
+    if (await tx.storeRequestItem.count({ where: { itemId: item.id } })) throw conflict("Departments have asked for this item. Mark it inactive instead.");
   },
 }));
 
@@ -97,7 +144,8 @@ router.use("/receipts", crud({
 
 // ---------------------------------------------------------------------
 // Stock out: items handed to departments (feeds to Livestock, tools to
-// MVA, fertiliser to Crops, ...). Numbered SO-year-number.
+// MVA, fertiliser to Crops, ...). Numbered SO-year-number. Dispatching a
+// store request records its stock out too, linked to the request.
 // ---------------------------------------------------------------------
 const issueRouter = express.Router();
 issueRouter.post("/", allow("storeIssues", "write"), async (req, res) => {
@@ -126,7 +174,7 @@ router.use("/issues", crud({
   resource: "storeIssues",
   model: "storeIssue",
   fields: {},
-  include: { item: itemBrief },
+  include: { item: itemBrief, request: { select: { id: true, requestNumber: true } } },
   dateField: "date",
   filters: ["itemId", "department"],
   orderBy: [{ date: "desc" }, { createdAt: "desc" }],

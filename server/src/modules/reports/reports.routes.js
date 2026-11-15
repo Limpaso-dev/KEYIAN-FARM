@@ -55,7 +55,8 @@ const departmentReport = async (req, res) => {
 
   const generatedAt = new Date().toISOString();
   const meta = { organisation: ORGANISATION, motto: MOTTO, generatedBy: req.user.name, generatedAt };
-  const fileBase = `keiyian-${requested}-${chosen ? `${chosen.title.toLowerCase().replace(/\s+/g, "-")}-` : ""}report-${range.slug}`;
+  // "Herd report" gives keiyian-livestock-herd-report-..., not "herd-report-report".
+  const fileBase = `keiyian-${requested}-${chosen ? `${chosen.title.toLowerCase().replace(/\s+report$/, "").replace(/\s+/g, "-")}-` : ""}report-${range.slug}`;
   if (format === "csv") {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${fileBase}.csv"`);

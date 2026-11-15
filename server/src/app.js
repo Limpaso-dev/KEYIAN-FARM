@@ -18,6 +18,7 @@ import cropsRoutes from "./modules/crops/crops.routes.js";
 import accountsRoutes from "./modules/accounts/accounts.routes.js";
 import requisitionRoutes from "./modules/requisitions/requisitions.routes.js";
 import productRequestRoutes from "./modules/requests/productRequests.routes.js";
+import storeRequestRoutes from "./modules/stores/storeRequests.routes.js";
 import reportRoutes from "./modules/reports/reports.routes.js";
 
 const app = express();
@@ -46,6 +47,7 @@ secured.use("/crops", cropsRoutes);
 secured.use("/accounts", accountsRoutes);
 secured.use("/requisitions", requisitionRoutes);
 secured.use("/product-requests", productRequestRoutes);
+secured.use("/store-requests", storeRequestRoutes);
 secured.use("/reports", reportRoutes);
 app.use("/api", secured);
 

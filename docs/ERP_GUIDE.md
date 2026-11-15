@@ -5,10 +5,10 @@
 | Department | What it records |
 |---|---|
 | HR | Staff, contracts, salary reviews and promotions, payroll, disciplinary cases (letters served, dismissals, summary), terminations, and the members register (pioneer founders and their hereditary successors). |
-| Livestock | Herd register with mother (dam) and father (sire), calvings and lactations, vaccinations, disease and herd health, milk per cow per session, and milk sent to MVA. |
+| Livestock | Herd register by dairy (Dairy A, Dairy C) with mother (dam) and father (sire) and the dates each animal joined and left the herd, calvings (twins included) and lactations, vaccinations (FMD, LSD, Blanthax), diseases from a list and herd health, milk per cow in kilograms (Dairy A milks morning and evening, Dairy C also at midday), and milk sent to MVA in kilograms. Reports: herd, milk, calvings, vaccinations and health, each on its own or together as the full report. |
 | Milk Value Addition (MVA) | Milk received from Livestock and from numbered local farmers (130, 131, ...), the milk price per litre, processing of raw milk into Fresh milk, Mala and Yoghurt, and products (including unprocessed raw milk) sent to Sales. |
 | Sales | Products received from MVA, local sales (cash, M-Pesa or credit), vehicles and their two-person crew, morning dispatch and evening returns, damages and customer replacements, and Sales stock. |
-| Stores | Items by category (animal feeds, MVA tools, farm tools, fertilisers, transport and construction materials), goods received and stock out to departments, in quantities only (no costs, suppliers, delivery notes or purchase orders). Departments ask for items by word of mouth. Reports: stock out, goods received and stock remaining. |
+| Stores | Items by name and category (transport & construction, crops, animal feeds, MVA processing tools, other), the stock in the store with each item's stock card, requests from the departments, goods received and stock out to departments, in quantities only (no item codes, costs, suppliers, delivery notes or purchase orders). Goods received add to stock and stock out takes from it. Reports: stock out, goods received and stock remaining. |
 | Crops | Sugarcane, tea and coffee farms: farm number, acreage, location, ratoon count, status history and harvests. |
 | Accounts | Income and expenses under the cooperative's categories, cash/bank/M-Pesa accounts, farmer milk payments, member dividends, salaries, suppliers and purchase orders (Accounts also does procurement). |
 
@@ -32,10 +32,17 @@ All rules are in `server/src/config/access.js`; the browser receives the compute
 
 ## Requisitions
 
-1. A department raises a requisition (items with estimated cost). Stores does not: its items are asked for by word of mouth.
+1. A department raises a requisition (items with estimated cost). Stores does not.
 2. The head of Accounts or the General Manager approves, returns (with a comment) or rejects it. Nobody can decide their own requisition.
 3. A returned requisition can be edited and resubmitted by the person who raised it.
 4. Accounts buys or pays for what was approved and marks it fulfilled.
+
+### Requests to Stores
+
+1. A department asks Stores for items under Requisitions -> To Stores (items from the store's list, with quantities).
+2. Stores sees the request under Stores -> Requests (and on its dashboard and bell) and dispatches it: the date, who received the items, and how much of each line (never more than asked for, nor more than the store holds). Each line becomes a stock out to that department and comes off stock.
+3. Stores may decline a request with a reason; the person who asked may cancel it while it is waiting.
+4. A department may still ask by word of mouth: Stores then records the stock out directly.
 
 ## End-of-day reports
 

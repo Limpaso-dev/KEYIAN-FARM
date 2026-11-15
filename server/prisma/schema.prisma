@@ -56,6 +56,8 @@ model User {
   requisitionsDecided         Requisition[]    @relation("RequisitionDecidedBy")
   productRequests             ProductRequest[] @relation("ProductRequestedBy")
   productRequestsHandled      ProductRequest[] @relation("ProductRequestHandledBy")
+  storeRequests               StoreRequest[]   @relation("StoreRequestedBy")
+  storeRequestsHandled        StoreRequest[]   @relation("StoreRequestHandledBy")
   transactions                Transaction[]
 
   @@index([role, department, isActive])
@@ -300,8 +302,14 @@ model Animal {
   name           String?
   breed          String?
   sex            String
+  /// dairy_a | dairy_c: where the animal is kept (and, for a cow, milked).
+  dairy          String         @default("dairy_a")
   dateOfBirth    DateTime?
   source         String         @default("born_on_farm")
+  /// When a bought or donated animal joined the herd.
+  acquiredDate   DateTime?      @db.Date
+  /// When it was sold, died or was culled (status other than active).
+  exitDate       DateTime?      @db.Date
   damId          String?
   sireId         String?
   sireDetails    String?
@@ -318,8 +326,11 @@ model Animal {
   vaccinations   Vaccination[]
   healthRecords  HealthRecord[]
   milkRecords    MilkRecord[]
+  bornAt         Lactation[]    @relation("LactationCalf")
+  bornTwinAt     Lactation[]    @relation("LactationTwin")
 
   @@index([status, sex])
+  @@index([dairy, status])
 }
 
 model Lactation {
@@ -328,12 +339,16 @@ model Lactation {
   lactationNumber Int
   calvingDate     DateTime
   calfId          String?
+  /// The second calf, when the cow had twins.
+  twinCalfId      String?
   dryOffDate      DateTime?
   status          String    @default("milking")
   notes           String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   animal          Animal    @relation(fields: [animalId], references: [id], onDelete: Restrict)
+  calf            Animal?   @relation("LactationCalf", fields: [calfId], references: [id], onDelete: SetNull)
+  twinCalf        Animal?   @relation("LactationTwin", fields: [twinCalfId], references: [id], onDelete: SetNull)
 
   @@unique([animalId, lactationNumber])
 }
@@ -341,6 +356,7 @@ model Lactation {
 model Vaccination {
   id             String    @id @default(uuid())
   animalId       String
+  /// fmd | lsd | blanthax (config/catalog.js vaccines)
   vaccine        String
   date           DateTime
   dose           String?
@@ -360,7 +376,10 @@ model HealthRecord {
   animalId   String?
   recordType String
   date       DateTime
-  condition  String
+  /// The disease (config/catalog.js diseases), for disease cases and treatments.
+  disease    String?
+  /// Details: what was checked or given, or the disease when it is "other".
+  condition  String?
   treatment  String?
   vet        String?
   cost       Decimal  @default(0) @db.Decimal(18, 2)
@@ -371,14 +390,19 @@ model HealthRecord {
   animal     Animal?  @relation(fields: [animalId], references: [id], onDelete: Restrict)
 
   @@index([date, recordType])
+  @@index([disease])
 }
 
+/// Milk per cow per session, weighed in kilograms. Dairy A milks in the
+/// morning and evening, Dairy C also at midday (config/catalog.js DAIRY_SESSIONS).
 model MilkRecord {
   id        String   @id @default(uuid())
   animalId  String
   date      DateTime @db.Date
+  /// The dairy the cow was milked at (she may move later).
+  dairy     String   @default("dairy_a")
   session   String
-  litres    Decimal  @db.Decimal(10, 2)
+  kg        Decimal  @db.Decimal(10, 2)
   createdAt DateTime @default(now())
   animal    Animal   @relation(fields: [animalId], references: [id], onDelete: Restrict)
 
@@ -386,16 +410,16 @@ model MilkRecord {
   @@index([date])
 }
 
-/// Milk sent from Livestock to MVA. MVA confirms what it received.
+/// Milk sent from Livestock to MVA, in kilograms. MVA confirms what it received.
 model MilkTransfer {
   id             String    @id @default(uuid())
   transferNumber String    @unique
   date           DateTime  @db.Date
   session        String
   dairy          String    @default("dairy_a")
-  litres         Decimal   @db.Decimal(10, 2)
+  kg             Decimal   @db.Decimal(10, 2)
   status         String    @default("sent")
-  receivedLitres Decimal?  @db.Decimal(10, 2)
+  receivedKg     Decimal?  @db.Decimal(10, 2)
   receivedAt     DateTime?
   receivedById   String?
   notes          String?
@@ -743,7 +767,8 @@ model ProductRequestItem {
 
 model StoreItem {
   id              String              @id @default(uuid())
-  code            String              @unique
+  /// Not recorded by Stores: items are known by name. Older items may still carry one.
+  code            String?             @unique
   name            String
   category        String
   unit            String
@@ -761,6 +786,7 @@ model StoreItem {
   receipts        StoreReceipt[]
   issues          StoreIssue[]
   orderItems      PurchaseOrderItem[]
+  requestItems    StoreRequestItem[]
 
   @@index([category])
 }
@@ -786,20 +812,59 @@ model StoreReceipt {
 }
 
 model StoreIssue {
-  id            String       @id @default(uuid())
-  issueNumber   String       @unique
-  date          DateTime     @db.Date
+  id            String        @id @default(uuid())
+  issueNumber   String        @unique
+  date          DateTime      @db.Date
   itemId        String
-  quantity      Decimal      @db.Decimal(12, 2)
+  quantity      Decimal       @db.Decimal(12, 2)
   department    Department
   issuedTo      String
   requisitionId String?
+  /// The department's request this stock out answers, if it came from one.
+  requestId     String?
   purpose       String?
-  createdAt     DateTime     @default(now())
-  item          StoreItem    @relation(fields: [itemId], references: [id], onDelete: Restrict)
-  requisition   Requisition? @relation(fields: [requisitionId], references: [id], onDelete: SetNull)
+  createdAt     DateTime      @default(now())
+  item          StoreItem     @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  requisition   Requisition?  @relation(fields: [requisitionId], references: [id], onDelete: SetNull)
+  request       StoreRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
 
   @@index([date, department])
+}
+
+/// A department asks Stores for items; Stores dispatches them, which is
+/// recorded as stock out to that department.
+model StoreRequest {
+  id            String             @id @default(uuid())
+  requestNumber String             @unique
+  date          DateTime           @db.Date
+  department    Department
+  /// pending | issued (dispatched by Stores) | declined | cancelled
+  status        String             @default("pending")
+  purpose       String?
+  requestedById String
+  handledById   String?
+  handledAt     DateTime?
+  declineReason String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  items         StoreRequestItem[]
+  issues        StoreIssue[]
+  requestedBy   User               @relation("StoreRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  handledBy     User?              @relation("StoreRequestHandledBy", fields: [handledById], references: [id], onDelete: SetNull)
+
+  @@index([status, date])
+  @@index([department, date])
+}
+
+model StoreRequestItem {
+  id            String       @id @default(uuid())
+  requestId     String
+  itemId        String
+  quantity      Decimal      @db.Decimal(12, 2)
+  /// What Stores dispatched against it.
+  quantityGiven Decimal      @default(0) @db.Decimal(12, 2)
+  request       StoreRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  item          StoreItem    @relation(fields: [itemId], references: [id], onDelete: Restrict)
 }
 
 // =====================================================================

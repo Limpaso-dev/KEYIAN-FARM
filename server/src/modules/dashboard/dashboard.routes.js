@@ -1,7 +1,7 @@
 import express from "express";
 import prisma from "../../config/prisma.js";
-import { canReadReport, productRequestRules, requisitionRules } from "../../config/access.js";
-import { OPTIONS, optionValues, REPORT_PARTS } from "../../config/catalog.js";
+import { canReadReport, productRequestRules, requisitionRules, storeRequestRules } from "../../config/access.js";
+import { DAIRY_SESSIONS, OPTIONS, optionValues, REPORT_PARTS } from "../../config/catalog.js";
 import { ok } from "../../lib/http.js";
 import { isoDay, resolvePeriod } from "../../lib/periods.js";
 import { BUILDERS } from "../reports/builders.js";
@@ -9,7 +9,7 @@ import { BUILDERS } from "../reports/builders.js";
 const router = express.Router();
 
 // Reference lists for drop-downs.
-router.get("/meta", (req, res) => ok(res, { ...OPTIONS, reportParts: REPORT_PARTS }));
+router.get("/meta", (req, res) => ok(res, { ...OPTIONS, reportParts: REPORT_PARTS, dairySessions: DAIRY_SESSIONS }));
 
 // Today's headline figures for the departments this user can see.
 router.get("/dashboard", async (req, res) => {
@@ -27,7 +27,7 @@ router.get("/dashboard", async (req, res) => {
   }
 
   const handles = productRequestRules.handles(req.user);
-  const [toDecide, mine, approvedToFulfil, productRequests] = await Promise.all([
+  const [toDecide, mine, approvedToFulfil, productRequests, storeRequests] = await Promise.all([
     requisitionRules.canDecide(req.user)
       ? prisma.requisition.count({ where: { status: "pending", requestedById: { not: req.user.id } } })
       : 0,
@@ -37,6 +37,8 @@ router.get("/dashboard", async (req, res) => {
     requisitionRules.canFulfil(req.user) ? prisma.requisition.count({ where: { status: "approved" } }) : 0,
     // Product requests waiting for this user's department (MVA: from Sales; Sales: from the administration).
     handles.length ? prisma.productRequest.count({ where: { toDepartment: { in: handles }, status: "pending" } }) : 0,
+    // Store requests waiting for Stores to dispatch.
+    storeRequestRules.handles(req.user) ? prisma.storeRequest.count({ where: { status: "pending" } }) : 0,
   ]);
 
   ok(res, {
@@ -48,6 +50,7 @@ router.get("/dashboard", async (req, res) => {
       department: Object.fromEntries(mine.map((row) => [row.status, row._count])),
     },
     productRequests: { toHandle: productRequests, department: handles[0] || null },
+    storeRequests: { toHandle: storeRequests },
   });
 });
 

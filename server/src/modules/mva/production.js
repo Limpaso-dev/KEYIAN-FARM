@@ -25,7 +25,7 @@ export const productionDays = async (db, where) => {
   for (const transfer of transfers) {
     const day = dayOf(transfer.date);
     const key = transfer.dairy === "dairy_c" ? "dairyC" : "dairyA";
-    day[key] = round2(day[key] + Number(transfer.receivedLitres ?? transfer.litres));
+    day[key] = round2(day[key] + Number(transfer.receivedKg ?? transfer.kg));
   }
   for (const delivery of deliveries) {
     const day = dayOf(delivery.date);

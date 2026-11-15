@@ -27,9 +27,10 @@ export const NAV_GROUPS = [
 
 /**
  * The Requisitions dropdown: requests to Accounts (money and things to buy),
- * and product requests - Sales asks MVA, the administration asks Sales (office
- * use). Each is named from where the user stands. Those who decide
- * requisitions see them first.
+ * product requests - Sales asks MVA, the administration asks Sales (office
+ * use) - and requests to Stores for its items. Each is named from where the
+ * user stands. Those who decide requisitions see them first. Stores answers
+ * its requests under Stores > Requests, so they are not listed here for it.
  */
 const requisitionSections = (auth) => {
   const req = auth.permissions?.requisitions || {};
@@ -39,7 +40,9 @@ const requisitionSections = (auth) => {
   const accounts = req.raise || req.seeAll || req.decide || req.fulfil ? [{ key: "accounts", label: req.seeAll ? "Requisitions" : "To Accounts" }] : [];
   const fromMva = asks("mva") || handles("mva") || products.seeAll ? [{ key: "mva", label: handles("mva") ? "Requests from Sales" : asks("mva") ? "Products from MVA" : "Sales requests to MVA" }] : [];
   const fromSales = asks("sales") || handles("sales") || products.seeAll ? [{ key: "sales", label: asks("sales") ? "Products from Sales" : "Office requests" }] : [];
-  return req.decide || req.seeAll ? [...accounts, ...fromMva, ...fromSales] : [...fromMva, ...fromSales, ...accounts];
+  const store = auth.permissions?.storeRequests || {};
+  const toStores = store.raise || (store.seeAll && !store.handle) ? [{ key: "stores", label: store.raise ? "To Stores" : "Store requests" }] : [];
+  return req.decide || req.seeAll ? [...accounts, ...fromMva, ...fromSales, ...toStores] : [...fromMva, ...fromSales, ...accounts, ...toStores];
 };
 
 /** Where the Reports page opens when no report is named: the user's own department; all departments for those who see several. */
@@ -148,11 +151,13 @@ export const navigation = [
     ],
   },
   {
-    label: "Stores", path: "/stores", icon: Warehouse, group: "departments", department: "stores", hint: "Items, goods received, stock out", visible: member("stores"),
+    label: "Stores", path: "/stores", icon: Warehouse, group: "departments", department: "stores", hint: "Stock, requests, goods received, stock out", visible: member("stores"),
     sections: [
-      { key: "items", label: "Items", show: can("storeItems") },
+      { key: "stock", label: "Stock", show: can("storeItems") },
+      { key: "requests", label: "Requests", show: (a) => Boolean(a.permissions?.storeRequests?.seeAll) },
       { key: "receipts", label: "Goods received", show: can("storeReceipts") },
       { key: "issues", label: "Stock out", show: can("storeIssues") },
+      { key: "items", label: "Items", show: can("storeItems") },
     ],
   },
   {

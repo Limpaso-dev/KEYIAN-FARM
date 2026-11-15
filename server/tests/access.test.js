@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { can, canReadReport, permissionsFor, productRequestRules, requisitionRules } from "../src/config/access.js";
+import { can, canReadReport, permissionsFor, productRequestRules, requisitionRules, storeRequestRules } from "../src/config/access.js";
 
 const user = (role, department = null, extra = {}) => ({ id: `${role}-${department}`, role, department, isActive: true, ...extra });
 
@@ -109,6 +109,21 @@ test("product requests: Sales asks MVA, the administration asks Sales; the depar
   assert.equal(productRequestRules.seeAll(user("general_manager")), true);
   assert.equal(productRequestRules.seeAll(user("head", "accounts")), false);
   assert.deepEqual(permissionsFor(user("officer", "sales")).productRequests, { raiseTo: ["mva"], handles: ["sales"], seeAll: false });
+});
+
+test("store requests: the departments ask Stores, Stores dispatches; Stores, the GM and admins see all", () => {
+  assert.equal(storeRequestRules.canRaise(user("officer", "livestock")), true);
+  assert.equal(storeRequestRules.canRaise(user("head", "accounts")), true);
+  assert.equal(storeRequestRules.canRaise(user("officer", "stores")), false);
+  assert.equal(storeRequestRules.canRaise(user("general_manager")), false);
+  assert.equal(storeRequestRules.canRaise(user("admin")), false);
+  assert.equal(storeRequestRules.handles(user("officer", "stores")), true);
+  assert.equal(storeRequestRules.handles(user("admin")), false);
+  assert.equal(storeRequestRules.seeAll(user("officer", "stores")), true);
+  assert.equal(storeRequestRules.seeAll(user("general_manager")), true);
+  assert.equal(storeRequestRules.seeAll(user("officer", "crops")), false);
+  assert.equal(storeRequestRules.canRaise(user("officer", "crops", { isActive: false })), false);
+  assert.deepEqual(permissionsFor(user("officer", "mva")).storeRequests, { raise: true, handle: false, seeAll: false });
 });
 
 test("reports: own department, or all for GM and admin", () => {
