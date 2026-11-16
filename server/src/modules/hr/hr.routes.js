@@ -7,6 +7,7 @@ import { badRequest, conflict, notFound, ok } from "../../lib/http.js";
 import { nextCode, nextNumber } from "../../lib/numbers.js";
 import { isoDay, nairobiToday } from "../../lib/periods.js";
 import { parseBody, round2 } from "../../lib/validate.js";
+import { accountDepartmentOf } from "../../config/catalog.js";
 import { recordTransaction } from "../accounts/ledger.js";
 
 const router = express.Router();
@@ -212,6 +213,7 @@ router.get("/contracts-expiring", allow("contracts", "read"), async (req, res) =
 // yet paid from the month it takes effect. Paid payroll is history.
 // ---------------------------------------------------------------------
 const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/;
+// Staff get no allowances: net pay is the basic salary less deductions (lines from before keep theirs).
 const netPay = ({ basicSalary, allowances = 0, deductions = 0 }) => round2(Number(basicSalary) + Number(allowances) - Number(deductions));
 
 const reviewRouter = express.Router();
@@ -302,12 +304,17 @@ const editable = (payroll) => {
   if (payroll.status === "paid") throw conflict("This salary has been paid and can no longer be changed");
 };
 
+// Paying a salary records it as an expense under Salaries, charged to the
+// staff member's department; Crops staff are charged to Tea, Sugarcane or
+// Coffee, chosen when paying.
 payrollRouter.post("/:id/pay", allow("payroll", "pay"), async (req, res) => {
-  const { accountId, date } = parseBody({ accountId: "id!", date: "date!" }, req.body);
+  const { accountId, date, department } = parseBody({ accountId: "id!", date: "date!", department: "option:accountDepartments" }, req.body);
   const row = await inTransaction(async (tx) => {
     const payroll = await tx.payroll.findUnique({ where: { id: req.params.id }, include: withEmployee });
     if (!payroll) throw notFound("Payroll line");
     if (payroll.status === "paid") throw conflict("This salary has already been paid");
+    const chargedTo = department || accountDepartmentOf(payroll.employee.department);
+    if (!chargedTo) throw badRequest("Choose the department this salary is charged to (Tea, Sugarcane or Coffee for Crops staff)");
     const transaction = await recordTransaction(tx, req.user, {
       type: "expense",
       category: "salaries",
@@ -316,7 +323,7 @@ payrollRouter.post("/:id/pay", allow("payroll", "pay"), async (req, res) => {
       amount: payroll.netPay,
       description: `Salary ${payroll.period} - ${payroll.employee.firstName} ${payroll.employee.lastName}`,
       party: `${payroll.employee.staffNumber} ${payroll.employee.firstName} ${payroll.employee.lastName}`,
-      department: "hr",
+      department: chargedTo,
       sourceType: "payroll",
       sourceId: payroll.id,
     });
@@ -333,8 +340,8 @@ router.use("/payroll", crud({
   router: payrollRouter,
   resource: "payroll",
   model: "payroll",
-  fields: { employeeId: "id!", period: "string!", basicSalary: "decimal!", allowances: "decimal", deductions: "decimal", notes: "text" },
-  updateFields: { allowances: "decimal", deductions: "decimal", notes: "text" },
+  fields: { employeeId: "id!", period: "string!", basicSalary: "decimal!", deductions: "decimal", notes: "text" },
+  updateFields: { deductions: "decimal", notes: "text" },
   include: withEmployee,
   filters: ["period", "status", "employeeId"],
   orderBy: [{ period: "desc" }, { createdAt: "asc" }],
@@ -342,7 +349,7 @@ router.use("/payroll", crud({
     if (existing) editable(existing);
     if (!existing && !PERIOD.test(data.period)) throw badRequest("Period must be in the form YYYY-MM");
     data.netPay = netPay({ ...existing, ...data });
-    if (data.netPay < 0) throw badRequest("Deductions cannot be more than salary plus allowances");
+    if (data.netPay < 0) throw badRequest("Deductions cannot be more than the salary");
   },
   beforeDelete: (payroll) => editable(payroll),
 }));

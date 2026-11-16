@@ -95,12 +95,19 @@ if (!url) {
   test("accounts: income, balances and voiding", async () => {
     const accounts = await call("accounts", "GET", "/accounts/accounts/balances");
     cashId = accounts.find((a) => a.name === "Cash on Hand").id;
-    await call("accounts", "POST", "/accounts/transactions", { type: "income", category: "rentals", accountId: cashId, date: today, amount: 500000, description: "Shop rent" });
-    await call("accounts", "POST", "/accounts/transactions", { type: "income", category: "salaries", accountId: cashId, date: today, amount: 1, description: "wrong" }, { expect: 400 });
-    const wrong = await call("accounts", "POST", "/accounts/transactions", { type: "income", category: "coop_holding", accountId: cashId, date: today, amount: 10, description: "typo" });
+    // Every entry is recorded against one of Accounts' departments: Crops counts as Tea, Sugarcane and Coffee; Dispensary and Rentals are departments too.
+    await call("accounts", "POST", "/accounts/transactions", { type: "income", category: "rentals", accountId: cashId, date: today, amount: 500000, description: "Shop rent" }, { expect: 400 });
+    await call("accounts", "POST", "/accounts/transactions", { type: "income", category: "rentals", accountId: cashId, date: today, amount: 500000, description: "Shop rent", department: "crops" }, { expect: 400 });
+    const rent = await call("accounts", "POST", "/accounts/transactions", { type: "income", category: "rentals", accountId: cashId, date: today, amount: 500000, description: "Shop rent", department: "rentals" });
+    assert.equal(rent.department, "rentals");
+    assert.deepEqual((await call("accounts", "GET", "/meta")).accountDepartments.map((d) => d.label), ["HR", "Livestock", "Milk Value Addition", "Sales", "Stores", "Tea", "Sugarcane", "Coffee", "Accounts", "Dispensary", "Rentals"]);
+    const expenseCategories = (await call("accounts", "GET", "/meta")).expenseCategories.map((c) => c.label);
+    assert.ok(["Consultancy", "Auditing fee", "Security", "Legal fee", "Sundry expense", "Food and beverage"].every((c) => expenseCategories.includes(c)), expenseCategories.join(", "));
+    await call("accounts", "POST", "/accounts/transactions", { type: "income", category: "salaries", accountId: cashId, date: today, amount: 1, description: "wrong", department: "accounts" }, { expect: 400 });
+    const wrong = await call("accounts", "POST", "/accounts/transactions", { type: "income", category: "coop_holding", accountId: cashId, date: today, amount: 10, description: "typo", department: "accounts" });
     await call("accounts", "POST", `/accounts/transactions/${wrong.id}/void`, { reason: "typo" }, { expect: 403 });
     await call("accHead", "POST", `/accounts/transactions/${wrong.id}/void`, { reason: "typo" });
-    await call("accounts", "POST", "/accounts/transactions", { type: "expense", category: "electricity", accountId: cashId, date: today, amount: 9_000_000, description: "too much" }, { expect: 409 });
+    await call("accounts", "POST", "/accounts/transactions", { type: "expense", category: "electricity", accountId: cashId, date: today, amount: 9_000_000, description: "too much", department: "accounts" }, { expect: 409 });
     const after = await call("accounts", "GET", "/accounts/accounts/balances");
     assert.equal(after.find((a) => a.id === cashId).balance, 500000);
   });
@@ -131,7 +138,8 @@ if (!url) {
     await call("hrHead", "POST", "/hr/payroll/generate", { period });
     const [line] = await call("accounts", "GET", `/hr/payroll?status=with_finance&period=${period}`);
     assert.equal(line.employeeId, employee.id);
-    await call("hrHead", "PUT", `/hr/payroll/${line.id}`, { allowances: 2000, deductions: 1000 });
+    // Staff get no allowances: only deductions can be set, and an allowance sent is ignored.
+    assert.equal((await call("hrHead", "PUT", `/hr/payroll/${line.id}`, { allowances: 2000, deductions: 1000 })).allowances, 0);
 
     // A salary review reaches the staff record, the contract and unpaid payroll.
     await call("hrHead", "POST", "/hr/salary-reviews", { employeeId: employee.id, reviewType: "promotion", effectiveDate: "2099-01-01", newSalary: 90000, reason: "Too early" }, { expect: 400 });
@@ -143,15 +151,17 @@ if (!url) {
     assert.equal((await call("hrHead", "GET", `/hr/contracts/${firstContract.id}`)).salary, 25000);
     const repriced = await call("hrHead", "GET", `/hr/payroll/${line.id}`);
     assert.equal(repriced.basicSalary, 25000);
-    assert.equal(repriced.netPay, 26000);
+    assert.equal(repriced.netPay, 24000);
 
     const paid = await call("accounts", "POST", `/hr/payroll/${line.id}/pay`, { accountId: cashId, date: today });
     assert.equal(paid.status, "paid");
-    assert.equal(paid.netPay, 26000);
+    assert.equal(paid.netPay, 24000);
+    const salary = (await call("accounts", "GET", "/accounts/transactions?category=salaries")).find((t) => t.sourceId === line.id);
+    assert.deepEqual([salary.type, salary.amount, salary.department, salary.description], ["expense", 24000, "sales", `Salary ${period} - Mary Wanjiku`]);
     await call("accounts", "POST", `/hr/payroll/${line.id}/pay`, { accountId: cashId, date: today }, { expect: 409 });
     await call("hrHead", "PUT", `/hr/payroll/${line.id}`, { allowances: 1 }, { expect: 409 });
     await call("hrHead", "POST", "/hr/salary-reviews", { employeeId: employee.id, reviewType: "adjustment", effectiveDate: today, newSalary: 27000, reason: "Paid payroll stays as it was" });
-    assert.equal((await call("hrHead", "GET", `/hr/payroll/${line.id}`)).netPay, 26000);
+    assert.equal((await call("hrHead", "GET", `/hr/payroll/${line.id}`)).netPay, 24000);
 
     // Contracts are renewed from the profile; the old one is marked renewed.
     await call("hrHead", "POST", "/hr/contracts", { employeeId: employee.id, contractType: "fixed_term", startDate: today }, { expect: 400 });
@@ -197,7 +207,9 @@ if (!url) {
     const lineage = await call("hrHead", "GET", `/hr/members/${heir.id}/lineage`);
     assert.equal(lineage.successors[0].memberNumber, "P001-1");
     await call("accounts", "POST", "/accounts/member-payments", { memberId: pioneer.id, date: today, paymentType: "dividend", amount: 100, accountId: cashId }, { expect: 409 });
-    await call("accounts", "POST", "/accounts/member-payments", { memberId: tomId, date: today, paymentType: "dividend", amount: 4000, accountId: cashId });
+    const dividend = await call("accounts", "POST", "/accounts/member-payments", { memberId: tomId, date: today, paymentType: "dividend", amount: 4000, accountId: cashId });
+    const dividendEntry = (await call("accounts", "GET", "/accounts/transactions?category=members_payment")).find((t) => t.id === dividend.transactionId);
+    assert.deepEqual([dividendEntry.type, dividendEntry.amount, dividendEntry.department], ["expense", 4000, "hr"]);
     // Accounts reads what paying salaries and members needs - not the rest of HR.
     assert.ok((await call("accounts", "GET", "/hr/payroll")).length >= 1);
     assert.ok((await call("accounts", "GET", "/hr/members")).length >= 2);
@@ -815,20 +827,54 @@ if (!url) {
     const lookedBefore = (await call("livestock", "POST", "/requisitions/answers/seen")).since;
     assert.ok(lookedBefore && new Date(lookedBefore) < new Date(approved.rows[0].decidedAt));
     assert.equal((await answers("livestock")).count, 0);
-    // An answer counts for the rest of the department, not for the one who gave it.
-    const books = await call("accounts", "POST", "/requisitions", { title: "Receipt books", items: [{ description: "Receipt book", quantity: 5, unitCost: 300, purpose: "Receipts for farmer payments" }] });
-    await call("accHead", "POST", `/requisitions/${books.id}/decision`, { decision: "reject", comment: "Use the ones in stock" });
-    assert.deepEqual((await answers("accounts")).rows.map((r) => [r.requisitionNumber, r.status]), [[books.requisitionNumber, "rejected"]]);
-    assert.equal((await answers("accHead")).count, 0);
+    // Accounts raises no requisitions and asks Stores for nothing: it decides.
+    await call("accounts", "POST", "/requisitions", { title: "Receipt books", items: [{ description: "Receipt book", quantity: 5, unitCost: 300, purpose: "Receipts for farmer payments" }] }, { expect: 403 });
+    await call("accHead", "POST", "/store-requests", { items: [{ itemId: feeds.id, quantity: 1, purpose: "Office" }] }, { expect: 403 });
+    assert.deepEqual([(await call("accounts", "GET", "/auth/me")).permissions.requisitions.raise, (await call("accounts", "GET", "/auth/me")).permissions.storeRequests.raise], [false, false]);
+    assert.equal((await answers("accounts")).count, 0);
+    // Crops asks; Accounts declines with its reason.
+    const sprayers = await call("crops", "POST", "/requisitions", { title: "Sprayers", items: [{ description: "Knapsack sprayer", quantity: 2, unitCost: 4500, purpose: "Spraying the cane" }] });
+    await call("accHead", "POST", `/requisitions/${sprayers.id}/decision`, { decision: "reject", comment: "Borrow from Tea" });
+    assert.deepEqual((await answers("crops")).rows.map((r) => [r.requisitionNumber, r.status]), [[sprayers.requisitionNumber, "rejected"]]);
 
-    // No purchase orders in Stores: Accounts raises and pays them, and nothing is received against them.
+    // A purchase order is a delivery Stores expects (quantities, no prices); Stores records what arrives and Accounts is told.
     const supplier = await call("accounts", "POST", "/accounts/suppliers", { name: "Unga Feeds Ltd" });
-    const po = await call("accounts", "POST", "/accounts/purchase-orders", { date: today, supplierId: supplier.id, items: [{ description: "Dairy meal", quantity: 30, unitPrice: 2400 }] });
+    const licks = await call("stores", "POST", "/stores/items", { name: "Mineral licks", category: "animal_feeds", unit: "blocks", openingQuantity: 0 });
+    const po = await call("accounts", "POST", "/accounts/purchase-orders", { date: today, supplierId: supplier.id, items: [{ storeItemId: licks.id, description: "Mineral licks", quantity: 30, unitPrice: 2400 }, { description: "Delivery charge", quantity: 1, unitPrice: 1500 }] });
     await call("stores", "GET", "/accounts/purchase-orders", null, { expect: 403 });
     await call("stores", "GET", "/accounts/suppliers", null, { expect: 403 });
-    await call("root", "POST", `/accounts/purchase-orders/${po.id}/receive`, { date: today, items: [{ itemId: po.items[0].id, quantity: 30 }] }, { expect: 404 });
-    await call("accounts", "POST", `/accounts/purchase-orders/${po.id}/pay`, { accountId: cashId, date: today, amount: 72000 });
-    await call("accounts", "POST", `/accounts/purchase-orders/${po.id}/pay`, { accountId: cashId, date: today, amount: 1 }, { expect: 400 });
+    const expected = (await call("stores", "GET", "/stores/deliveries?status=waiting")).find((d) => d.id === po.id);
+    assert.deepEqual([expected.poNumber, expected.supplier.name, expected.status, expected.items.length], [po.poNumber, "Unga Feeds Ltd", "ordered", 2]);
+    assert.ok(expected.items.every((i) => i.unitPrice === undefined && i.total === undefined) && expected.totalAmount === undefined);
+    await call("livestock", "GET", "/stores/deliveries", null, { expect: 403 });
+    const deliveries = async () => call("accounts", "GET", "/accounts/purchase-orders/deliveries");
+    await call("accounts", "POST", "/accounts/purchase-orders/deliveries/seen");
+    assert.equal((await deliveries()).count, 0);
+    const [mealLine, chargeLine] = ["Mineral licks", "Delivery charge"].map((d) => po.items.find((i) => i.description === d));
+    const before = (await call("stores", "GET", `/stores/items/${licks.id}`)).quantityOnHand;
+    await call("stores", "POST", `/stores/deliveries/${po.id}/receive`, { date: today, items: [{ itemId: mealLine.id, quantity: 31 }] }, { expect: 400 });
+    await call("accounts", "POST", `/stores/deliveries/${po.id}/receive`, { date: today, items: [{ itemId: mealLine.id, quantity: 20 }] }, { expect: 403 });
+    const part = await call("stores", "POST", `/stores/deliveries/${po.id}/receive`, { date: today, deliveryNote: "10 bags to follow", items: [{ itemId: mealLine.id, quantity: 20 }] });
+    assert.deepEqual([part.status, part.deliveredBy.name, part.deliveryNote], ["partially_received", "stores", "10 bags to follow"]);
+    assert.equal((await call("stores", "GET", `/stores/items/${licks.id}`)).quantityOnHand, before + 20);
+    const fromOrder = (await call("stores", "GET", "/stores/receipts")).find((r) => r.purchaseOrderId === po.id);
+    assert.deepEqual([fromOrder.quantity, fromOrder.source, fromOrder.notes], [20, "purchase", `Delivery for ${po.poNumber} from Unga Feeds Ltd`]);
+    const told = await deliveries();
+    assert.deepEqual([told.count, told.rows[0].poNumber, told.rows[0].status], [1, po.poNumber, "partially_received"]);
+    await call("accounts", "POST", `/accounts/purchase-orders/${po.id}/cancel`, null, { expect: 409 });
+    await call("accounts", "POST", "/accounts/purchase-orders/deliveries/seen");
+    const done = await call("stores", "POST", `/stores/deliveries/${po.id}/receive`, { date: today, items: [{ itemId: mealLine.id, quantity: 10 }, { itemId: chargeLine.id, quantity: 1 }] });
+    assert.equal(done.status, "received");
+    assert.equal((await call("stores", "GET", `/stores/items/${licks.id}`)).quantityOnHand, before + 30);
+    assert.deepEqual([(await deliveries()).count, (await call("accounts", "GET", `/accounts/purchase-orders/${po.id}`)).status], [1, "received"]);
+    await call("stores", "POST", `/stores/deliveries/${po.id}/receive`, { date: today, items: [{ itemId: mealLine.id, quantity: 1 }] }, { expect: 409 });
+    assert.ok(!(await call("stores", "GET", "/stores/deliveries?status=waiting")).some((d) => d.id === po.id));
+    // Paying the supplier: an order not raised from a requisition says which department it is charged to.
+    await call("accounts", "POST", `/accounts/purchase-orders/${po.id}/pay`, { accountId: cashId, date: today, amount: 72000 }, { expect: 400 });
+    await call("accounts", "POST", `/accounts/purchase-orders/${po.id}/pay`, { accountId: cashId, date: today, amount: 72000, department: "livestock" });
+    await call("accounts", "POST", `/accounts/purchase-orders/${po.id}/pay`, { accountId: cashId, date: today, amount: 1501, department: "livestock" }, { expect: 400 });
+    const supplierEntry = (await call("accounts", "GET", "/accounts/transactions?category=purchases")).find((t) => t.sourceId === po.id);
+    assert.deepEqual([supplierEntry.amount, supplierEntry.department], [72000, "livestock"]);
   });
 
   test("Stores: the stock, stock cards, and requests from the departments that Stores dispatches", async () => {
@@ -1024,6 +1070,50 @@ if (!url) {
     await call("accounts", "POST", "/accounts/milk-payments", { periodStart: today, periodEnd: today }, { expect: 409 });
   });
 
+  test("Accounts reports: requisitions raised, approved and declined; income and expenses by department, and each department", async () => {
+    const report = async (part) => (await call("accounts", "GET", `/reports/department?department=accounts${part ? `&part=${part}` : ""}&period=day&date=${today}`)).reports[0];
+    const titles = (r) => r.sections.map((s) => s.title);
+    const labels = (section) => section.columns.map((c) => c.label);
+
+    // Requisitions: raised (with when each was approved or declined), approved, declined.
+    const raised = await report("raised");
+    assert.deepEqual(titles(raised), ["Requisitions raised"]);
+    assert.deepEqual(labels(raised.sections[0]), ["Date raised", "Requisition", "Department", "Title", "Raised by", "Estimate", "Status", "Date approved", "Date declined"]);
+    const feeds = raised.sections[0].rows.find((r) => r.title === "Feeds");
+    const sprayers = raised.sections[0].rows.find((r) => r.title === "Sprayers");
+    assert.deepEqual([feeds.department, feeds.status, Boolean(feeds.approved), feeds.declined], ["Livestock", "Fulfilled", true, null]);
+    assert.deepEqual([sprayers.department, sprayers.status, sprayers.approved, Boolean(sprayers.declined)], ["Crops", "Rejected", null, true]);
+    assert.equal(raised.summary.find((s) => s.label === "Requisitions raised").value, raised.sections[0].rows.length);
+    const approved = await report("approved");
+    assert.deepEqual(labels(approved.sections[0]), ["Date raised", "Date approved", "Requisition", "Department", "Title", "Approved by", "Estimate", "Status"]);
+    assert.deepEqual(approved.sections[0].rows.map((r) => [r.title, r.decidedBy]), [["Feeds", "gm"]]);
+    const declined = await report("declined");
+    assert.deepEqual(labels(declined.sections[0]), ["Date raised", "Date declined", "Requisition", "Department", "Title", "Declined by", "Reason", "Estimate"]);
+    assert.deepEqual(declined.sections[0].rows.map((r) => [r.title, r.decidedBy, r.reason, r.amount]), [["Sprayers", "accHead", "Borrow from Tea", 9000]]);
+    assert.equal(declined.heading, `Accounts: Requisitions declined - ${(await call("accounts", "GET", `/reports/department?department=accounts&period=day&date=${today}`)).period.label}`);
+
+    // Income and expenses by department: every department, then each on its own.
+    const all = await report("departments");
+    const byDepartment = all.sections.find((s) => s.title === "Income and expenses by department");
+    assert.deepEqual(byDepartment.rows.map((r) => r.department), ["HR", "Livestock", "Milk Value Addition", "Sales", "Stores", "Tea", "Sugarcane", "Coffee", "Accounts", "Dispensary", "Rentals"]);
+    const row = (name) => byDepartment.rows.find((r) => r.department === name);
+    assert.deepEqual([row("Rentals").income, row("Sales").expenses, row("HR").expenses, row("Livestock").expenses], [500000, 24000, 4000, 72000]);
+    assert.ok(!titles(all).some((t) => t.includes("by category")));
+    assert.ok(all.sections.find((s) => s.title === "Expense entries").columns.some((c) => c.label === "Department"));
+    const rentals = await report("dept-rentals");
+    assert.equal(rentals.heading.startsWith("Accounts: Rentals income and expenses - "), true);
+    assert.deepEqual(titles(rentals), ["Rentals income", "Rentals expenses"]);
+    assert.deepEqual(rentals.summary.map((s) => [s.label, s.value]), [["Income", 500000], ["Expenses", 0], ["Net", 500000]]);
+    assert.deepEqual(rentals.sections[0].rows.map((r) => r.description), ["Shop rent"]);
+    assert.equal((await report("dept-tea")).sections[0].emptyText, "No income recorded for Tea in this period.");
+    // The full report: everything, without each department's own tables.
+    const full = await report("");
+    assert.deepEqual(full.summary.map((s) => s.label), ["Income", "Expenses", "Net", "Requisitions raised", "Requisitions approved", "Requisitions declined"]);
+    assert.ok(titles(full).includes("Income and expenses by department") && titles(full).includes("Requisitions declined") && !titles(full).includes("Rentals income"));
+    const csv = await call("accounts", "GET", `/reports/department?department=accounts&part=dept-rentals&period=month&date=${today}&format=csv`, null, { raw: true });
+    assert.match(csv.headers.get("content-disposition"), /keiyian-accounts-rentals-income-and-expenses-report-\d{4}-\d{2}\.csv/);
+  });
+
   test("Department reports for any period - day, week, two weeks, month, year, custom - as JSON, CSV and PDF", async () => {
     const departments = [["hrHead", "hr"], ["livestock", "livestock"], ["mva", "mva"], ["sales", "sales"], ["stores", "stores"], ["crops", "crops"], ["accounts", "accounts"]];
     const periods = [`period=day&date=${today}`, `period=week&date=${today}`, `period=fortnight&date=${today}`, `period=month&date=${today}`, `period=year&date=${today}`, `period=custom&from=${today}&to=${today}`];
@@ -1066,7 +1156,7 @@ if (!url) {
 
     // Sales and MVA print their sheets one at a time too; the sidebar reads the list from /meta.
     const meta = await call("sales", "GET", "/meta");
-    assert.deepEqual(Object.fromEntries(Object.entries(meta.reportParts).map(([d, parts]) => [d, parts.map((p) => p.key)])), { mva: ["production", "output"], sales: ["vehicles", "store", "local"], stores: ["out", "received", "stock"], livestock: ["herd", "milk", "calvings", "vaccinations", "health"], crops: ["summary", "sugarcane", "tea", "coffee", "fodder"] });
+    assert.deepEqual(Object.fromEntries(Object.entries(meta.reportParts).map(([d, parts]) => [d, parts.map((p) => p.key)])), { mva: ["production", "output"], sales: ["vehicles", "store", "local"], stores: ["out", "received", "stock"], livestock: ["herd", "milk", "calvings", "vaccinations", "health"], accounts: ["raised", "approved", "declined", "departments", "dept-hr", "dept-livestock", "dept-mva", "dept-sales", "dept-stores", "dept-tea", "dept-sugarcane", "dept-coffee", "dept-accounts", "dept-dispensary", "dept-rentals"], crops: ["summary", "sugarcane", "tea", "coffee", "fodder"] });
     const salesPart = async (part) => (await call("sales", "GET", `/reports/department?department=sales&part=${part}&period=day&date=${today}`)).reports[0];
     assert.deepEqual((await salesPart("vehicles")).sections.map((s) => s.title), ["Vehicles", "Vehicle trips and money"]);
     assert.deepEqual((await salesPart("store")).sections.map((s) => s.title), ["Store"]);

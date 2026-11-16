@@ -4,16 +4,16 @@
 
 | Department | What it records |
 |---|---|
-| HR | Staff, contracts, salary reviews and promotions, payroll, disciplinary cases (letters served, dismissals, summary), terminations, and the members register (pioneer founders and their hereditary successors). |
+| HR | Staff, contracts, salary reviews and promotions, payroll (basic salary less deductions; staff get no allowances), disciplinary cases (letters served, dismissals, summary), terminations, and the members register (pioneer founders and their hereditary successors). |
 | Livestock | Herd register by dairy (Dairy A, Dairy C; a male is not kept in a dairy) with mother (dam) and father (sire) and the dates each animal joined and left the herd, calvings (twins included) and lactations, vaccinations (FMD, LSD, Blanthax), diseases from a list and herd health, milk per cow in kilograms (Dairy A milks morning and evening, Dairy C also at midday), and milk sent to MVA in kilograms, never more than was recorded at that milking and not yet sent. Reports: herd, milk, calvings, vaccinations and health, each on its own or together as the full report. |
 | Milk Value Addition (MVA) | Milk received from Livestock and from numbered local farmers (130, 131, ...; the farmer number identifies a farmer across the cooperative and is what farmers are searched by), the milk price per litre, processing of raw milk into Fresh milk, Mala and Yoghurt, and products (including unprocessed raw milk) sent to Sales. |
 | Sales | Products received from MVA, local sales (cash, M-Pesa or credit), vehicles and their two-person crew, morning dispatch and evening returns, damages and customer replacements, and Sales stock. |
-| Stores | Items by name and category (transport & construction, crops, animal feeds, MVA processing tools, other), the stock in the store with each item's stock card, requests from the departments, goods received and stock out to departments, in quantities only (no item codes, costs, suppliers, delivery notes or purchase orders). Goods received add to stock and stock out takes from it. Reports: stock out, goods received and stock remaining. |
+| Stores | Items by name and category (transport & construction, crops, animal feeds, MVA processing tools, other), the stock in the store with each item's stock card, requests from the departments, deliveries to expect, goods received and stock out to departments, in quantities only (no item codes, costs or prices). Goods received add to stock and stock out takes from it. Each purchase order Accounts raises appears under Stores -> Deliveries (with a count in the sidebar and in the bell); Stores records what arrives, in full or in parts, store items come into stock as goods received, and Accounts is told. Reports: stock out, goods received and stock remaining. |
 | Crops | Sugarcane, tea, coffee and fodder farms: farm number, Field ID (each farm's unique identification number, which farms are searched by), acreage, location, ratoon count, status history and harvests. Reports: a summary (farms and acres by crop), then one report per crop listing each farm's number, Field ID, location, age, acres, ratoon (sugarcane) and status as at the end of the period. Age counts from planting, or for sugarcane and fodder from the last harvest after it; tea and coffee are aged from planting. |
-| Accounts | Income and expenses under the cooperative's categories, cash/bank/M-Pesa accounts, farmer milk payments, member dividends, salaries, suppliers and purchase orders (Accounts also does procurement). |
+| Accounts | Income and expenses under the cooperative's categories, each recorded against a department: HR, Livestock, Milk Value Addition, Sales, Stores, Tea, Sugarcane, Coffee (Crops counts as its three crops, though requisitions still come from Crops), Accounts, Dispensary and Rentals. Cash/bank/M-Pesa accounts, farmer milk payments, member dividends, salaries, suppliers and purchase orders (Accounts also does procurement). Paying a salary records an expense under Salaries, charged to the staff member's department; paying a member records one under Members payment. Accounts raises no requisitions and asks Stores for nothing: it approves, returns or rejects. When Stores records a delivery against a purchase order, Accounts is told (a count beside Purchase orders and in the bell). Reports: requisitions raised, approved and declined; income and expenses for all departments, and for each department on its own. |
 
 Income categories: Coop Agency Commission, Rentals, Coop Holding, Sales revenue (banked), Other income.
-Expense categories: Members payment, Salaries, Hired transport services, Travel and subsistence, Acting allowances, Postage and telephone, Printing and stationery, Electricity, Oil and fuel, Purchases (supplier payments), Other expenses.
+Expense categories: Members payment, Salaries, Hired transport services, Travel and subsistence, Acting allowances, Postage and telephone, Printing and stationery, Electricity, Oil and fuel, Consultancy, Auditing fee, Security, Legal fee, Food and beverage, Sundry expense, Purchases (supplier payments), Other expenses.
 These lists live in `server/src/config/catalog.js`.
 
 ## Roles
@@ -32,7 +32,7 @@ All rules are in `server/src/config/access.js`; the browser receives the compute
 
 ## Requisitions
 
-1. A department raises a requisition: items with estimated cost, each with its own purpose or justification. Stores does not.
+1. A department raises a requisition: items with estimated cost, each with its own purpose or justification. Stores and Accounts do not.
 2. The head of Accounts or the General Manager approves, returns (with a comment) or rejects it. Nobody can decide their own requisition.
 3. A returned requisition can be edited and resubmitted by the person who raised it.
 4. Accounts buys or pays for what was approved and marks it fulfilled.
@@ -47,7 +47,7 @@ All rules are in `server/src/config/access.js`; the browser receives the compute
 
 ## End-of-day reports
 
-Reports -> choose the report in the sidebar (departments with several, such as Crops, list each one) and the period -> view on screen, Download PDF or Download CSV. Staff see their own department; the General Manager, administrators and Accounts can see every department or "All departments" in one file.
+Reports -> choose the report in the sidebar (departments with several, such as Crops and Accounts, list each one, Accounts' in two groups: Requisitions and Income & expenses) and the period -> view on screen, Print, Download PDF or Download CSV. Every report is laid out on A4 landscape pages, the same on screen, printed and in the PDF: the cooperative header on the first page, the Summary across the page, each table with its columns sized to what is in them (dates, amounts and reference numbers never wrap; the rest of the width is shared evenly), a long table carried on to the next page under its headings, the sign-off lines at the foot of the last page, and on every page the system-generated note with the page number. On a phone a page is shown whole; pinch to zoom, or download the PDF. Staff see their own department; the General Manager, administrators and Accounts can see every department or "All departments" in one file.
 
 ## Accounts and passwords
 

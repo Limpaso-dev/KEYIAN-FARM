@@ -8,13 +8,14 @@ import { cx } from "../../lib/cx";
 import { date, number, today } from "../../lib/format";
 import { refs } from "../../lib/refs";
 import { useFetch } from "../../lib/useFetch";
+import { deliveries } from "./deliveries";
 import { storeRequestsConfig } from "./storeRequests";
 
-// Stores keeps quantities only: no costs, suppliers, delivery notes,
-// purchase orders or item codes (items are known by name). Departments ask
-// for items under Requests (or by word of mouth); what is handed to them is
-// recorded as stock out. Goods received add to an item's stock and stock out
-// takes from it.
+// Stores keeps quantities only: no costs, prices or item codes (items are
+// known by name). Departments ask for items under Requests (or by word of
+// mouth); what is handed to them is recorded as stock out. Goods received
+// add to an item's stock and stock out takes from it. Accounts' purchase
+// orders arrive under Deliveries as goods to expect.
 
 const quantityOf = (r) => `${number(r.quantity)} ${r.item?.unit || ""}`;
 
@@ -206,6 +207,7 @@ const StoresPage = () => {
       sections={{
         stock: () => <ResourcePage config={stock} />,
         requests: () => <ResourcePage config={storeRequestsConfig(auth)} />,
+        deliveries: () => <ResourcePage config={deliveries} />,
         receipts: () => <ResourcePage config={receipts} />,
         issues: () => <ResourcePage config={issues} />,
         items: () => <ResourcePage config={items} />,

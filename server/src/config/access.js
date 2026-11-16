@@ -68,7 +68,7 @@ export const RESOURCES = {
   milkPayments: { dept: "accounts", actions: { pay: { depts: ["accounts"] } } },
   farmerDetails: { dept: "accounts" },
   memberPayments: { dept: "accounts", read: ["hr"] },
-  // Stores does not use purchase orders or suppliers.
+  // Stores sees purchase orders only as deliveries to expect (quantities, no prices).
   suppliers: { dept: "accounts" },
   purchaseOrders: { dept: "accounts", actions: { pay: { depts: ["accounts"] } } },
 };
@@ -105,9 +105,14 @@ export const can = (user, resource, action = "read") => {
 // Requisitions are raised by the departments and decided by the head of
 // Accounts or the General Manager; Accounts fulfils them. Stores raises
 // none: it answers the departments' store requests (see storeRequestRules).
+// Accounts raises none either: it approves, returns or rejects them, and buys
+// what it needs itself through purchase orders.
 // They are not tied to one department, so they have their own rules.
+/** Departments that ask others (Accounts for money, Stores for items); Stores and Accounts answer instead. */
+const asksOthers = (user) => Boolean(user?.isActive && user.department && !["stores", "accounts"].includes(user.department));
+
 export const requisitionRules = {
-  canRaise: (user) => Boolean(user?.isActive && user.department && user.department !== "stores"),
+  canRaise: asksOthers,
   canSeeAll: (user) => isSystemAdmin(user) || isGeneralManager(user) || user?.department === "accounts",
   canDecide: (user) =>
     Boolean(user?.isActive && (isGeneralManager(user) || (user.department === "accounts" && isHead(user)))),
@@ -128,12 +133,12 @@ export const productRequestRules = {
   seeAll: (user) => Boolean(user?.isActive && (isSystemAdmin(user) || isGeneralManager(user))),
 };
 
-// Store requests. Each department (other than Stores) asks Stores for items;
+// Store requests. Each department (other than Stores and Accounts) asks Stores for items;
 // Stores dispatches them, which is recorded as stock out to that department.
 // A department sees its own requests; Stores, the General Manager and the
 // administrators see them all.
 export const storeRequestRules = {
-  canRaise: (user) => Boolean(user?.isActive && user.department && user.department !== "stores"),
+  canRaise: asksOthers,
   handles: (user) => Boolean(user?.isActive && user.department === "stores"),
   seeAll: (user) => Boolean(user?.isActive && (isSystemAdmin(user) || isGeneralManager(user) || user.department === "stores")),
 };

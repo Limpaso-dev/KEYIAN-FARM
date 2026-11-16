@@ -60,6 +60,7 @@ model User {
   storeRequestsHandled        StoreRequest[]   @relation("StoreRequestHandledBy")
   transactions                Transaction[]
   seenMarks                   SeenMark[]
+  purchaseOrdersDelivered     PurchaseOrder[]  @relation("PurchaseOrderDeliveredBy")
 
   @@index([role, department, isActive])
 }
@@ -964,7 +965,9 @@ model Transaction {
   amount      Decimal     @db.Decimal(18, 2)
   description String
   party       String?
-  department  Department?
+  /// One of Accounts' departments (catalog ACCOUNT_DEPARTMENTS): the staff
+  /// departments, with Tea, Sugarcane and Coffee for Crops, plus Dispensary and Rentals.
+  department  String?
   sourceType  String?
   sourceId    String?
   status      String      @default("posted")
@@ -1098,8 +1101,13 @@ model PurchaseOrder {
   amountPaid    Decimal             @default(0) @db.Decimal(18, 2)
   status        String              @default("ordered")
   notes         String?
+  /// Stores' latest delivery recorded against the order, which Accounts is told of.
+  deliveredAt   DateTime?
+  deliveredById String?
+  deliveryNote  String?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
+  deliveredBy   User?               @relation("PurchaseOrderDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
   supplier      Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   requisition   Requisition?        @relation(fields: [requisitionId], references: [id], onDelete: SetNull)
   items         PurchaseOrderItem[]

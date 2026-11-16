@@ -118,7 +118,7 @@ router.get("/:id", async (req, res) => {
 
 router.post("/", async (req, res) => {
   if (!storeRequestRules.canRaise(req.user)) {
-    throw forbidden(req.user.department === "stores" ? "Stores does not ask itself for items" : "Only the departments ask Stores for items");
+    throw forbidden(req.user.department === "stores" ? "Stores does not ask itself for items" : req.user.department === "accounts" ? "Accounts does not ask Stores for items" : "Only the departments ask Stores for items");
   }
   const data = parseBody({ date: "date", purpose: "text" }, req.body);
   const items = parseItems(req.body.items, { itemId: "id!", quantity: "decimal!", purpose: "text" }, { label: "items" }).filter((line) => line.quantity > 0);

@@ -79,8 +79,9 @@ const reportSections = (auth) => {
       continue;
     }
     if (several) grouped.push({ key: `heading-${department}`, heading: true, label: name });
+    // A part may belong to a group (Accounts: Requisitions; Income & expenses), shown under a short name.
     for (const part of parts) {
-      grouped.push({ key: `${department}:${part.key}`, label: part.title, crumb: several ? `${name}: ${part.title}` : part.title, to: reportPath(department, part.key) });
+      grouped.push({ key: `${department}:${part.key}`, label: part.short || part.title, group: part.group, crumb: several ? `${name}: ${part.title}` : part.title, to: reportPath(department, part.key) });
     }
     grouped.push({ key: department, label: "Full report", crumb: `${name} report`, to: reportPath(department) });
   }
@@ -155,10 +156,11 @@ export const navigation = [
     ],
   },
   {
-    label: "Stores", path: "/stores", icon: Warehouse, group: "departments", department: "stores", hint: "Stock, requests, goods received, stock out", visible: member("stores"),
+    label: "Stores", path: "/stores", icon: Warehouse, group: "departments", department: "stores", hint: "Stock, requests, deliveries, goods received, stock out", visible: member("stores"),
     sections: [
       { key: "stock", label: "Stock", show: can("storeItems") },
       { key: "requests", label: "Requests", show: (a) => Boolean(a.permissions?.storeRequests?.seeAll) },
+      { key: "deliveries", label: "Deliveries", group: "Goods in & out", count: "expectedDeliveries", show: can("storeReceipts") },
       { key: "receipts", label: "Goods received", group: "Goods in & out", show: can("storeReceipts") },
       { key: "issues", label: "Stock out", group: "Goods in & out", show: can("storeIssues") },
       { key: "items", label: "Items", show: can("storeItems") },
@@ -181,7 +183,7 @@ export const navigation = [
       { key: "farmers", label: "Farmer details", group: "Farmers", show: can("farmerDetails") },
       { key: "salaries", label: "Salaries", group: "Staff & members", show: can("payroll", "pay") },
       { key: "members", label: "Member payments", group: "Staff & members", show: can("memberPayments") },
-      { key: "orders", label: "Purchase orders", group: "Purchasing", show: can("purchaseOrders") },
+      { key: "orders", label: "Purchase orders", group: "Purchasing", count: "deliveryAnswers", show: can("purchaseOrders") },
       { key: "suppliers", label: "Suppliers", group: "Purchasing", show: can("suppliers") },
     ],
   },

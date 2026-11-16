@@ -34,9 +34,37 @@ export const EXPENSE_CATEGORIES = list([
   ["printing_stationery", "Printing and stationery"],
   ["electricity", "Electricity"],
   ["oil_fuel", "Oil and fuel"],
+  ["consultancy", "Consultancy"],
+  ["auditing_fee", "Auditing fee"],
+  ["security", "Security"],
+  ["legal_fee", "Legal fee"],
+  ["food_beverage", "Food and beverage"],
+  ["sundry_expense", "Sundry expense"],
   ["purchases", "Purchases (supplier payments)"],
   ["other_expense", "Other expenses"],
 ]);
+
+/**
+ * The departments Accounts records income and expenses against. Crops counts
+ * as its three crops (requisitions still come from Crops), and the dispensary
+ * and the rentals are departments of their own.
+ */
+export const ACCOUNT_DEPARTMENTS = list([
+  ["hr", "HR"],
+  ["livestock", "Livestock"],
+  ["mva", "Milk Value Addition"],
+  ["sales", "Sales"],
+  ["stores", "Stores"],
+  ["tea", "Tea"],
+  ["sugarcane", "Sugarcane"],
+  ["coffee", "Coffee"],
+  ["accounts", "Accounts"],
+  ["dispensary", "Dispensary"],
+  ["rentals", "Rentals"],
+]);
+
+/** A staff or requisition department as Accounts records it; null for Crops, which Accounts splits by crop. */
+export const accountDepartmentOf = (department) => (ACCOUNT_DEPARTMENTS.some((d) => d.value === department) ? department : null);
 
 export const INCOME_CATEGORIES = list([
   ["coop_agency_commission", "Coop Agency Commission"],
@@ -51,6 +79,7 @@ export const OPTIONS = {
   roles: ROLES,
   expenseCategories: EXPENSE_CATEGORIES,
   incomeCategories: INCOME_CATEGORIES,
+  accountDepartments: ACCOUNT_DEPARTMENTS,
   transactionTypes: list([["income", "Income"], ["expense", "Expense"]]),
   accountTypes: list([["cash", "Cash"], ["bank", "Bank"], ["mobile_money", "Mobile money"]]),
   paymentMethods: list([["cash", "Cash"], ["mpesa", "M-Pesa"], ["bank", "Bank"], ["credit", "Credit"]]),
@@ -191,7 +220,10 @@ export const OPTIONS = {
     ["declined", "Declined"],
     ["cancelled", "Cancelled"],
   ]),
-  purchaseOrderStatus: list([["ordered", "Ordered"], ["partially_received", "Partly received"], ["received", "Received"], ["cancelled", "Cancelled"]]),
+  // Stores records the delivery against the order.
+  purchaseOrderStatus: list([["ordered", "Ordered"], ["partially_received", "Partly delivered"], ["received", "Delivered"], ["cancelled", "Cancelled"]]),
+  // Stores' deliveries list: those still expected, or those delivered.
+  deliveryStatus: list([["waiting", "Expected"], ["partially_received", "Partly delivered"], ["received", "Delivered"]]),
 };
 
 /**
@@ -209,6 +241,15 @@ export const REPORT_PARTS = {
     { key: "calvings", title: "Calvings report" },
     { key: "vaccinations", title: "Vaccination report" },
     { key: "health", title: "Health report" },
+  ],
+  // Requisitions raised, approved and declined; then income and expenses, for all departments and for each.
+  // `group` gathers parts in the sidebar; `short` is their name there.
+  accounts: [
+    { key: "raised", title: "Requisitions raised", short: "Raised", group: "Requisitions" },
+    { key: "approved", title: "Requisitions approved", short: "Approved", group: "Requisitions" },
+    { key: "declined", title: "Requisitions declined", short: "Declined", group: "Requisitions" },
+    { key: "departments", title: "Income and expenses by department", short: "All departments", group: "Income & expenses" },
+    ...ACCOUNT_DEPARTMENTS.map(({ value, label }) => ({ key: `dept-${value}`, title: `${label} income and expenses`, short: label, group: "Income & expenses" })),
   ],
   // The summary (farms and acres by crop), then one report per crop.
   crops: [{ key: "summary", title: "Summary" }, ...OPTIONS.cropTypes.map(({ value, label }) => ({ key: value, title: `${label} report` }))],

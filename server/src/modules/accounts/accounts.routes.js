@@ -1,11 +1,13 @@
 import express from "express";
 import prisma from "../../config/prisma.js";
+import { accountDepartmentOf } from "../../config/catalog.js";
 import { allow } from "../../middleware/auth.js";
 import { audit } from "../../lib/audit.js";
 import { crud, dateRange, inTransaction } from "../../lib/crud.js";
 import { farmerNumberSearch } from "../../lib/farmers.js";
 import { badRequest, conflict, notFound, ok } from "../../lib/http.js";
 import { nextNumber } from "../../lib/numbers.js";
+import { markSeen, seenAt } from "../../lib/seen.js";
 import { parseBody, parseItems, round2 } from "../../lib/validate.js";
 import { accountBalance, checkCategory, recordTransaction } from "./ledger.js";
 
@@ -49,7 +51,7 @@ transactionRouter.post("/", allow("transactions", "write"), async (req, res) => 
     amount: "decimal!",
     description: "text!",
     party: "string",
-    department: "option:departments",
+    department: "option:accountDepartments!",
   }, req.body);
   checkCategory(data.type, data.category);
   const transaction = await inTransaction(async (tx) => {
@@ -77,13 +79,28 @@ transactionRouter.post("/:id/void", allow("transactions", "void"), async (req, r
   ok(res, transaction);
 });
 
-// Totals by category for a period.
+// Totals for a period, by department (and by category within the type).
 transactionRouter.get("/summary", allow("transactions", "read"), async (req, res) => {
   const where = { status: "posted", ...dateRange("date", req.query) };
-  const groups = await prisma.transaction.groupBy({ by: ["type", "category"], where, _sum: { amount: true }, _count: true });
+  const [groups, byDepartment] = await Promise.all([
+    prisma.transaction.groupBy({ by: ["type", "category"], where, _sum: { amount: true }, _count: true }),
+    prisma.transaction.groupBy({ by: ["type", "department"], where, _sum: { amount: true } }),
+  ]);
   const rows = groups.map((g) => ({ type: g.type, category: g.category, count: g._count, amount: Number(g._sum.amount || 0) }));
   const total = (type) => round2(rows.filter((r) => r.type === type).reduce((sum, r) => sum + r.amount, 0));
-  ok(res, { rows, income: total("income"), expenses: total("expense"), net: round2(total("income") - total("expense")) });
+  const departments = new Map();
+  for (const g of byDepartment) {
+    const entry = departments.get(g.department) || { department: g.department, income: 0, expenses: 0 };
+    entry[g.type === "income" ? "income" : "expenses"] = round2(Number(g._sum.amount || 0));
+    departments.set(g.department, entry);
+  }
+  ok(res, {
+    rows,
+    departments: [...departments.values()].map((d) => ({ ...d, net: round2(d.income - d.expenses) })),
+    income: total("income"),
+    expenses: total("expense"),
+    net: round2(total("income") - total("expense")),
+  });
 });
 
 router.use("/transactions", crud({
@@ -300,6 +317,7 @@ router.use("/suppliers", crud({
 
 const poInclude = {
   supplier: { select: { id: true, name: true } },
+  deliveredBy: { select: { id: true, name: true } },
   requisition: { select: { id: true, requisitionNumber: true, department: true, title: true } },
   items: { include: { storeItem: { select: { id: true, name: true, unit: true } } } },
 };
@@ -337,11 +355,38 @@ poRouter.post("/", allow("purchaseOrders", "write"), async (req, res) => {
   ok(res, order, 201);
 });
 
-// Stores does not use purchase orders, so deliveries are not received against
-// them: goods come into the store through Stores' own Goods received.
+// Stores is told of each order as a delivery to expect, and records what
+// arrives (stores.routes.js, /stores/deliveries); Accounts is then told.
+// Deliveries recorded since an Accounts officer last looked at the orders
+// are counted beside Purchase orders in the sidebar.
+const DELIVERIES = "deliveryAnswers";
+const deliveriesSince = async (since) => {
+  const where = { deliveredAt: since ? { gt: since } : { not: null } };
+  const [count, rows] = await Promise.all([
+    prisma.purchaseOrder.count({ where }),
+    prisma.purchaseOrder.findMany({
+      where,
+      select: { id: true, poNumber: true, status: true, deliveredAt: true, deliveryNote: true, supplier: { select: { name: true } }, deliveredBy: { select: { name: true } } },
+      orderBy: { deliveredAt: "desc" },
+      take: 20,
+    }),
+  ]);
+  return { since, count, rows };
+};
+const noDeliveries = { since: null, count: 0, rows: [] };
+poRouter.get("/deliveries", allow("purchaseOrders", "read"), async (req, res) => {
+  if (req.user.department !== "accounts") return ok(res, noDeliveries);
+  return ok(res, await deliveriesSince(await seenAt(prisma, req.user.id, DELIVERIES)));
+});
+poRouter.post("/deliveries/seen", allow("purchaseOrders", "read"), async (req, res) => {
+  if (req.user.department !== "accounts") return ok(res, noDeliveries);
+  const deliveries = await deliveriesSince(await seenAt(prisma, req.user.id, DELIVERIES));
+  await markSeen(prisma, req.user.id, DELIVERIES);
+  return ok(res, deliveries);
+});
 
 poRouter.post("/:id/pay", allow("purchaseOrders", "pay"), async (req, res) => {
-  const data = parseBody({ accountId: "id!", date: "date!", amount: "decimal!", category: "string" }, req.body);
+  const data = parseBody({ accountId: "id!", date: "date!", amount: "decimal!", category: "string", department: "option:accountDepartments" }, req.body);
   const category = data.category || "purchases";
   checkCategory("expense", category);
   const order = await inTransaction(async (tx) => {
@@ -350,6 +395,8 @@ poRouter.post("/:id/pay", allow("purchaseOrders", "pay"), async (req, res) => {
     if (existing.status === "cancelled") throw conflict("This order was cancelled");
     const balance = round2(Number(existing.totalAmount) - Number(existing.amountPaid));
     if (data.amount > balance + 0.001) throw badRequest(`The unpaid balance on this order is ${balance}`);
+    const department = data.department || accountDepartmentOf(existing.requisition?.department);
+    if (!department) throw badRequest("Choose the department this payment is charged to");
     await recordTransaction(tx, req.user, {
       type: "expense",
       category,
@@ -358,7 +405,7 @@ poRouter.post("/:id/pay", allow("purchaseOrders", "pay"), async (req, res) => {
       amount: data.amount,
       description: `Payment for ${existing.poNumber}`,
       party: existing.supplier.name,
-      department: existing.requisition?.department,
+      department,
       sourceType: "purchaseOrder",
       sourceId: existing.id,
     });
@@ -378,7 +425,7 @@ poRouter.post("/:id/cancel", allow("purchaseOrders", "write"), async (req, res) 
     const existing = await tx.purchaseOrder.findUnique({ where: { id: req.params.id }, include: { items: true } });
     if (!existing) throw notFound("Purchase order");
     if (existing.status !== "ordered" || Number(existing.amountPaid) > 0) {
-      throw conflict("Only orders with nothing received or paid can be cancelled");
+      throw conflict("Only orders with nothing delivered or paid can be cancelled");
     }
     const updated = await tx.purchaseOrder.update({ where: { id: existing.id }, data: { status: "cancelled" }, include: poInclude });
     await audit(tx, { user: req.user, action: "cancel", entity: "purchaseOrder", entityId: existing.id });

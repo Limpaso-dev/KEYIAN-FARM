@@ -31,6 +31,18 @@ const SOURCES = {
     when: (auth) => Boolean(auth.permissions?.storeRequests?.raise),
     load: async () => (await get("/store-requests/answers")).count,
   },
+  // Purchase orders whose goods Stores is still expecting.
+  expectedDeliveries: {
+    word: "waiting",
+    when: (auth) => auth.can("storeReceipts", "write"),
+    load: async () => (await get("/stores/deliveries", { status: "waiting" })).length,
+  },
+  // Deliveries Stores recorded against purchase orders since the Accounts officer last looked.
+  deliveryAnswers: {
+    word: "new",
+    when: (auth) => auth.user?.department === "accounts" && auth.can("purchaseOrders"),
+    load: async () => (await get("/accounts/purchase-orders/deliveries")).count,
+  },
 };
 
 /** What a count beside these sections counts: "new", "waiting", or "to see" when they differ. */
@@ -67,10 +79,12 @@ export const useNavCounts = (auth) => {
 };
 
 /**
- * Opening a list of answers (path: "/requisitions" or "/store-requests")
- * marks them seen, which clears the count in the sidebar. Returns what had
- * been answered since the user last looked - { since (null: never), count,
- * rows } - so the list can show it and mark those rows new; null until known.
+ * Opening a list of answers (path: "/requisitions" or "/store-requests"; or
+ * the address that marks them seen, ending in /seen, such as
+ * "/accounts/purchase-orders/deliveries/seen") marks them seen, which clears
+ * the count in the sidebar. Returns what had been answered since the user
+ * last looked - { since (null: never), count, rows } - so the list can show
+ * it and mark those rows new; null until known.
  */
 export const useAnswersSeen = (path, enabled) => {
   const [answers, setAnswers] = useState(null);
@@ -80,7 +94,7 @@ export const useAnswersSeen = (path, enabled) => {
     if (!enabled || started.current) return;
     started.current = true;
     // If it fails, nothing is marked new and the count stays for next time.
-    post(`${path}/answers/seen`)
+    post(path.endsWith("/seen") ? path : `${path}/answers/seen`)
       .then((result) => setAnswers(result?.data || null))
       .catch(() => {})
       .finally(refreshNavCounts);

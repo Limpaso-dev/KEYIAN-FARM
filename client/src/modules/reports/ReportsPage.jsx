@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { FileBarChart2, FileDown, FileSpreadsheet, Printer } from "lucide-react";
 import { PeriodPicker } from "../../components/reports/PeriodPicker";
-import { PrintArea, ReportDocument } from "../../components/reports/ReportDocument";
+import { ReportSheets } from "../../components/reports/ReportSheets";
 import { Alert, Button, Card, PageHeader, Spinner } from "../../components/ui/ui";
 import { useAuth } from "../../context/useAuth";
 import { currentSection, defaultReportDepartment, findNavItem, linksOf, sectionsFor } from "../../navigation";
@@ -15,8 +15,9 @@ import { useFetch } from "../../lib/useFetch";
 
 /**
  * Department reports for any period - a day (urgent), a week, two weeks, a
- * month, a quarter, a half year, a year or a custom range. Print gives just
- * the report; PDF and CSV (Excel) downloads carry the same layout.
+ * month, a quarter, a half year, a year or a custom range, shown as the A4
+ * pages it prints on. Print gives just those pages; the PDF has the same
+ * pages and CSV (Excel) the same tables.
  */
 const ReportsPage = () => {
   const auth = useAuth();
@@ -76,14 +77,9 @@ const ReportsPage = () => {
       <Alert tone="error" className="mb-4">{loadError}</Alert>
       {!allowed.length && <Alert tone="info">Your account does not have access to any department reports.</Alert>}
       {loading && !data && <Spinner label="Building report..." />}
-      <div className={cx("space-y-8 transition-opacity", loading && data && "opacity-60")}>
-        {reports.map((report) => <ReportDocument key={report.department} report={report} meta={data} />)}
+      <div className={cx("transition-opacity", loading && data && "opacity-60")}>
+        <ReportSheets reports={reports} meta={data} />
       </div>
-      {reports.length > 0 && (
-        <PrintArea>
-          {reports.map((report) => <ReportDocument key={report.department} report={report} meta={data} />)}
-        </PrintArea>
-      )}
     </div>
   );
 };

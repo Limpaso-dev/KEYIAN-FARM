@@ -788,19 +788,79 @@ const crops = async (db, range) => {
 };
 
 // ---------------------------------------------------------------------
+// Accounts: requisitions raised, approved and declined; income and expenses
+// by department - Accounts' own departments, with Crops as Tea, Sugarcane
+// and Coffee, plus Dispensary and Rentals - and each department on its own.
+// ---------------------------------------------------------------------
+const NO_DEPARTMENT = "No department";
+const EAT_MS = 3 * 3600 * 1000;
+/** A moment (requisition raised, decided) as its calendar day in Nairobi. */
+const eatDay = (moment) => (moment ? new Date(`${new Date(moment.getTime() + EAT_MS).toISOString().slice(0, 10)}T00:00:00.000Z`) : null);
+/** The period's days as moments: from midnight in Nairobi. */
+const withinEat = (range) => ({ gte: new Date(range.from.getTime() - EAT_MS), lt: new Date(range.to.getTime() - EAT_MS) });
+
 const accounts = async (db, range) => {
-  const [transactions, accountsList, requisitions] = await Promise.all([
+  const [transactions, accountsList, raised, decided] = await Promise.all([
     db.transaction.findMany({ where: { date: within(range), status: "posted" }, include: { account: true }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
     db.account.findMany({ where: { isActive: true }, orderBy: { name: "asc" } }),
-    db.requisition.findMany({ where: { decidedAt: within(range) }, include: { decidedBy: true }, orderBy: { decidedAt: "asc" } }),
+    db.requisition.findMany({ where: { createdAt: withinEat(range) }, include: { requestedBy: true, decidedBy: true }, orderBy: { createdAt: "asc" } }),
+    db.requisition.findMany({ where: { decidedAt: withinEat(range), status: { in: ["approved", "fulfilled", "rejected"] } }, include: { requestedBy: true, decidedBy: true }, orderBy: { decidedAt: "asc" } }),
   ]);
+  const known = optionValues("accountDepartments");
+  // Entries from before Accounts kept its own departments may name another (Crops).
+  const departmentName = (key) => (!key ? NO_DEPARTMENT : known.includes(key) ? optionLabel("accountDepartments", key) : optionLabel("departments", key));
   const income = transactions.filter((t) => t.type === "income");
   const expenses = transactions.filter((t) => t.type === "expense");
-  const byCategory = (rows, list) => {
-    const map = new Map();
-    for (const row of rows) map.set(row.category, round2((map.get(row.category) || 0) + Number(row.amount)));
-    return [...map.entries()].map(([category, amount]) => ({ category: optionLabel(list, category), amount }));
-  };
+  const totalIncome = sum(income, "amount");
+  const totalExpenses = sum(expenses, "amount");
+  const entry = (t) => ({
+    date: t.date,
+    reference: t.reference,
+    department: departmentName(t.department),
+    category: optionLabel(t.type === "income" ? "incomeCategories" : "expenseCategories", t.category),
+    description: t.description,
+    party: t.party || "",
+    account: t.account.name,
+    amount: Number(t.amount),
+  });
+  const entryColumns = (party, withDepartment = true) => [
+    col("date", "Date", "date"), col("reference", "Ref"), ...(withDepartment ? [col("department", "Department")] : []), col("category", "Category"),
+    col("description", "Description"), col("party", party), col("account", "Account"), col("amount", "Amount", "money"),
+  ];
+  const flows = (rows) => ({ income: { rows: rows.filter((t) => t.type === "income"), date: "date" }, expenses: { rows: rows.filter((t) => t.type === "expense"), date: "date" } });
+  const flowValues = (r) => ({ income: sum(r.income, "amount"), expenses: sum(r.expenses, "amount"), net: round2(sum(r.income, "amount") - sum(r.expenses, "amount")) });
+  const flowColumns = [col("income", "Income", "money"), col("expenses", "Expenses", "money"), col("net", "Net", "money")];
+
+  // ---- By department: every department, then any older entries outside the list or without one.
+  const extra = [...new Set(transactions.map((t) => t.department).filter((d) => d && !known.includes(d)))];
+  const departmentKeys = [...known, ...extra, ...(transactions.some((t) => !t.department) ? [null] : [])];
+  const byDepartment = departmentKeys.map((key) => {
+    const rows = transactions.filter((t) => (t.department || null) === key);
+    return { department: departmentName(key), ...flowValues({ income: rows.filter((t) => t.type === "income"), expenses: rows.filter((t) => t.type === "expense") }) };
+  });
+
+  // ---- Each department on its own (its own report only).
+  const perDepartment = known.map((key) => {
+    const part = `dept-${key}`;
+    const name = departmentName(key);
+    const rows = transactions.filter((t) => t.department === key);
+    const own = flowValues({ income: rows.filter((t) => t.type === "income"), expenses: rows.filter((t) => t.type === "expense") });
+    const only = (item) => item && inPart(part, { ...item, partOnly: true });
+    return {
+      summary: [
+        only({ label: "Income", value: own.income, type: "money" }),
+        only({ label: "Expenses", value: own.expenses, type: "money" }),
+        only({ label: "Net", value: own.net, type: "money" }),
+      ],
+      sections: [
+        only(breakdown(range, `${name} income and expenses`, flowColumns, flows(rows), flowValues, ["income", "expenses", "net"])),
+        only({ ...section(`${name} income`, entryColumns("Received from", false), rows.filter((t) => t.type === "income").map(entry), ["amount"]), emptyText: `No income recorded for ${name} in this period.` }),
+        only({ ...section(`${name} expenses`, entryColumns("Paid to", false), rows.filter((t) => t.type === "expense").map(entry), ["amount"]), emptyText: `No expenses recorded for ${name} in this period.` }),
+      ].filter(Boolean),
+    };
+  });
+
+  // ---- Account balances at the end of the period.
   const balances = [];
   for (const account of accountsList) {
     const sums = await db.transaction.groupBy({
@@ -811,35 +871,70 @@ const accounts = async (db, range) => {
     const total = (type) => Number(sums.find((s) => s.type === type)?._sum.amount || 0);
     balances.push({ account: account.name, type: optionLabel("accountTypes", account.accountType), balance: round2(Number(account.openingBalance) + total("income") - total("expense")) });
   }
-  const totalIncome = sum(income, "amount");
-  const totalExpenses = sum(expenses, "amount");
-  const entry = (t) => ({ date: t.date, reference: t.reference, category: optionLabel(t.type === "income" ? "incomeCategories" : "expenseCategories", t.category), description: t.description, party: t.party || "", account: t.account.name, amount: Number(t.amount) });
-  const entryColumns = [col("date", "Date", "date"), col("reference", "Ref"), col("category", "Category"), col("description", "Description"), col("party", "Paid to / from"), col("account", "Account"), col("amount", "Amount", "money")];
+
+  // ---- Requisitions: raised in the period; approved and declined in it.
+  const approved = decided.filter((r) => r.status !== "rejected");
+  const declined = decided.filter((r) => r.status === "rejected");
+  const requisition = (r) => ({
+    raised: eatDay(r.createdAt),
+    number: r.requisitionNumber,
+    department: optionLabel("departments", r.department),
+    title: r.title,
+    raisedBy: r.requestedBy?.name || "",
+    decidedBy: r.decidedBy?.name || "",
+    approved: ["approved", "fulfilled"].includes(r.status) ? eatDay(r.decidedAt) : null,
+    declined: r.status === "rejected" ? eatDay(r.decidedAt) : null,
+    status: optionLabel("requisitionStatus", r.status),
+    reason: r.decisionComment || "",
+    amount: Number(r.totalAmount),
+  });
+  const reqColumns = (...keys) => keys.map((key) => ({
+    raised: col("raised", "Date raised", "date"),
+    approved: col("approved", "Date approved", "date"),
+    declined: col("declined", "Date declined", "date"),
+    number: col("number", "Requisition"),
+    department: col("department", "Department"),
+    title: col("title", "Title"),
+    raisedBy: col("raisedBy", "Raised by"),
+    decidedBy: col("decidedBy", keys.includes("declined") && !keys.includes("approved") ? "Declined by" : "Approved by"),
+    status: col("status", "Status"),
+    reason: col("reason", "Reason"),
+    amount: col("amount", "Estimate", "money"),
+  })[key]);
+
   return {
     title: "Accounts",
+    parts: REPORT_PARTS.accounts,
     summary: [
-      { label: "Income", value: totalIncome, type: "money" },
-      { label: "Expenses", value: totalExpenses, type: "money" },
-      { label: "Net", value: round2(totalIncome - totalExpenses), type: "money" },
-      { label: "Requisitions decided", value: requisitions.length },
+      inPart("departments", { label: "Income", value: totalIncome, type: "money" }),
+      inPart("departments", { label: "Expenses", value: totalExpenses, type: "money" }),
+      inPart("departments", { label: "Net", value: round2(totalIncome - totalExpenses), type: "money" }),
+      inPart("raised", { label: "Requisitions raised", value: raised.length }),
+      inPart("raised", { label: "Estimated value", value: sum(raised, "totalAmount"), type: "money", partOnly: true }),
+      inPart("approved", { label: "Requisitions approved", value: approved.length }),
+      inPart("approved", { label: "Estimated value", value: sum(approved, "totalAmount"), type: "money", partOnly: true }),
+      inPart("declined", { label: "Requisitions declined", value: declined.length }),
+      inPart("declined", { label: "Estimated value", value: sum(declined, "totalAmount"), type: "money", partOnly: true }),
+      ...perDepartment.flatMap((d) => d.summary),
     ],
     sections: [
-      section("Income by category", [col("category", "Category"), col("amount", "Amount", "money")], byCategory(income, "incomeCategories"), ["amount"]),
-      section("Expenses by category", [col("category", "Category"), col("amount", "Amount", "money")], byCategory(expenses, "expenseCategories"), ["amount"]),
-      breakdown(range, "Income and expenses", [col("income", "Income", "money"), col("expenses", "Expenses", "money"), col("net", "Net", "money")],
-        { income: { rows: income, date: "date" }, expenses: { rows: expenses, date: "date" } },
-        (r) => ({ income: sum(r.income, "amount"), expenses: sum(r.expenses, "amount"), net: round2(sum(r.income, "amount") - sum(r.expenses, "amount")) }),
-        ["income", "expenses", "net"]),
-      listsEachRecord(range) && section("Income entries", entryColumns, income.map(entry), ["amount"]),
-      listsEachRecord(range) && section("Expense entries", entryColumns, expenses.map(entry), ["amount"]),
+      inPart("departments", section("Income and expenses by department", [col("department", "Department"), ...flowColumns], byDepartment, ["income", "expenses", "net"])),
+      inPart("departments", breakdown(range, "Income and expenses", flowColumns, flows(transactions), flowValues, ["income", "expenses", "net"])),
+      listsEachRecord(range) && inPart("departments", section("Income entries", entryColumns("Received from"), income.map(entry), ["amount"])),
+      listsEachRecord(range) && inPart("departments", section("Expense entries", entryColumns("Paid to"), expenses.map(entry), ["amount"])),
       section(`Account balances at ${dayText(range.asAt)}`, [col("account", "Account"), col("type", "Type"), col("balance", "Balance", "money")], balances, ["balance"]),
-      section("Requisitions decided", [col("date", "Decided", "date"), col("number", "Requisition"), col("department", "Department"), col("title", "Title"), col("status", "Decision"), col("by", "By"), col("amount", "Estimated", "money")],
-        requisitions.map((r) => ({ date: r.decidedAt, number: r.requisitionNumber, department: optionLabel("departments", r.department), title: r.title, status: optionLabel("requisitionStatus", r.status), by: r.decidedBy?.name || "", amount: Number(r.totalAmount) }))),
+      inPart("raised", { ...section("Requisitions raised", reqColumns("raised", "number", "department", "title", "raisedBy", "amount", "status", "approved", "declined"), raised.map(requisition), ["amount"]), emptyText: "No requisitions were raised in this period." }),
+      inPart("approved", { ...section("Requisitions approved", reqColumns("raised", "approved", "number", "department", "title", "decidedBy", "amount", "status"), approved.map(requisition), ["amount"]), emptyText: "No requisitions were approved in this period." }),
+      inPart("declined", { ...section("Requisitions declined", reqColumns("raised", "declined", "number", "department", "title", "decidedBy", "reason", "amount"), declined.map(requisition), ["amount"]), emptyText: "No requisitions were declined in this period." }),
+      ...perDepartment.flatMap((d) => d.sections),
     ].filter(Boolean),
   };
 };
 
 export const BUILDERS = { hr, livestock, mva, sales, stores, crops, accounts };
 
-/** A report's summary as a whole: without the figures meant for one part only (a crop's own farms and acres). */
-export const fullSummary = (report) => report.summary.filter((item) => !item.partOnly);
+/**
+ * A report as a whole: without the figures and tables meant for one part
+ * only (a crop's own farms and acres, a department's own income and expenses).
+ */
+export const fullReport = (report) => ({ ...report, summary: report.summary.filter((item) => !item.partOnly), sections: report.sections.filter((s) => !s.partOnly) });

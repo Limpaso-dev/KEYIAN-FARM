@@ -108,23 +108,240 @@
   }
 }
 
-/* Reports: wide text columns (remarks, notes) keep a readable width on screen. */
+/* Tables shown within a page (HR overview, staff profile): wide text columns (remarks, notes) keep a readable width. */
 .report-wide-cell {
   min-width: 18rem;
 }
 
 /*
- * Printing a report prints only the report documents (rendered into
- * .print-root by PrintArea) - not the sidebar, filters or anything else on
- * the screen - on A4 landscape, each report starting on a new page.
+ * Reports are A4 landscape pages (ReportSheets): the same pages on screen,
+ * printed, and in the PDF from the server (both laid out by layout.js).
+ * Sizes are in millimetres and pixels, not rem, so a page is the same at
+ * any screen size; the PDF's points are these pixels x 0.75.
+ */
+.report-sheets {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.report-document {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.report-sheet {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 297mm;
+  height: 210mm;
+  padding: 12mm;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px #e3e7e5, 0 2px 6px rgb(13 17 15 / 0.06);
+  color: #19271f;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-feature-settings: normal;
+  font-size: 11.33px;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.report-sheet-body {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The full header, on each report's first page, with its rule. */
+.report-sheet-header {
+  padding-bottom: 20.67px;
+  background: linear-gradient(#40532a, #40532a) left bottom 18.67px / 100% 2px no-repeat;
+  text-align: center;
+}
+
+.report-sheet-header h2 {
+  padding: 6.67px 0 1px;
+  font-size: 16.67px;
+  font-weight: 700;
+}
+
+.report-org {
+  color: #40532a;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.report-motto {
+  color: #5e6b5e;
+  font-size: 12.67px;
+  font-style: italic;
+}
+
+.report-generated {
+  padding-bottom: 8px;
+  color: #5e6b5e;
+  font-size: 12px;
+}
+
+/* Later pages: the organisation and the report on one line. */
+.report-running {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 19.67px;
+  background: linear-gradient(#b7c4b2, #b7c4b2) left bottom 13.33px / 100% 1px no-repeat;
+  color: #5e6b5e;
+  font-size: 10.67px;
+}
+
+.report-running-org {
+  color: #40532a;
+  font-weight: 700;
+}
+
+.report-table {
+  margin-bottom: 18.67px;
+}
+
+.report-table-title {
+  padding-bottom: 6.67px;
+  color: #40532a;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.report-table-title.is-continued {
+  color: #5e6b5e;
+}
+
+.report-sheet table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-top: 1px solid #b7c4b2;
+  border-left: 1px solid #b7c4b2;
+}
+
+.report-sheet th,
+.report-sheet td {
+  padding: 4.67px 6px;
+  border-right: 1px solid #b7c4b2;
+  border-bottom: 1px solid #b7c4b2;
+  overflow-wrap: break-word;
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.report-sheet thead th {
+  background: #e6ede2;
+  font-weight: 600;
+  vertical-align: bottom;
+}
+
+.report-sheet tfoot td {
+  background: #f1f5ef;
+  font-weight: 600;
+}
+
+.report-sheet .is-right {
+  text-align: right;
+}
+
+.report-sheet td.is-right,
+.report-sheet td.is-nowrap {
+  white-space: nowrap;
+}
+
+.report-sheet .is-negative {
+  color: #9f1239;
+}
+
+.report-sheet .is-empty {
+  color: #5e6b5e;
+  font-style: italic;
+}
+
+/* The Summary's two halves. */
+.report-sheet .is-pair-edge {
+  border-right-width: 2px;
+}
+
+/* Sign-off lines at the foot of the last page. */
+.report-signoff {
+  margin-top: auto;
+  padding: 16px 0 10px;
+  font-size: 12px;
+}
+
+.report-signoff-row {
+  display: grid;
+  grid-template-columns: 6.5em minmax(0, 1fr) max-content minmax(0, 0.62fr) max-content minmax(0, 0.52fr);
+  align-items: end;
+  column-gap: 8px;
+  height: 32px;
+  padding-bottom: 2px;
+}
+
+.report-signoff-label {
+  padding-left: 16px;
+}
+
+.report-signoff-line {
+  border-bottom: 1px solid #5e6b5e;
+}
+
+.report-sheet-foot {
+  display: flex;
+  flex: 0 0 7mm;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 12px;
+  background: linear-gradient(#b7c4b2, #b7c4b2) left 5.33px / 100% 1px no-repeat;
+  color: #5e6b5e;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.report-sheet-note {
+  font-style: italic;
+}
+
+/* Off-screen copies of the tables, measured to plan the pages. */
+.report-measure {
+  position: absolute;
+  top: 0;
+  left: -100000px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.report-sheet.is-measuring {
+  height: auto;
+}
+
+.report-sheet.is-measuring .report-sheet-body {
+  flex: none;
+}
+
+/*
+ * Printing a report prints only its pages (the copy in .print-root) - not
+ * the sidebar, filters or anything else on the screen - one A4 landscape
+ * page per sheet, with nothing added by the browser's margins.
  */
 .print-root {
   display: none;
 }
 
-@page report {
+@page report-sheet {
   size: A4 landscape;
-  margin: 12mm 10mm;
+  margin: 0;
 }
 
 @media print {
@@ -138,51 +355,24 @@
 
   .print-root {
     display: block;
-    page: report;
-    color: #0f172a;
+    page: report-sheet;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
 
+  .print-root .report-sheets,
   .print-root .report-document {
-    border: 0;
-    border-radius: 0;
+    display: block;
+  }
+
+  .print-root .report-sheet {
     box-shadow: none;
-    overflow: visible;
-  }
-
-  .print-root .report-document + .report-document {
-    break-before: page;
-  }
-
-  .print-root .report-header,
-  .print-root tr {
+    break-after: page;
     break-inside: avoid;
   }
 
-  .print-root h3 {
-    break-after: avoid;
-  }
-
-  /* Column headings repeat on every page; the totals row prints once, at the end. */
-  .print-root tfoot {
-    display: table-row-group;
-  }
-
-  .print-root .overflow-x-auto {
-    overflow: visible;
-  }
-
-  .print-root .report-narrow {
-    max-width: 55%;
-  }
-
-  .print-root .report-wide-cell {
-    min-width: 0;
-  }
-
-  .print-root table {
-    font-size: 10.5px;
+  .print-root .report-document:last-child .report-sheet:last-child {
+    break-after: auto;
   }
 }
 

@@ -4,6 +4,7 @@ import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
 import { Input } from "../../components/ui/ui";
 import { Search } from "lucide-react";
+import { departmentLabel } from "./departments";
 import { ReportTable } from "../../components/reports/ReportDocument";
 import { SystemNote } from "../../components/ui/KeyFigures";
 import { useAuth } from "../../context/useAuth";
@@ -13,17 +14,20 @@ import { refs } from "../../lib/refs";
 import { put } from "../../lib/api";
 import { clearFetchCache, useFetch } from "../../lib/useFetch";
 import { payroll } from "../hr/payroll";
-import { purchaseOrdersConfig } from "./purchaseOrders";
+import { PurchaseOrders } from "./PurchaseOrdersPage";
 
 // ---------------------------------------------------------------------
-// Income and expenses with a category summary for the period.
+// Income and expenses with a summary for the period, by department.
 // ---------------------------------------------------------------------
-const CategorySummary = () => {
-  const { label } = useAuth();
+const DepartmentSummary = () => {
+  const { label, meta } = useAuth();
   const [range, setRange] = useState({ from: today().slice(0, 8) + "01", to: today() });
   const { data } = useFetch("/accounts/transactions/summary", range);
-  const rows = data?.rows || [];
-  const list = (type) => rows.filter((r) => r.type === type).sort((a, b) => b.amount - a.amount);
+  // Accounts' departments in their order, then any older entry outside them.
+  const order = (meta?.accountDepartments || []).map((d) => d.value);
+  const rows = [...(data?.departments || [])]
+    .sort((a, b) => (order.includes(a.department) ? order.indexOf(a.department) : 99) - (order.includes(b.department) ? order.indexOf(b.department) : 99))
+    .map((d) => ({ department: departmentLabel(label, d.department), income: d.income, expenses: d.expenses, net: d.net }));
   return (
     <section>
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 pb-3">
@@ -33,31 +37,15 @@ const CategorySummary = () => {
           <label className="text-xs text-slate-500">To<Input type="date" className="mt-1" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} /></label>
         </div>
       </div>
-      {/* An income and expenditure statement: rows and columns, totals, then the net. */}
-      <div className="space-y-6 py-5">
-        <div className="grid gap-6 lg:grid-cols-2">
-          {[["income", "Income by category", "incomeCategories", "Total income", data?.income], ["expense", "Expenses by category", "expenseCategories", "Total expenses", data?.expenses]].map(([type, title, options, totalLabel, total]) => (
-            <ReportTable
-              key={type}
-              emptyText="Nothing recorded"
-              section={{
-                title,
-                columns: [{ key: "category", label: "Category" }, { key: "amount", label: "Amount (KES)", type: "money" }],
-                rows: list(type).map((r) => ({ category: label(options, r.category), amount: r.amount })),
-                totals: { amount: total ?? 0 },
-                totalLabel,
-              }}
-            />
-          ))}
-        </div>
+      {/* An income and expenditure statement by department: rows and columns, then the totals. */}
+      <div className="py-5">
         <ReportTable
-          narrow
+          emptyText="Nothing recorded"
           section={{
-            title: "Net for the period",
-            columns: [{ key: "item", label: "Item" }, { key: "amount", label: "Amount (KES)", type: "money" }],
-            rows: [{ item: "Total income", amount: data?.income ?? 0 }, { item: "Less total expenses", amount: data?.expenses ?? 0 }],
-            totals: { amount: data?.net ?? 0 },
-            totalLabel: "Net (income less expenses)",
+            title: "Income and expenses by department",
+            columns: [{ key: "department", label: "Department" }, { key: "income", label: "Income (KES)", type: "money" }, { key: "expenses", label: "Expenses (KES)", type: "money" }, { key: "net", label: "Net (KES)", type: "money" }],
+            rows,
+            totals: { income: data?.income ?? 0, expenses: data?.expenses ?? 0, net: data?.net ?? 0 },
           }}
         />
       </div>
@@ -70,7 +58,7 @@ const transactions = {
   resource: "transactions",
   endpoint: "/accounts/transactions",
   title: "Income and expenses",
-  description: "Entries are never deleted. The head of Accounts can void a manual entry with a reason.",
+  description: "Each entry is recorded against a department: Crops as Tea, Sugarcane or Coffee; Dispensary and Rentals as departments of their own. Salaries, member payments and supplier payments are recorded here when they are paid. Entries are never deleted; the head of Accounts can void a manual entry with a reason.",
   singular: "Entry",
   createLabel: "Record income / expense",
   editFields: false,
@@ -79,6 +67,7 @@ const transactions = {
   filters: [
     { type: "search", placeholder: "Reference, description, payee" },
     { name: "type", label: "Type", options: "transactionTypes" },
+    { name: "department", label: "Department", options: "accountDepartments" },
     { name: "status", label: "Status", options: [{ value: "posted", label: "Posted" }, { value: "voided", label: "Voided" }] },
     { type: "dateRange" },
   ],
@@ -86,6 +75,7 @@ const transactions = {
     { key: "reference", label: "Ref" },
     { key: "date", label: "Date", type: "date" },
     { key: "type", label: "Type", render: (r) => <span className={r.type === "income" ? "text-emerald-700" : "text-rose-700"}>{r.type === "income" ? "Income" : "Expense"}</span> },
+    { key: "department", label: "Department", render: (r, c) => departmentLabel(c.label, r.department) },
     { key: "category", label: "Category", render: (r, c) => c.label(r.type === "income" ? "incomeCategories" : "expenseCategories", r.category) },
     { key: "description", label: "Description" },
     { key: "party", label: "Paid to / from" },
@@ -101,7 +91,7 @@ const transactions = {
     { name: "amount", label: "Amount (KES)", type: "number", required: true },
     { name: "accountId", label: "Account", type: "select", ref: refs.moneyAccounts, required: true },
     { name: "party", label: "Paid to / received from" },
-    { name: "department", label: "Department", type: "select", options: "departments", placeholder: "Not specific" },
+    { name: "department", label: "Department", type: "select", options: "accountDepartments", required: true, help: "Crops: choose Tea, Sugarcane or Coffee" },
     { name: "description", label: "Description", type: "textarea", required: true },
   ],
   createInitial: () => ({ type: "expense", date: today() }),
@@ -248,9 +238,27 @@ const memberPayments = {
     { name: "description", label: "Description", type: "textarea" },
   ],
   createInitial: () => ({ date: today(), paymentType: "dividend" }),
+  created: () => "Member paid and recorded as an expense under Members payment",
 };
 
-const salaries = { ...payroll, title: "Salaries to pay", description: "Payroll generated by HR, ready for payment.", defaultQuery: { status: "with_finance" }, toolbar: undefined, filters: [{ name: "status", label: "Status", options: "payrollStatus" }] };
+// Paying a salary records it as an expense under Salaries, charged to the
+// staff member's department (Crops staff: their crop, chosen here).
+const salaries = {
+  ...payroll,
+  title: "Salaries to pay",
+  description: "Payroll generated by HR, ready for payment. Each salary paid is recorded as an expense under Salaries, charged to the staff member's department.",
+  defaultQuery: { status: "with_finance" },
+  toolbar: undefined,
+  filters: [{ name: "status", label: "Status", options: "payrollStatus" }],
+  actions: payroll.actions.map((action) => (action.key !== "pay" ? action : {
+    ...action,
+    fields: [
+      ...action.fields,
+      { name: "department", label: "Charged to", type: "select", options: "accountDepartments", required: true, help: "The staff member's department. Crops staff: Tea, Sugarcane or Coffee." },
+    ],
+    initial: (r) => ({ date: today(), department: r.employee?.department === "crops" ? "" : r.employee?.department || "" }),
+  })),
+};
 
 // MVA registers each farmer's name and number. Accounts keeps the rest.
 const farmerDetails = {
@@ -312,13 +320,13 @@ const suppliers = {
 const AccountsPage = () => (
   <ModulePage
     sections={{
-      entries: () => <ResourcePage config={transactions} header={() => <CategorySummary />} />,
+      entries: () => <ResourcePage config={transactions} header={() => <DepartmentSummary />} />,
       accounts: () => <ResourcePage config={moneyAccounts} />,
       milk: () => <ResourcePage config={milkPayments} />,
       farmers: () => <ResourcePage config={farmerDetails} />,
       salaries: () => <ResourcePage config={salaries} />,
       members: () => <ResourcePage config={memberPayments} />,
-      orders: () => <ResourcePage config={purchaseOrdersConfig} />,
+      orders: () => <PurchaseOrders />,
       suppliers: () => <ResourcePage config={suppliers} />,
     }}
   />

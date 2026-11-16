@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatCell, generatedStamp, summarySection, toCsv, toPdf } from "../src/modules/reports/render.js";
+import { formatCell, generatedStamp, summaryGrid, summarySection, toCsv, toPdf } from "../src/modules/reports/render.js";
 
 const report = {
   heading: "Sales report - November 2026",
@@ -49,11 +49,22 @@ test("the summary is a two-column table of formatted figures", () => {
   ]);
 });
 
+test("on the page the summary runs across the width: two item/value pairs a row, read down the left first", () => {
+  const grid = summaryGrid(report);
+  assert.deepEqual(grid.columns.map((c) => c.label), ["Item", "Value", "Item", "Value"]);
+  assert.deepEqual(grid.rows, [
+    { item: "Local sales", value: "KES 1,250.00", item2: "Shortage", value2: "KES -40.00" },
+    { item: "Open vehicles", value: "1", item2: "", value2: "" },
+  ]);
+});
+
 test("PDF renders a valid document, one report per page, no blank pages", async () => {
   const pdf = await toPdf([report], meta);
   assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
   assert.equal(pages(pdf), 1);
   assert.equal(pages(await toPdf([report, report], meta)), 2);
+  // A4 landscape: 297 x 210 mm.
+  assert.match(pdf.toString("latin1"), /\/MediaBox \[0 0 841\.89 595\.28\]/);
 });
 
 test("long tables carry on over pages", async () => {

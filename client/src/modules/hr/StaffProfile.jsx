@@ -194,7 +194,6 @@ const StaffProfile = () => {
           columns: [
             { key: "period", label: "Month" },
             { key: "basicSalary", label: "Basic (KES)", type: "money" },
-            { key: "allowances", label: "Allowances (KES)", type: "money" },
             { key: "deductions", label: "Deductions (KES)", type: "money" },
             { key: "netPay", label: "Net pay (KES)", type: "money" },
             { key: "status", label: "Status" },

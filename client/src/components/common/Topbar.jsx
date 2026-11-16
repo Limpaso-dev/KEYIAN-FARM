@@ -5,6 +5,7 @@ import { useAuth } from "../../context/useAuth";
 import { get } from "../../lib/api";
 import { dateTime, money } from "../../lib/format";
 import { COUNTS_CHANGED } from "../../lib/useNavCounts";
+import { deliveryLines } from "../../modules/stores/deliveryItems";
 import { requestLines } from "../../modules/stores/requestLines";
 import { currentSection, findNavItem, NAV_GROUPS } from "../../navigation";
 import { cx } from "../../lib/cx";
@@ -29,12 +30,15 @@ const useNotifications = (user, permissions, label) => {
       const handles = permissions?.productRequests?.handles || [];
       // Store requests waiting for Stores to dispatch.
       // Answers to the department's requisitions and store requests since the user last looked at them.
-      const [toHandle, sent, toDispatch, answered, storeAnswered] = await Promise.all([
+      // Deliveries: Stores expects what Accounts ordered; Accounts hears when Stores records one.
+      const [toHandle, sent, toDispatch, answered, storeAnswered, expecting, delivered] = await Promise.all([
         Promise.all(handles.map((to) => get("/product-requests", { to, status: "pending" }))).then((lists) => lists.flat()),
         permissions?.productRequests?.raiseTo?.includes("mva") ? get("/product-requests", { to: "mva", status: "sent" }) : [],
         permissions?.storeRequests?.handle ? get("/store-requests", { status: "pending" }) : [],
         permissions?.requisitions?.raise ? get("/requisitions/answers") : { rows: [] },
         permissions?.storeRequests?.raise ? get("/store-requests/answers") : { rows: [] },
+        user.department === "stores" ? get("/stores/deliveries", { status: "waiting" }) : [],
+        user.department === "accounts" ? get("/accounts/purchase-orders/deliveries") : { rows: [] },
       ]);
       const yoursReturned = (r) => r.status === "returned" && r.requestedById === user.id;
       const toAccounts = "/requisitions?tab=accounts";
@@ -47,6 +51,8 @@ const useNotifications = (user, permissions, label) => {
         ...toHandle.map((r) => ({ id: `p-${r.id}`, title: r.toDepartment === "mva" ? "Sales asked for products" : "Office request from the administration", detail: `${r.requestNumber} · ${productLines(r.items)}`, at: r.createdAt, to: `/requisitions?tab=${r.toDepartment}` })),
         ...sent.map((r) => ({ id: `s-${r.id}`, title: "MVA sent the products you asked for", detail: `${r.requestNumber} · receive them under From MVA`, at: r.handledAt, to: "/sales?tab=received" })),
         ...toDispatch.map((r) => ({ id: `q-${r.id}`, title: `${label("departments", r.department)} asked for items`, detail: `${r.requestNumber} · ${storeLines(r.items)}`, at: r.createdAt, to: "/stores?tab=requests" })),
+        ...expecting.map((r) => ({ id: `e-${r.id}`, title: `Delivery expected from ${r.supplier?.name}`, detail: `${r.poNumber} · ${deliveryLines(r)}`, at: r.createdAt, to: "/stores?tab=deliveries" })),
+        ...delivered.rows.map((r) => ({ id: `g-${r.id}`, title: r.status === "received" ? "Stores received a delivery in full" : "Stores received part of a delivery", detail: `${r.poNumber} · ${r.supplier?.name}${r.deliveryNote ? ` · ${r.deliveryNote}` : ""}`, at: r.deliveredAt, to: "/accounts?tab=orders" })),
       ].sort((a, b) => new Date(b.at) - new Date(a.at)));
       setFailed(false);
     } catch {

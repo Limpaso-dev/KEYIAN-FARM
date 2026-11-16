@@ -81,6 +81,9 @@ test("requisitions are decided by the head of Accounts or the General Manager", 
   assert.equal(requisitionRules.canDecide(user("admin")), false);
   assert.equal(requisitionRules.canRaise(user("officer", "crops")), true);
   assert.equal(requisitionRules.canRaise(user("general_manager")), false);
+  // Accounts decides requisitions and raises none.
+  assert.equal(requisitionRules.canRaise(user("head", "accounts")), false);
+  assert.equal(requisitionRules.canRaise(user("officer", "accounts")), false);
 });
 
 test("Stores keeps quantities to itself: no purchase orders, suppliers or requisitions", () => {
@@ -113,7 +116,8 @@ test("product requests: Sales asks MVA, the administration asks Sales; the depar
 
 test("store requests: the departments ask Stores, Stores dispatches; Stores, the GM and admins see all", () => {
   assert.equal(storeRequestRules.canRaise(user("officer", "livestock")), true);
-  assert.equal(storeRequestRules.canRaise(user("head", "accounts")), true);
+  // Accounts asks Stores for nothing.
+  assert.equal(storeRequestRules.canRaise(user("head", "accounts")), false);
   assert.equal(storeRequestRules.canRaise(user("officer", "stores")), false);
   assert.equal(storeRequestRules.canRaise(user("general_manager")), false);
   assert.equal(storeRequestRules.canRaise(user("admin")), false);

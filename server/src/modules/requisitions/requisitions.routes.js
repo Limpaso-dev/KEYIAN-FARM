@@ -14,7 +14,8 @@ import { parseBody, parseItems, round2 } from "../../lib/validate.js";
 //   requester          -> edits a returned one and resubmits (pending)
 //   Accounts           -> fulfilled (bought or paid for)
 // Each item carries its own purpose (why it is needed).
-// Stores raises none: it answers the departments' store requests.
+// Stores raises none: it answers the departments' store requests. Accounts
+// raises none either: it decides them.
 
 const router = express.Router();
 const include = {
@@ -125,7 +126,13 @@ router.get("/:id", async (req, res) => {
 });
 
 router.post("/", async (req, res) => {
-  if (!requisitionRules.canRaise(req.user)) throw forbidden(req.user?.department === "stores" ? "Stores does not raise requisitions; departments ask Stores for items through store requests" : "Only department staff can raise requisitions");
+  if (!requisitionRules.canRaise(req.user)) {
+    const refusals = {
+      stores: "Stores does not raise requisitions; departments ask Stores for items through store requests",
+      accounts: "Accounts does not raise requisitions: it approves, returns or rejects them",
+    };
+    throw forbidden(refusals[req.user?.department] || "Only department staff can raise requisitions");
+  }
   const data = parseBody({ title: "string!", purpose: "text", priority: "option:priorities" }, req.body);
   const items = buildItems(req.body.items);
   const requisition = await inTransaction(async (tx) => {
