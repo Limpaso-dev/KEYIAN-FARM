@@ -263,23 +263,30 @@ if (!url) {
 
   let rawMilkId; let freshId; let malaId; let yoghurtId;
   test("livestock: dairies, calvings and twins, vaccines and diseases from lists, milk in kg, transfer to MVA", async () => {
-    // Every animal belongs to a dairy.
+    // Every female belongs to a dairy; a male is not kept in a dairy, whatever is sent.
     await call("livestock", "POST", "/livestock/animals", { tagNumber: "X", sex: "female" }, { expect: 400 });
     const cow = await call("livestock", "POST", "/livestock/animals", { tagNumber: "KE-001", name: "Daisy", sex: "female", breed: "Friesian", dairy: "dairy_a" });
     const bull = await call("livestock", "POST", "/livestock/animals", { tagNumber: "KE-B1", sex: "male", dairy: "dairy_a" });
+    assert.equal(bull.dairy, null);
     const cCow = await call("livestock", "POST", "/livestock/animals", { tagNumber: "KE-C1", sex: "female", dairy: "dairy_c" });
+    // Made male, an animal leaves its dairy; made female again, she needs one.
+    const steer = await call("livestock", "POST", "/livestock/animals", { tagNumber: "KE-S1", sex: "male" });
+    await call("livestock", "PUT", `/livestock/animals/${steer.id}`, { sex: "female" }, { expect: 400 });
+    assert.equal((await call("livestock", "PUT", `/livestock/animals/${steer.id}`, { sex: "female", dairy: "dairy_c" })).dairy, "dairy_c");
+    assert.equal((await call("livestock", "PUT", `/livestock/animals/${steer.id}`, { sex: "male" })).dairy, null);
+    await call("root", "DELETE", `/livestock/animals/${steer.id}`);
     await call("livestock", "POST", "/livestock/animals", { tagNumber: "X", sex: "female", dairy: "dairy_a", damId: bull.id }, { expect: 400 });
     const { calf } = await call("livestock", "POST", "/livestock/calvings", { damId: cow.id, sireId: bull.id, calvingDate: today, calfTagNumber: "KE-002", calfSex: "female" });
     assert.deepEqual([calf.damId, calf.dairy], [cow.id, "dairy_a"]);
     assert.equal((await call("livestock", "GET", `/livestock/animals/${cow.id}`)).lactationCount, 1);
 
-    // Twins: both calves join the register in the mother's dairy, on the one calving.
+    // Twins: both calves join the register on the one calving; the heifer calf in her mother's dairy, the bull calf in none.
     const twins = { damId: cCow.id, sireDetails: "AI 123", calvingDate: today, calfTagNumber: "KE-C2", calfSex: "male", twins: true };
     await call("livestock", "POST", "/livestock/calvings", twins, { expect: 400 });
     await call("livestock", "POST", "/livestock/calvings", { ...twins, twinTagNumber: "ke-c2", twinSex: "female" }, { expect: 400 });
     await call("livestock", "POST", "/livestock/calvings", { ...twins, twinTagNumber: "ke-001", twinSex: "female" }, { expect: 409 });
     const born = await call("livestock", "POST", "/livestock/calvings", { ...twins, twinTagNumber: "KE-C3", twinSex: "female" });
-    assert.deepEqual([born.calf.dairy, born.twin.dairy, born.twin.damId, born.twin.sireDetails, born.lactation.twinCalfId], ["dairy_c", "dairy_c", cCow.id, "AI 123", born.twin.id]);
+    assert.deepEqual([born.calf.dairy, born.twin.dairy, born.twin.damId, born.twin.sireDetails, born.lactation.twinCalfId], [null, "dairy_c", cCow.id, "AI 123", born.twin.id]);
     const [twinCalving] = await call("livestock", "GET", `/livestock/lactations?animalId=${cCow.id}`);
     assert.deepEqual([twinCalving.calf.tagNumber, twinCalving.twinCalf.tagNumber, twinCalving.lactationNumber], ["KE-C2", "KE-C3", 1]);
     const single = (await call("livestock", "GET", `/livestock/lactations?animalId=${cow.id}`))[0];
@@ -310,17 +317,34 @@ if (!url) {
     await call("livestock", "POST", "/livestock/milk-records", { date: today, session: "morning", records: [{ animalId: cow.id, kg: 5 }] }, { expect: 400 });
     await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_c", session: "morning", records: [{ animalId: cow.id, kg: 5 }] }, { expect: 400 });
     await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: bull.id, kg: 3 }] }, { expect: 400 });
-    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: cow.id, kg: 18.5 }] });
+    // Nothing recorded yet: no milk to send.
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 5 }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: cow.id, kg: 52.5 }] });
     await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_c", session: "midday", records: [{ animalId: cCow.id, kg: 6 }] });
     const daily = await call("livestock", "GET", `/livestock/milk-records/daily?from=${today}&to=${today}`);
-    assert.deepEqual(daily.map((d) => [d.dairy, d.session, d.kg]).sort(), [["dairy_a", "morning", 18.5], ["dairy_c", "midday", 6]]);
+    assert.deepEqual(daily.map((d) => [d.dairy, d.session, d.kg]).sort(), [["dairy_a", "morning", 52.5], ["dairy_c", "midday", 6]]);
     assert.deepEqual((await call("livestock", "GET", "/livestock/milk-records?dairy=dairy_c")).map((m) => [m.animal.tagNumber, Number(m.kg)]), [["KE-C1", 6]]);
 
     // Milk sent to MVA, in kg, at a milking its dairy has.
     await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", kg: 50 }, { expect: 400 });
     await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "midday", dairy: "dairy_a", kg: 50 }, { expect: 400 });
+    // Only milk recorded at that milking, and not sent yet, can be sent.
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 53 }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "evening", dairy: "dairy_a", kg: 1 }, { expect: 400 });
     const transfer = await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 50 });
     await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { session: "midday" }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 3 }, { expect: 400 });
+    const rest = await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 2.5 });
+    await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { kg: 51 }, { expect: 400 });
+    await call("root", "DELETE", `/livestock/milk-transfers/${rest.id}`);
+    assert.equal(Number((await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { kg: 52.5 })).kg), 52.5);
+    await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { kg: 50 });
+    // The milk recorded cannot drop below what was sent: weighed again, edited or deleted.
+    const [morningRecord] = await call("livestock", "GET", `/livestock/milk-records?dairy=dairy_a&from=${today}&to=${today}`);
+    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: cow.id, kg: 40 }] }, { expect: 409 });
+    await call("livestock", "PUT", `/livestock/milk-records/${morningRecord.id}`, { kg: 49 }, { expect: 409 });
+    await call("root", "DELETE", `/livestock/milk-records/${morningRecord.id}`, null, { expect: 409 });
+    assert.equal(Number((await call("livestock", "PUT", `/livestock/milk-records/${morningRecord.id}`, { kg: 52.5 })).kg), 52.5);
     await call("livestock", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedKg: 48 }, { expect: 403 });
     await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedKg: 51 }, { expect: 400 });
     const received = await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedKg: 48 });
@@ -350,10 +374,10 @@ if (!url) {
     assert.ok(herd.heading.startsWith("Livestock: Herd report - "), herd.heading);
     assert.deepEqual(herd.sections.map((s) => s.title.replace(/ at .+/, " at")), ["Herd at", "Herd register", "Joined and left the herd"]);
     assert.deepEqual(herd.sections[0].columns.map((c) => c.label), ["Dairy", "Milking cows", "Dry cows", "Heifers", "Female calves", "Bulls", "Male calves", "Total"]);
-    assert.deepEqual(herd.sections[0].rows.map((r) => [r.dairy, r.milking, r.dry, r.heifer, r.femaleCalf, r.bull, r.maleCalf, r.total]), [["Dairy A", 1, 0, 0, 1, 0, 0, 2], ["Dairy C", 1, 0, 1, 1, 0, 1, 4]]);
+    assert.deepEqual(herd.sections[0].rows.map((r) => [r.dairy, r.milking, r.dry, r.heifer, r.femaleCalf, r.bull, r.maleCalf, r.total]), [["Dairy A", 1, 0, 0, 1, 0, 0, 2], ["Dairy C", 1, 0, 1, 1, 0, 0, 3], ["Not in a dairy", 0, 0, 0, 0, 0, 1, 1]]);
     assert.deepEqual(values(herd), [["Animals in the herd", 6], ["Milking cows", 2], ["Dry cows", 0], ["Joined the herd", 4], ["Left the herd", 1]]);
     const register = herd.sections[1].rows;
-    assert.deepEqual(register.map((r) => r.tag), ["KE-001", "KE-002", "KE-C1", "KE-C2", "KE-C3", "KE-H1"]);
+    assert.deepEqual(register.map((r) => [r.tag, r.dairy]), [["KE-001", "Dairy A"], ["KE-002", "Dairy A"], ["KE-C1", "Dairy C"], ["KE-C3", "Dairy C"], ["KE-H1", "Dairy C"], ["KE-C2", ""]]);
     assert.deepEqual(["cls", "mother", "father", "calvings"].map((k) => register.find((r) => r.tag === "KE-002")[k]), ["Female calf", "KE-001 Daisy", "KE-B1", 0]);
     assert.match(register.find((r) => r.tag === "KE-H1").age, /^\d+ yr( \d+ mo)?$/);
     assert.deepEqual(herd.sections[2].rows.map((r) => [r.change, r.tag]).sort(), [["Born", "KE-002"], ["Born", "KE-C2"], ["Born", "KE-C3"], ["Bought", "KE-H1"], ["Sold", "KE-B1"]]);
@@ -365,9 +389,9 @@ if (!url) {
     // Milk, in kg, by dairy and its milkings.
     const milk = await part("milk");
     assert.deepEqual(milk.sections.map((s) => s.title), ["Milk by dairy and session (kg)", "Milk per cow (kg)", "Milk sent to MVA"]);
-    assert.deepEqual(milk.sections[0].rows.map((r) => [r.dairy, r.session, r.kg, r.sent]), [["Dairy A", "Morning", 18.5, 50], ["Dairy A", "Evening", 0, 0], ["Dairy C", "Morning", 0, 0], ["Dairy C", "Midday", 6, 0], ["Dairy C", "Evening", 0, 0]]);
-    assert.deepEqual(milk.sections[1].rows.map((r) => [r.tag, r.dairy, r.morning, r.midday, r.evening, r.total]), [["KE-001", "Dairy A", 18.5, "", 0, 18.5], ["KE-C1", "Dairy C", 0, 6, 0, 6]]);
-    assert.deepEqual(values(milk), [["Milk recorded (kg)", 24.5], ["Dairy A (kg)", 18.5], ["Dairy C (kg)", 6], ["Sent to MVA (kg)", 50], ["Not yet sent (kg)", -25.5]]);
+    assert.deepEqual(milk.sections[0].rows.map((r) => [r.dairy, r.session, r.kg, r.sent]), [["Dairy A", "Morning", 52.5, 50], ["Dairy A", "Evening", 0, 0], ["Dairy C", "Morning", 0, 0], ["Dairy C", "Midday", 6, 0], ["Dairy C", "Evening", 0, 0]]);
+    assert.deepEqual(milk.sections[1].rows.map((r) => [r.tag, r.dairy, r.morning, r.midday, r.evening, r.total]), [["KE-001", "Dairy A", 52.5, "", 0, 52.5], ["KE-C1", "Dairy C", 0, 6, 0, 6]]);
+    assert.deepEqual(values(milk), [["Milk recorded (kg)", 58.5], ["Dairy A (kg)", 52.5], ["Dairy C (kg)", 6], ["Sent to MVA (kg)", 50], ["Not yet sent (kg)", 8.5]]);
     assert.ok((await part("milk", `period=week&date=${today}`)).sections.some((s) => s.title === "Milk (kg) by day"));
 
     // Calvings, with the twins.
@@ -410,6 +434,16 @@ if (!url) {
     await call("mva", "POST", "/mva/milk-prices", { effectiveDate: "2026-01-01", pricePerLitre: 50 });
     const deliveries = await call("mva", "POST", "/mva/milk-deliveries", { date: today, session: "morning", deliveries: [{ supplierId: farmer.id, litres: 60 }, { supplierId: second.id, litres: 40 }] });
     assert.equal(deliveries[0].amount, 3000);
+    // A farmer is found by the farmer number, which identifies them across the cooperative: their deliveries, and the register.
+    const numbers = (rows) => rows.map((d) => d.supplier.supplierNumber);
+    assert.deepEqual(numbers(await call("mva", "GET", `/mva/milk-deliveries?search=131&from=${today}&to=${today}`)), [131]);
+    assert.deepEqual(await call("mva", "GET", `/mva/milk-deliveries?search=kiprop&from=${today}&to=${today}`), []);
+    assert.deepEqual(await call("mva", "GET", "/mva/milk-deliveries?search=999"), []);
+    assert.deepEqual(await call("mva", "GET", "/mva/milk-deliveries?search=99999999999"), []);
+    assert.deepEqual((await call("mva", "GET", "/mva/milk-suppliers?search=131")).map((s) => s.firstName), ["Ann"]);
+    assert.deepEqual(await call("mva", "GET", "/mva/milk-suppliers?search=chebet"), []);
+    assert.deepEqual((await call("accounts", "GET", "/accounts/farmers?search=130")).map((s) => s.firstName), ["John"]);
+    assert.deepEqual(await call("accounts", "GET", "/accounts/farmers?search=kiprop"), []);
 
     let stock = await call("mva", "GET", "/stock/mva");
     assert.equal(stock.find((s) => s.code === "RAW_MILK").onHand, 148);
@@ -742,19 +776,50 @@ if (!url) {
 
     // Stores raises no requisitions (departments ask it for items through store requests). Accounts fulfils approved ones.
     assert.deepEqual((await call("stores", "GET", "/auth/me")).permissions.requisitions, { raise: false, seeAll: false, decide: false, fulfil: false });
-    await call("stores", "POST", "/requisitions", { title: "Gloves", purpose: "Store work", items: [{ description: "Gloves", quantity: 2 }] }, { expect: 403 });
-    const req = await call("livestock", "POST", "/requisitions", { title: "Feeds", purpose: "Dairy meal for the week", items: [{ description: "Dairy meal", quantity: 10, unit: "bags", unitCost: 2500 }] });
+    await call("stores", "POST", "/requisitions", { title: "Gloves", items: [{ description: "Gloves", quantity: 2, purpose: "Store work" }] }, { expect: 403 });
+    // Each item carries its own purpose; one for the whole requisition is not enough.
+    await call("livestock", "POST", "/requisitions", { title: "Feeds", purpose: "Dairy meal for the week", items: [{ description: "Dairy meal", quantity: 10, unit: "bags", unitCost: 2500 }] }, { expect: 400 });
+    const req = await call("livestock", "POST", "/requisitions", {
+      title: "Feeds",
+      items: [
+        { description: "Dairy meal", quantity: 10, unit: "bags", unitCost: 2500, purpose: "Dairy meal for the milking cows this week" },
+        { description: "Mineral lick", quantity: 2, unit: "blocks", purpose: "Lick blocks for Dairy C" },
+      ],
+    });
     assert.equal(req.totalAmount, 25000);
+    assert.equal(req.purpose, null);
+    assert.deepEqual(req.items.map((i) => [i.description, i.purpose]).sort(), [["Dairy meal", "Dairy meal for the milking cows this week"], ["Mineral lick", "Lick blocks for Dairy C"]]);
+    // The department hears of each answer (approved, returned, rejected) until it looks at its requisitions.
+    const answers = async (who, kind = "requisitions") => call(who, "GET", `/${kind}/answers`);
+    assert.equal((await answers("livestock")).count, 0);
     await call("accounts", "POST", `/requisitions/${req.id}/decision`, { decision: "approve" }, { expect: 403 });
     await call("accHead", "POST", `/requisitions/${req.id}/decision`, { decision: "return" }, { expect: 400 });
     await call("accHead", "POST", `/requisitions/${req.id}/decision`, { decision: "return", comment: "Add unit cost" });
-    await call("livestock", "PUT", `/requisitions/${req.id}`, { title: "Feeds", purpose: "Dairy meal", items: [{ description: "Dairy meal", quantity: 10, unitCost: 2400 }] });
+    const returned = await answers("livestock");
+    assert.deepEqual([returned.count, returned.since, returned.rows[0].status, returned.rows[0].decisionComment], [1, null, "returned", "Add unit cost"]);
+    assert.equal((await answers("crops")).count, 0);
+    assert.equal((await answers("stores")).count, 0);
+    assert.equal((await call("livestock", "POST", "/requisitions/answers/seen")).since, null);
+    assert.equal((await answers("livestock")).count, 0);
+    await call("livestock", "PUT", `/requisitions/${req.id}`, { title: "Feeds", items: [{ description: "Dairy meal", quantity: 10, unitCost: 2400 }] }, { expect: 400 });
+    await call("livestock", "PUT", `/requisitions/${req.id}`, { title: "Feeds", items: [{ description: "Dairy meal", quantity: 10, unitCost: 2400, purpose: "Dairy meal for the milking cows" }] });
     assert.equal((await call("gm", "GET", "/requisitions/inbox")).length, 1);
     await call("gm", "POST", `/requisitions/${req.id}/decision`, { decision: "approve" });
     await call("stores", "POST", `/requisitions/${req.id}/fulfil`, null, { expect: 403 });
     await call("accounts", "POST", `/requisitions/${req.id}/fulfil`);
     assert.equal((await call("livestock", "GET", `/requisitions/${req.id}`)).status, "fulfilled");
     await call("crops", "GET", `/requisitions/${req.id}`, null, { expect: 404 });
+    // Approved (and since fulfilled) while nobody looked: counted once more; looking clears it.
+    const approved = await answers("livestock");
+    assert.deepEqual([approved.count, approved.rows[0].status], [1, "fulfilled"]);
+    const lookedBefore = (await call("livestock", "POST", "/requisitions/answers/seen")).since;
+    assert.ok(lookedBefore && new Date(lookedBefore) < new Date(approved.rows[0].decidedAt));
+    assert.equal((await answers("livestock")).count, 0);
+    // An answer counts for the rest of the department, not for the one who gave it.
+    const books = await call("accounts", "POST", "/requisitions", { title: "Receipt books", items: [{ description: "Receipt book", quantity: 5, unitCost: 300, purpose: "Receipts for farmer payments" }] });
+    await call("accHead", "POST", `/requisitions/${books.id}/decision`, { decision: "reject", comment: "Use the ones in stock" });
+    assert.deepEqual((await answers("accounts")).rows.map((r) => [r.requisitionNumber, r.status]), [[books.requisitionNumber, "rejected"]]);
+    assert.equal((await answers("accHead")).count, 0);
 
     // No purchase orders in Stores: Accounts raises and pays them, and nothing is received against them.
     const supplier = await call("accounts", "POST", "/accounts/suppliers", { name: "Unga Feeds Ltd" });
@@ -784,8 +849,10 @@ if (!url) {
     await call("stores", "POST", "/store-requests", { items: [{ itemId: gloves.id, quantity: 1 }] }, { expect: 403 });
     await call("gm", "POST", "/store-requests", { items: [{ itemId: gloves.id, quantity: 1 }] }, { expect: 403 });
     await call("livestock", "POST", "/store-requests", { items: [] }, { expect: 400 });
-    await call("livestock", "POST", "/store-requests", { items: [{ itemId: gloves.id, quantity: 1 }, { itemId: gloves.id, quantity: 2 }] }, { expect: 400 });
-    const ask = await call("livestock", "POST", "/store-requests", { date: today, purpose: "Milking", items: [{ itemId: gloves.id, quantity: 4 }, { itemId: cement.id, quantity: 2 }] });
+    await call("livestock", "POST", "/store-requests", { items: [{ itemId: gloves.id, quantity: 1, purpose: "Milking" }, { itemId: gloves.id, quantity: 2, purpose: "Milking" }] }, { expect: 400 });
+    await call("livestock", "POST", "/store-requests", { purpose: "Milking", items: [{ itemId: gloves.id, quantity: 4 }] }, { expect: 400 });
+    const ask = await call("livestock", "POST", "/store-requests", { date: today, items: [{ itemId: gloves.id, quantity: 4, purpose: "Milking" }, { itemId: cement.id, quantity: 2, purpose: "Mend the milking parlour floor" }] });
+    assert.deepEqual(ask.items.map((i) => [i.item.name, i.purpose]).sort(), [["Cement", "Mend the milking parlour floor"], ["Gloves", "Milking"]]);
     assert.match(ask.requestNumber, /^SRQ-\d{4}-\d{4}$/);
     assert.deepEqual([ask.department, ask.status, ask.canCancel, ask.canDispatch], ["livestock", "pending", true, false]);
 
@@ -823,18 +890,26 @@ if (!url) {
     await call("livestock", "GET", `/stores/items/${gloves.id}/card`, null, { expect: 403 });
 
     // Stores declines with a reason; the person who asked cancels a waiting request; nobody else can.
-    const second = await call("livestock", "POST", "/store-requests", { items: [{ itemId: cement.id, quantity: 3 }] });
+    const second = await call("livestock", "POST", "/store-requests", { items: [{ itemId: cement.id, quantity: 3, purpose: "Calf pen floor" }] });
     await call("stores", "POST", `/store-requests/${second.id}/decline`, {}, { expect: 400 });
     await call("livestock", "POST", `/store-requests/${second.id}/decline`, { reason: "x" }, { expect: 403 });
     const declined = await call("stores", "POST", `/store-requests/${second.id}/decline`, { reason: "No cement in the store" });
     assert.deepEqual([declined.status, declined.declineReason], ["declined", "No cement in the store"]);
-    const third = await call("livestock", "POST", "/store-requests", { items: [{ itemId: gloves.id, quantity: 1 }] });
+    const third = await call("livestock", "POST", "/store-requests", { items: [{ itemId: gloves.id, quantity: 1, purpose: "Spare pair" }] });
     await call("stores", "POST", `/store-requests/${third.id}/cancel`, null, { expect: 403 });
     assert.equal((await call("livestock", "POST", `/store-requests/${third.id}/cancel`)).status, "cancelled");
 
+    // The department hears what Stores answered (dispatched, declined) until it looks at its requests.
+    const storeAnswers = await call("livestock", "GET", "/store-requests/answers");
+    assert.deepEqual([storeAnswers.count, storeAnswers.rows.map((r) => r.status).sort()], [2, ["declined", "issued"]]);
+    assert.equal((await call("stores", "GET", "/store-requests/answers")).count, 0);
+    assert.equal((await call("crops", "GET", "/store-requests/answers")).count, 0);
+    await call("livestock", "POST", "/store-requests/answers/seen");
+    assert.equal((await call("livestock", "GET", "/store-requests/answers")).count, 0);
+
     // An item no longer in use cannot be asked for, and one that was asked for cannot be deleted.
     await call("stores", "PUT", `/stores/items/${cement.id}`, { isActive: false });
-    await call("crops", "POST", "/store-requests", { items: [{ itemId: cement.id, quantity: 1 }] }, { expect: 400 });
+    await call("crops", "POST", "/store-requests", { items: [{ itemId: cement.id, quantity: 1, purpose: "Farm store" }] }, { expect: 400 });
     assert.ok(!(await call("crops", "GET", "/store-requests/items")).some((i) => i.id === cement.id));
     await call("root", "DELETE", `/stores/items/${cement.id}`, null, { expect: 409 });
     assert.deepEqual((await call("crops", "GET", "/auth/me")).permissions.storeRequests, { raise: true, handle: false, seeAll: false });
@@ -842,7 +917,7 @@ if (!url) {
   });
 
   test("Crops: farms, status and ratoon count", async () => {
-    const farm = await call("crops", "POST", "/crops/farms", { farmNumber: "SC-01", cropType: "sugarcane", acreage: 4.5, location: "Kapsoit" });
+    const farm = await call("crops", "POST", "/crops/farms", { farmNumber: "SC-01", fieldId: "27431400", cropType: "sugarcane", acreage: 4.5, location: "Kapsoit" });
     await call("crops", "POST", `/crops/farms/${farm.id}/status`, { status: "awaiting_fertiliser", date: today, note: "Weeding finished" });
     await call("crops", "POST", "/crops/harvests", { farmId: farm.id, harvestDate: today, quantity: 120, unit: "tonnes", amount: 480000, markHarvested: true });
     const updated = await call("crops", "GET", `/crops/farms/${farm.id}`);
@@ -850,73 +925,94 @@ if (!url) {
     assert.equal(updated.status, "harvested");
   });
 
-  test("Crops: period reports match the tea and cane report sheets", async () => {
-    // Tea farm report, May and June 2024: 2,500 kg a day target.
-    const tea = await call("crops", "POST", "/crops/farms", { farmNumber: "TEA-01", cropType: "tea", acreage: 60, location: "Keiyian", dailyTarget: 2500 });
-    const may = [["02", 3082.3], ["03", 3468.6], ["06", 3037.1], ["07", 4797.3], ["08", 4865.6], ["09", 5997], ["10", 2785.7], ["13", 2395.7], ["14", 2912], ["15", 2455],
-      ["16", 2446.7], ["17", 2208.3], ["20", 2495.7], ["21", 2851.1], ["22", 2283.4], ["24", 2324.1], ["27", 1820.1], ["28", 2168], ["29", 3046.7], ["30", 1539.7]];
-    const june = [["03", 2346.8], ["04", 3063.2], ["05", 2392.2], ["06", 2354.9], ["07", 2636.4], ["10", 3367.9], ["11", 1582.3], ["12", 2112.2], ["17", 4101.8],
-      ["18", 4110.6], ["19", 3390.7], ["20", 3390.7], ["21", 1991.1], ["24", 3620], ["25", 3194.9], ["26", 2103.3], ["27", 2410.6]];
-    for (const [month, rows] of [["05", may], ["06", june]]) {
-      for (const [d, kgs] of rows) await call("crops", "POST", "/crops/harvests", { farmId: tea.id, harvestDate: `2024-${month}-${d}`, quantity: kgs, unit: "kg", markHarvested: false });
-    }
-    const pick = (report, label) => report.summary.find((s) => s.label.startsWith(label)).value;
+  test("Crops: the Field ID identifies a farm, and farms are searched by it", async () => {
+    const register = (body, options) => call("crops", "POST", "/crops/farms", { cropType: "sugarcane", acreage: 2, location: "Kapsoit", ...body }, options);
+    await register({ farmNumber: "SC-02" }, { expect: 400 });
+    const farm = await register({ farmNumber: "SC-02", fieldId: "  kf 7730 " });
+    assert.equal(farm.fieldId, "KF 7730");
+    // One farm to a Field ID, whatever the case it is typed in.
+    const clash = await register({ farmNumber: "SC-03", fieldId: "Kf 7730", cropType: "tea" }, { expect: 409 });
+    assert.equal(clash.message, "Field ID KF 7730 is already registered to farm SC-02");
+    await call("crops", "PUT", `/crops/farms/${farm.id}`, { fieldId: "27431400" }, { expect: 409 });
+    await call("crops", "PUT", `/crops/farms/${farm.id}`, { fieldId: "" }, { expect: 400 });
+    assert.equal((await call("crops", "PUT", `/crops/farms/${farm.id}`, { fieldId: "kf 7730", notes: "Same field" })).fieldId, "KF 7730");
+    // The search finds farms by Field ID only.
+    const search = async (term) => (await call("crops", "GET", `/crops/farms?search=${encodeURIComponent(term)}`)).map((f) => f.farmNumber);
+    assert.deepEqual(await search("7730"), ["SC-02"]);
+    assert.deepEqual(await search("kf 77"), ["SC-02"]);
+    assert.deepEqual(await search("Kapsoit"), []);
+    assert.deepEqual(await search("SC-02"), []);
+    // "Growing" is no longer a farm status.
+    await call("crops", "POST", `/crops/farms/${farm.id}/status`, { status: "growing", date: today }, { expect: 400 });
+    assert.ok(!(await call("crops", "GET", "/meta")).farmStatus.some((s) => s.value === "growing"));
+  });
 
-    const mayReport = (await call("crops", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=5")).reports[0];
-    assert.equal(pick(mayReport, "Kgs plucked"), 58980.1);
-    assert.equal(pick(mayReport, "Target"), 50000);
-    assert.equal(pick(mayReport, "Variance"), 8980.1);
-    assert.equal(pick(mayReport, "Plucking days"), 20);
-    assert.equal(pick(mayReport, "Average per plucking day"), 2949.01);
-    const daily = mayReport.sections[0];
-    assert.equal(daily.rows.length, 20);
-    assert.equal(daily.rows.find((r) => r.date.startsWith("2024-05-30")).variance, -960.3);
+  test("Crops: a summary, then a report for each crop - farm no., Field ID, location, age, acres, ratoon, status", async () => {
+    // Cane planted on 8 Jan 2025 and cut on 20 Jun 2026; tea planted in 2022 and plucked in August; fodder cut on 1 Jul.
+    const cane = await call("crops", "POST", "/crops/farms", { farmNumber: "175A", fieldId: "27431401", cropType: "sugarcane", acreage: 24.93, location: "Oloontare", plantingDate: "2025-01-08", cycleStartDate: "2025-01-08", ratoonCount: 0, status: "weeding", statusNote: "Second weeding" });
+    await call("crops", "POST", "/crops/harvests", { farmId: cane.id, harvestDate: "2026-06-20", quantity: 1200, unit: "tonnes", markHarvested: true });
+    await call("crops", "POST", `/crops/farms/${cane.id}/status`, { status: "fertiliser_applied", date: "2026-08-01", note: "CAN applied" });
+    const tea = await call("crops", "POST", "/crops/farms", { farmNumber: "KF3456", fieldId: " tea 0001", cropType: "tea", acreage: 8, location: "Keiyian", plantingDate: "2022-06-07", status: "awaiting_harvest" });
+    await call("crops", "POST", "/crops/harvests", { farmId: tea.id, harvestDate: "2026-08-10", quantity: 2400, unit: "kg", amount: 48000 });
+    const fodder = await call("crops", "POST", "/crops/farms", { farmNumber: "FD-1", fieldId: "FOD-01", cropType: "fodder", variety: "Boma rhodes", acreage: 2, location: "Paddock 3", plantingDate: "2026-02-01", status: "planted" });
+    await call("crops", "POST", "/crops/harvests", { farmId: fodder.id, harvestDate: "2026-07-01", quantity: 40, unit: "bales" });
 
-    const juneReport = (await call("crops", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=6")).reports[0];
-    assert.equal(pick(juneReport, "Kgs plucked"), 48169.6);
-    assert.equal(pick(juneReport, "Variance"), 5669.6);
-    assert.equal(pick(juneReport, "Change vs May 2024"), -18.33);
+    const report = async (part, month) => {
+      const data = await call("crops", "GET", `/reports/department?department=crops${part ? `&part=${part}` : ""}&period=month&date=${month}-01`);
+      return { ...data.reports[0], label: data.period.label };
+    };
+    const rowsOf = (r) => r.sections[0].rows;
 
-    const q2 = (await call("crops", "GET", "/crops/reports?crop=tea&period=quarter&year=2024&index=2")).reports[0];
-    const monthly = q2.sections[0].rows;
-    assert.deepEqual(monthly.map((r) => r.kgs), [0, 58980.1, 48169.6]);
-    assert.deepEqual(monthly.map((r) => r.toDate), [0, 58980.1, 107149.7]);
-    assert.equal(monthly[1].average, 2949.01);
+    // Before the cut: the plant crop, aged from planting, with the status it had then.
+    const march = await report("sugarcane", "2026-03");
+    assert.equal(march.heading, `Crops: Sugarcane report - ${march.label}`);
+    assert.deepEqual(march.sections.map((s) => s.title), ["Sugarcane farms as at 31 Mar 2026"]);
+    assert.deepEqual(march.sections[0].columns.map((c) => c.label), ["Farm no.", "Field ID", "Location", "Age", "Acres", "Ratoon", "Status"]);
+    assert.deepEqual(rowsOf(march), [{ farmNumber: "175A", fieldId: "27431401", location: "Oloontare", age: "14 months", acreage: 24.93, ratoon: "PC", status: "Weeding - Second weeding" }]);
+    assert.deepEqual(march.sections[0].totals, { acreage: 24.93 });
+    assert.deepEqual(march.summary.map((s) => [s.label, s.value]), [["Sugarcane farms", 1], ["Acres", 24.93]]);
+    // Ten days after the cut: the first ratoon, aged from the cut.
+    const june = await report("sugarcane", "2026-06");
+    assert.deepEqual([rowsOf(june)[0].age, rowsOf(june)[0].ratoon, rowsOf(june)[0].status], ["10 days", "RI", "Harvested - Recorded with harvest"]);
+    const august = await report("sugarcane", "2026-08");
+    assert.deepEqual([rowsOf(august)[0].age, rowsOf(august)[0].ratoon, rowsOf(august)[0].status], ["2 months", "RI", "Fertiliser applied - CAN applied"]);
 
-    // Cane status: 397B, 43.6 ha, RII, 150 TCH, cut on 20 June 2024.
-    const cane = await call("crops", "POST", "/crops/farms", { farmNumber: "397B", longFarmNumber: "27130300", cropType: "sugarcane", acreage: 109, hectares: 43.6, location: "Keiyian", ratoonCount: 2, expectedTch: 150, cycleStartDate: "2023-01-01" });
-    await call("crops", "POST", "/crops/harvests", { farmId: cane.id, harvestDate: "2024-06-20", quantity: 3434.64, unit: "tonnes", markHarvested: true });
-    const caneRow = (report) => report.sections[0].rows.find((r) => r.farmNumber === "397B");
+    // Tea is aged from planting (plucking does not restart it) and has no ratoon; fodder grows again after each cut.
+    const teaReport = await report("tea", "2026-08");
+    assert.deepEqual(teaReport.sections[0].columns.map((c) => c.label), ["Farm no.", "Field ID", "Location", "Age", "Acres", "Status"]);
+    assert.deepEqual(rowsOf(teaReport), [{ farmNumber: "KF3456", fieldId: "TEA 0001", location: "Keiyian", age: "4 yr 2 mo", acreage: 8, status: "Awaiting harvest" }]);
+    assert.deepEqual(rowsOf(await report("fodder", "2026-08")).map((r) => [r.farmNumber, r.age, r.status]), [["FD-1", "1 month", "Planted"]]);
+    const coffee = await report("coffee", "2026-08");
+    assert.deepEqual([coffee.sections[0].rows.length, coffee.sections[0].totals, coffee.sections[0].emptyText], [0, undefined, "No coffee farms in the register as at 31 Aug 2026."]);
 
-    const feb = (await call("crops", "GET", "/crops/reports?crop=sugarcane&period=month&year=2024&index=2")).reports[0];
-    assert.equal(feb.sections[0].title, "Cane status as at 29 Feb 2024");
-    assert.deepEqual({ ...caneRow(feb), remarks: undefined, sNo: undefined }, {
-      sNo: undefined, farmNumber: "397B", longFarmNumber: "27130300", hectares: 43.6, acreage: 109, age: 13, cycle: "RII", tch: 150, expectedYield: 6540, achieved: null, yearToDate: null, remarks: undefined,
-    });
-    // Status as at the end of February is the one it was registered with,
-    // not the "Harvested" set by the June cut.
-    assert.equal(caneRow(feb).remarks, "Land preparation");
-    const juneCane = (await call("crops", "GET", "/crops/reports?crop=sugarcane&period=month&year=2024&index=6")).reports[0];
-    assert.equal(caneRow(juneCane).remarks, "Harvested - Recorded with harvest");
-    assert.equal(caneRow(juneCane).cycle, "RIII");
-    assert.equal(caneRow(juneCane).age, 0);
-    assert.equal(caneRow(juneCane).achieved, 3434.64);
-    assert.equal(pick(juneCane, "Average TCH achieved"), 78.78);
-    const h1 = (await call("crops", "GET", "/crops/reports?crop=sugarcane&period=half&year=2024&index=1")).reports[0];
-    assert.equal(h1.sections[2].rows[5].toDate, 3434.64);
+    // The summary: what was recorded in the period, and the register by crop.
+    const summary = await report("summary", "2026-08");
+    assert.deepEqual(summary.summary.map((s) => [s.label, s.value]), [["Harvest records", 1], ["Harvest value", 48000], ["Farm status updates", 1], ["Total farms", 3], ["Total acreage", 34.93]]);
+    assert.deepEqual(summary.sections.map((s) => s.title), ["Farms by crop"]);
+    assert.deepEqual(summary.sections[0].rows.map((r) => [r.crop, r.farms, r.acreage]), [["Sugarcane", 1, 24.93], ["Tea", 1, 8], ["Coffee", 0, 0], ["Fodder", 1, 2]]);
+    // The full report: the summary and every crop, without each crop's own figures.
+    const full = await report("", "2026-08");
+    assert.equal(full.heading, `Crops report - ${full.label}`);
+    assert.deepEqual(full.summary.map((s) => s.label), ["Harvest records", "Harvest value", "Farm status updates", "Total farms", "Total acreage"]);
+    assert.deepEqual(full.sections.map((s) => s.title), ["Farms by crop", "Sugarcane farms as at 31 Aug 2026", "Tea farms as at 31 Aug 2026", "Coffee farms as at 31 Aug 2026", "Fodder farms as at 31 Aug 2026"]);
+    // The dashboard shows the same figures as the full report.
+    const card = (await call("crops", "GET", "/dashboard")).cards.find((c) => c.department === "crops");
+    assert.deepEqual(card.summary.map((s) => s.label), ["Harvest records", "Harvest value", "Farm status updates", "Total farms", "Total acreage"]);
+    // A register as at an earlier day leaves out farms that came later.
+    assert.deepEqual((await report("summary", "2024-12")).summary.find((s) => s.label === "Total farms").value, 1);
 
-    // Every crop at once, downloads, and access.
-    const all = await call("crops", "GET", "/crops/reports?crop=all&period=year&year=2024");
-    assert.deepEqual(all.reports.map((r) => r.crop), ["tea", "sugarcane"]);
-    assert.ok(all.years.includes(2024));
-    const csv = await call("crops", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=5&format=csv", null, { raw: true });
-    assert.match(csv.headers.get("content-disposition"), /keiyian-tea-report-2024-05\.csv/);
-    assert.match(await csv.text(), /Prepared by|Daily plucking - May 2024/);
-    const pdf = await call("crops", "GET", "/crops/reports?crop=all&period=year&year=2024&format=pdf", null, { raw: true });
+    // Downloads, access, and the old crop reports are gone.
+    const csv = await call("crops", "GET", "/reports/department?department=crops&part=coffee&period=month&date=2026-08-01&format=csv", null, { raw: true });
+    assert.match(csv.headers.get("content-disposition"), /keiyian-crops-coffee-report-2026-08\.csv/);
+    const csvText = await csv.text();
+    assert.match(csvText, /Crops: Coffee report - August 2026/);
+    assert.match(csvText, /No coffee farms in the register as at 31 Aug 2026\./);
+    const pdf = await call("crops", "GET", "/reports/department?department=crops&part=sugarcane&period=month&date=2026-08-01&format=pdf", null, { raw: true });
     assert.equal(pdf.headers.get("content-type"), "application/pdf");
     assert.ok((await pdf.arrayBuffer()).byteLength > 2000);
-    await call("crops", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=13", null, { expect: 400 });
-    await call("sales", "GET", "/crops/reports?crop=tea&period=month&year=2024&index=5", null, { expect: 403 });
+    await call("sales", "GET", "/reports/department?department=crops&part=tea&period=month", null, { expect: 403 });
+    await call("crops", "GET", "/reports/department?department=crops&part=maize&period=month", null, { expect: 400 });
+    await call("crops", "GET", "/crops/reports?crop=tea&period=month", null, { expect: 404 });
   });
 
   test("Accounts: farmer milk payment run", async () => {
@@ -970,7 +1066,7 @@ if (!url) {
 
     // Sales and MVA print their sheets one at a time too; the sidebar reads the list from /meta.
     const meta = await call("sales", "GET", "/meta");
-    assert.deepEqual(Object.fromEntries(Object.entries(meta.reportParts).map(([d, parts]) => [d, parts.map((p) => p.key)])), { mva: ["production", "output"], sales: ["vehicles", "store", "local"], stores: ["out", "received", "stock"], livestock: ["herd", "milk", "calvings", "vaccinations", "health"] });
+    assert.deepEqual(Object.fromEntries(Object.entries(meta.reportParts).map(([d, parts]) => [d, parts.map((p) => p.key)])), { mva: ["production", "output"], sales: ["vehicles", "store", "local"], stores: ["out", "received", "stock"], livestock: ["herd", "milk", "calvings", "vaccinations", "health"], crops: ["summary", "sugarcane", "tea", "coffee", "fodder"] });
     const salesPart = async (part) => (await call("sales", "GET", `/reports/department?department=sales&part=${part}&period=day&date=${today}`)).reports[0];
     assert.deepEqual((await salesPart("vehicles")).sections.map((s) => s.title), ["Vehicles", "Vehicle trips and money"]);
     assert.deepEqual((await salesPart("store")).sections.map((s) => s.title), ["Store"]);

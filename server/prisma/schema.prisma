@@ -59,6 +59,7 @@ model User {
   storeRequests               StoreRequest[]   @relation("StoreRequestedBy")
   storeRequestsHandled        StoreRequest[]   @relation("StoreRequestHandledBy")
   transactions                Transaction[]
+  seenMarks                   SeenMark[]
 
   @@index([role, department, isActive])
 }
@@ -302,8 +303,8 @@ model Animal {
   name           String?
   breed          String?
   sex            String
-  /// dairy_a | dairy_c: where the animal is kept (and, for a cow, milked).
-  dairy          String         @default("dairy_a")
+  /// dairy_a | dairy_c: where a female is kept and milked. Males are not kept in a dairy (empty).
+  dairy          String?
   dateOfBirth    DateTime?
   source         String         @default("born_on_farm")
   /// When a bought or donated animal joined the herd.
@@ -861,6 +862,8 @@ model StoreRequestItem {
   requestId     String
   itemId        String
   quantity      Decimal      @db.Decimal(12, 2)
+  /// What this item is for (each item asked for is justified on its own).
+  purpose       String?
   /// What Stores dispatched against it.
   quantityGiven Decimal      @default(0) @db.Decimal(12, 2)
   request       StoreRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
@@ -874,8 +877,10 @@ model StoreRequestItem {
 model CropFarm {
   id             String          @id @default(uuid())
   farmNumber     String          @unique
-  // Miller/factory registration number, e.g. 27431400 on the cane register.
-  longFarmNumber String?
+  /// Field ID: the farm's unique identification number (e.g. 27431400 on the
+  /// cane register), kept in capitals. Farms are searched by it. Farms
+  /// registered before it was required may not have one yet.
+  fieldId        String?         @unique
   // Cane variety, tea clone, or the fodder grown (Boma rhodes, sorghum...).
   variety        String?
   cropType       String
@@ -1022,7 +1027,8 @@ model Requisition {
   requisitionNumber String            @unique
   department        Department
   title             String
-  purpose           String
+  /// The purpose given for the whole requisition before each item carried its own.
+  purpose           String?
   priority          String            @default("normal")
   totalAmount       Decimal           @db.Decimal(18, 2)
   status            String            @default("pending")
@@ -1050,7 +1056,21 @@ model RequisitionItem {
   unit          String?
   unitCost      Decimal     @default(0) @db.Decimal(12, 2)
   total         Decimal     @db.Decimal(18, 2)
+  /// Why this item is needed (each item is justified on its own).
+  purpose       String?
   requisition   Requisition @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
+}
+
+/// When a user last opened a list, so the sidebar can count what changed
+/// since: e.g. key "requisitionAnswers" - requisitions of their department
+/// approved, returned or rejected since they last looked.
+model SeenMark {
+  userId String
+  key    String
+  seenAt DateTime
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, key])
 }
 
 model Supplier {

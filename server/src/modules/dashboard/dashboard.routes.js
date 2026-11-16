@@ -4,7 +4,7 @@ import { canReadReport, productRequestRules, requisitionRules, storeRequestRules
 import { DAIRY_SESSIONS, OPTIONS, optionValues, REPORT_PARTS } from "../../config/catalog.js";
 import { ok } from "../../lib/http.js";
 import { isoDay, resolvePeriod } from "../../lib/periods.js";
-import { BUILDERS } from "../reports/builders.js";
+import { BUILDERS, fullSummary } from "../reports/builders.js";
 
 const router = express.Router();
 
@@ -23,7 +23,7 @@ router.get("/dashboard", async (req, res) => {
   const cards = [];
   for (const department of departments) {
     const report = await BUILDERS[department](prisma, today);
-    cards.push({ department, title: report.title, summary: report.summary });
+    cards.push({ department, title: report.title, summary: fullSummary(report) });
   }
 
   const handles = productRequestRules.handles(req.user);

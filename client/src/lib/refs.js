@@ -25,7 +25,8 @@ export const refs = {
   storeItems: { path: "/stores/items", params: { isActive: "true" }, label: (i) => i.name },
   // What a department can ask Stores for (names only; quantities stay with Stores).
   requestableStoreItems: { path: "/store-requests/items", label: (i) => i.name },
-  farms: { path: "/crops/farms", label: (f) => `${f.farmNumber} - ${f.location}` },
+  // Farms are known by their Field ID (farms registered before it was required may have none yet).
+  farms: { path: "/crops/farms", label: (f) => [f.farmNumber, f.fieldId && `Field ID ${f.fieldId}`, f.location].filter(Boolean).join(" · ") },
 
   moneyAccounts: { path: "/accounts/accounts/balances", label: (a) => `${a.name} (${money(a.balance)})`, filter: (a) => a.isActive },
   suppliers: { path: "/accounts/suppliers", params: { status: "active" }, label: (s) => s.name },

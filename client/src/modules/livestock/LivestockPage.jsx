@@ -1,6 +1,7 @@
 import { Baby, Droplets } from "lucide-react";
 import { currentSession, sessionField } from "./dairies";
-import { milkTransfers as transfers } from "./milkTransfers";
+import { MilkToSend } from "./MilkOnHand";
+import { milkTransfers as transfers, sendMilkFields } from "./milkTransfers";
 import { ActionButton } from "../../components/resource/ActionButton";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
@@ -15,11 +16,19 @@ import { useFetch } from "../../lib/useFetch";
 const tag = (a) => (a ? `${a.tagNumber}${a.name ? ` - ${a.name}` : ""}` : "");
 const kg = (value) => `${number(value)} kg`;
 
+const isMale = (v) => v.sex === "male";
+
 const animalFields = [
   { name: "tagNumber", label: "Tag number", required: true },
   { name: "name", label: "Name" },
-  { name: "sex", label: "Sex", type: "select", options: "animalSex", required: true },
-  { name: "dairy", label: "Dairy", type: "select", options: "dairies", required: true },
+  // A male is not kept in a dairy: choosing Male clears the dairy and closes it.
+  { name: "sex", label: "Sex", type: "select", options: "animalSex", required: true, onSelect: (_, v) => (isMale(v) ? { dairy: "" } : {}) },
+  {
+    name: "dairy", label: "Dairy", type: "select", options: "dairies",
+    required: (v) => !isMale(v), readOnly: isMale,
+    placeholder: "Not for males",
+    help: (v) => (isMale(v) ? "Males are not kept in a dairy" : undefined),
+  },
   { name: "breed", label: "Breed" },
   { name: "dateOfBirth", label: "Date of birth", type: "date" },
   { name: "source", label: "Source", type: "select", options: "animalSource" },
@@ -48,7 +57,7 @@ const animals = {
   columns: [
     { key: "tagNumber", label: "Tag" },
     { key: "name", label: "Name" },
-    { key: "dairy", label: "Dairy", type: "option:dairies" },
+    { key: "dairy", label: "Dairy", render: (r, ctx) => (r.dairy ? ctx.label("dairies", r.dairy) : <span className="text-slate-400">No dairy</span>) },
     { key: "sex", label: "Sex", type: "option:animalSex" },
     { key: "breed", label: "Breed" },
     { key: "dateOfBirth", label: "Born", type: "date" },
@@ -85,7 +94,7 @@ const lactations = {
   resource: "lactations",
   endpoint: "/livestock/lactations",
   title: "Calvings and lactations",
-  description: "Recording a calving registers the calf (or twins) with its mother and father, in the mother's dairy, and starts the mother's next lactation.",
+  description: "Recording a calving registers the calf (or twins) with its mother and father, and starts the mother's next lactation. A heifer calf joins her mother's dairy; a bull calf is not kept in a dairy.",
   singular: "Lactation",
   filters: [{ name: "status", label: "Status", options: "lactationStatus" }, { type: "dateRange" }],
   columns: [
@@ -277,7 +286,7 @@ const LivestockPage = () => (
       vaccinations: () => <ResourcePage config={vaccinations} />,
       health: () => <ResourcePage config={health} />,
       milk: () => <ResourcePage config={milkRecords} header={() => <MilkTotals />} />,
-      transfers: () => <ResourcePage config={transfers} />,
+      transfers: () => <ResourcePage config={transfers} header={(ctx) => <MilkToSend ctx={ctx} sendFields={sendMilkFields} />} />,
     }}
   />
 );

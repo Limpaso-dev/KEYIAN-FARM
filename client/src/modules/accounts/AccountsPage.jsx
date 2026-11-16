@@ -3,13 +3,15 @@ import { Ban } from "lucide-react";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
 import { Input } from "../../components/ui/ui";
+import { Search } from "lucide-react";
 import { ReportTable } from "../../components/reports/ReportDocument";
 import { SystemNote } from "../../components/ui/KeyFigures";
 import { useAuth } from "../../context/useAuth";
+import { digitsOnly, farmerNumberFilter, numberStartsWith } from "../../lib/farmers";
 import { daysAgo, fullName, money, number, today } from "../../lib/format";
 import { refs } from "../../lib/refs";
 import { put } from "../../lib/api";
-import { useFetch } from "../../lib/useFetch";
+import { clearFetchCache, useFetch } from "../../lib/useFetch";
 import { payroll } from "../hr/payroll";
 import { purchaseOrdersConfig } from "./purchaseOrders";
 
@@ -178,27 +180,45 @@ const milkPayments = {
 const MilkRunLines = ({ row }) => {
   const { can, label } = useAuth();
   const [lines, setLines] = useState(row.lines);
+  const [find, setFind] = useState("");
   const editable = row.status === "draft" && can("milkPayments", "write");
+  // A farmer is found by number: 131 shows farmer 131, 13 the farmers 130 to 139.
+  const shown = find ? lines.filter((l) => numberStartsWith(l.supplier.supplierNumber, find)) : lines;
   const save = async (line, deductions) => {
     const result = await put(`/accounts/milk-payments/${row.id}/lines/${line.id}`, { deductions: deductions || 0 });
     setLines(result.data.lines);
+    // The run's total to pay, in the list above, follows.
+    clearFetchCache();
   };
   return (
-    <table className="w-full max-w-4xl text-sm">
-      <thead className="text-left text-xs uppercase text-slate-500"><tr><th className="py-1">Farmer</th><th>Paid by</th><th className="text-right">Litres</th><th className="text-right">Earned</th><th className="text-right">Deductions</th><th className="text-right">Net</th></tr></thead>
-      <tbody className="divide-y divide-slate-200">
-        {lines.map((l) => (
-          <tr key={l.id}>
-            <td className="py-1.5">{l.supplier.supplierNumber} - {fullName(l.supplier)}</td>
-            <td>{label("paymentMethods", l.supplier.paymentMethod)} {[l.supplier.bankName, l.supplier.accountNumber].filter(Boolean).join(" ")}</td>
-            <td className="text-right">{number(l.litres)}</td>
-            <td className="text-right">{money(l.amount)}</td>
-            <td className="text-right">{editable ? <Input type="number" min={0} className="ml-auto w-28 py-1 text-right" defaultValue={l.deductions || ""} onBlur={(e) => Number(e.target.value || 0) !== l.deductions && save(l, e.target.value)} aria-label={`Deductions for ${fullName(l.supplier)}`} /> : money(l.deductions)}</td>
-            <td className="text-right font-medium">{money(l.netAmount)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="max-w-4xl space-y-3">
+      {lines.length > 5 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="relative w-full sm:w-52">
+            <span className="sr-only">Find a farmer by number</span>
+            <Search size={15} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden />
+            <Input type="search" inputMode="numeric" placeholder="Farmer number" className="pl-8 tabular-nums" value={find} onChange={(e) => setFind(digitsOnly(e.target.value))} />
+          </label>
+          <p className="text-xs text-slate-500" aria-live="polite">{find ? `${shown.length} of ${lines.length} farmers shown` : `${lines.length} farmers`}</p>
+        </div>
+      )}
+      <table className="w-full text-sm">
+        <thead className="text-left text-xs uppercase text-slate-500"><tr><th className="py-1">Farmer</th><th>Paid by</th><th className="text-right">Litres</th><th className="text-right">Earned</th><th className="text-right">Deductions</th><th className="text-right">Net</th></tr></thead>
+        <tbody className="divide-y divide-slate-200">
+          {shown.map((l) => (
+            <tr key={l.id}>
+              <td className="py-1.5">{l.supplier.supplierNumber} - {fullName(l.supplier)}</td>
+              <td>{label("paymentMethods", l.supplier.paymentMethod)} {[l.supplier.bankName, l.supplier.accountNumber].filter(Boolean).join(" ")}</td>
+              <td className="text-right">{number(l.litres)}</td>
+              <td className="text-right">{money(l.amount)}</td>
+              <td className="text-right">{editable ? <div className="ml-auto w-28"><Input type="number" min={0} className="py-1 text-right tabular-nums" defaultValue={l.deductions || ""} onBlur={(e) => Number(e.target.value || 0) !== l.deductions && save(l, e.target.value)} aria-label={`Deductions for ${fullName(l.supplier)}`} /></div> : money(l.deductions)}</td>
+              <td className="text-right font-medium">{money(l.netAmount)}</td>
+            </tr>
+          ))}
+          {!shown.length && <tr><td colSpan={6} className="py-3 text-center text-slate-500">No farmer number {find} in this run</td></tr>}
+        </tbody>
+      </table>
+    </div>
   );
 };
 
@@ -236,13 +256,13 @@ const salaries = { ...payroll, title: "Salaries to pay", description: "Payroll g
 const farmerDetails = {
   resource: "farmerDetails",
   endpoint: "/accounts/farmers",
-  title: "Farmers",
-  description: "MVA registers each farmer's name and number. Accounts keeps their ID and payment details here; MVA cannot see them.",
+  title: "Farmer details",
+  description: "MVA registers each farmer's name and number. Accounts keeps their ID and payment details here; MVA cannot see them. Find a farmer by their farmer number.",
   singular: "Farmer",
   canCreate: () => false,
   createFields: null,
   deletable: false,
-  filters: [{ type: "search", placeholder: "Name, ID, account number" }, { name: "status", label: "Status", options: "supplierStatus" }],
+  filters: [farmerNumberFilter, { name: "status", label: "Status", options: "supplierStatus" }],
   columns: [
     { key: "supplierNumber", label: "No." },
     { key: "name", label: "Farmer", render: fullName },

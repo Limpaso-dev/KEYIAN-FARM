@@ -3,6 +3,7 @@ import prisma from "../../config/prisma.js";
 import { allow } from "../../middleware/auth.js";
 import { audit } from "../../lib/audit.js";
 import { crud, dateRange, inTransaction } from "../../lib/crud.js";
+import { farmerNumberSearch } from "../../lib/farmers.js";
 import { badRequest, conflict, notFound, ok } from "../../lib/http.js";
 import { nextNumber } from "../../lib/numbers.js";
 import { parseBody, parseItems, round2 } from "../../lib/validate.js";
@@ -112,9 +113,10 @@ router.use("/farmers", crud({
   updateFields: { nationalId: "string", phone: "string", location: "string", paymentMethod: "option:paymentMethods!", bankName: "string", accountNumber: "string" },
   create: false,
   remove: false,
-  search: ["firstName", "lastName", "nationalId", "accountNumber"],
   filters: ["status", "paymentMethod"],
   orderBy: { supplierNumber: "asc" },
+  // Farmers are searched by their farmer number.
+  listWhere: (where, query) => ({ ...where, ...farmerNumberSearch(query) }),
 }));
 
 // ---------------------------------------------------------------------

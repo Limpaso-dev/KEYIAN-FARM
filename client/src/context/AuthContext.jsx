@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import authContext from "./AuthContextStore";
 import api, { get } from "../lib/api";
 import { forgetToken, restoreToken, saveToken } from "../lib/session";
-import { clearFetchCache } from "../lib/useFetch";
+import { forgetFetchCache } from "../lib/useFetch";
 
 // The sign-in lasts while the site is open: closing the last tab or the
 // browser ends it (see lib/session.js).
@@ -13,7 +13,7 @@ export const AuthProvider = ({ children }) => {
 
   // Drops the signed-in state; the token is forgotten by whoever ends the session.
   const clear = useCallback(() => {
-    clearFetchCache();
+    forgetFetchCache();
     setSession(null);
   }, []);
 

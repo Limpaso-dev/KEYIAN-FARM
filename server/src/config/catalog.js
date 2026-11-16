@@ -167,7 +167,6 @@ export const OPTIONS = {
     ["weeding", "Weeding"],
     ["awaiting_fertiliser", "Weeding done, awaiting fertiliser"],
     ["fertiliser_applied", "Fertiliser applied"],
-    ["growing", "Growing"],
     ["awaiting_harvest", "Awaiting harvest"],
     ["harvesting", "Harvesting"],
     ["harvested", "Harvested"],
@@ -211,6 +210,8 @@ export const REPORT_PARTS = {
     { key: "vaccinations", title: "Vaccination report" },
     { key: "health", title: "Health report" },
   ],
+  // The summary (farms and acres by crop), then one report per crop.
+  crops: [{ key: "summary", title: "Summary" }, ...OPTIONS.cropTypes.map(({ value, label }) => ({ key: value, title: `${label} report` }))],
 };
 
 /** When each dairy milks: Dairy A in the morning and evening, Dairy C also at midday. */

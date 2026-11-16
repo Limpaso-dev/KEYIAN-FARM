@@ -4,6 +4,7 @@ import { optionLabel, optionValues, RAW_MILK } from "../../config/catalog.js";
 import { allow } from "../../middleware/auth.js";
 import { audit } from "../../lib/audit.js";
 import { crud, dateRange, inTransaction, listQuery } from "../../lib/crud.js";
+import { farmerNumberSearch } from "../../lib/farmers.js";
 import { badRequest, conflict, notFound, ok } from "../../lib/http.js";
 import { nextNumber } from "../../lib/numbers.js";
 import { isoDay } from "../../lib/periods.js";
@@ -39,9 +40,10 @@ router.use("/milk-suppliers", crud({
     status: "option:supplierStatus",
   },
   omit: { nationalId: true, phone: true, location: true, paymentMethod: true, bankName: true, accountNumber: true },
-  search: ["firstName", "lastName"],
   filters: ["status"],
   orderBy: { supplierNumber: "asc" },
+  // Farmers are searched by their farmer number.
+  listWhere: (where, query) => ({ ...where, ...farmerNumberSearch(query) }),
   prepare: async (data, { tx, existing }) => {
     if (!existing && !data.supplierNumber) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('milk-supplier-number'))`;
@@ -159,6 +161,11 @@ router.use("/milk-deliveries", crud({
   include: { supplier: supplierBrief },
   dateField: "date",
   filters: ["supplierId", "session"],
+  // ?search= finds one farmer's deliveries, by their farmer number.
+  listWhere: (where, query) => {
+    const farmer = farmerNumberSearch(query);
+    return farmer ? { ...where, supplier: farmer } : where;
+  },
   orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   create: false,
   update: false,

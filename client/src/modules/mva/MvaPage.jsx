@@ -5,12 +5,25 @@ import { ResourcePage } from "../../components/resource/ResourcePage";
 import { StockPanel } from "../../components/resource/StockPanel";
 import { KeyFigures } from "../../components/ui/KeyFigures";
 import { get } from "../../lib/api";
+import { farmerNumberFilter, numberStartsWith } from "../../lib/farmers";
 import { date, daysAgo, fullName, money, number, nairobiHour, today } from "../../lib/format";
 import { useFetch } from "../../lib/useFetch";
 import { milkTransfers } from "../livestock/milkTransfers";
 import { productTransfers } from "./productTransfers";
 
 const farmer = (s) => (s ? `${s.supplierNumber} - ${fullName(s)}` : "");
+
+// Finding one farmer on the collection sheet, by the farmer number that identifies them
+// across the cooperative: 130 finds 130 (first), and 13 narrows the sheet to 130-139.
+const farmerSearch = {
+  label: "Find a farmer by number",
+  placeholder: "Farmer number, e.g. 130",
+  noun: "farmers",
+  numeric: true,
+  match: (row, term) => numberStartsWith(row.number, term),
+  exact: (row, term) => String(row.number) === term,
+  empty: (term) => `No active farmer number ${term}`,
+};
 
 const suppliers = {
   resource: "milkSuppliers",
@@ -19,7 +32,7 @@ const suppliers = {
   description: "Each farmer gets a number (130, 131, 132 ...). Leave the number blank to use the next one. Their ID and payment details are kept by Accounts.",
   singular: "Farmer",
   createLabel: "Register farmer",
-  filters: [{ type: "search", placeholder: "Name" }, { name: "status", label: "Status", options: "supplierStatus" }],
+  filters: [farmerNumberFilter, { name: "status", label: "Status", options: "supplierStatus" }],
   columns: [
     { key: "supplierNumber", label: "No." },
     { key: "name", label: "Farmer", render: fullName },
@@ -80,7 +93,7 @@ const deliveries = {
   title: "Milk received from farmers",
   singular: "Delivery",
   defaultQuery: { from: today(), to: today() },
-  filters: [{ name: "session", label: "Session", options: "milkSessions" }, { type: "dateRange" }],
+  filters: [farmerNumberFilter, { name: "session", label: "Session", options: "milkSessions" }, { type: "dateRange" }],
   editFields: false,
   deletableWhen: (r) => !r.paymentRunId,
   columns: [
@@ -105,13 +118,15 @@ const deliveries = {
         { name: "session", label: "Session", type: "select", options: "milkSessions", required: true },
         {
           name: "deliveries", label: "Litres per farmer (leave blank if the farmer did not deliver)", type: "items", fixedRows: true,
+          help: "Type a farmer number and press Enter to go to that farmer; Enter after the litres brings you back to the search.",
+          search: farmerSearch,
           columns: [{ name: "farmer", label: "Farmer", type: "display" }, { name: "litres", label: "Litres", type: "number", width: 140 }],
           total: (r) => r.litres, formatTotal: (t) => `${number(t)} L`,
         },
       ]}
       initial={async () => {
         const list = await get("/mva/milk-suppliers", { status: "active" });
-        return { date: today(), session: nairobiHour() < 12 ? "morning" : "evening", deliveries: list.map((s) => ({ supplierId: s.id, farmer: farmer(s), litres: "" })) };
+        return { date: today(), session: nairobiHour() < 12 ? "morning" : "evening", deliveries: list.map((s) => ({ supplierId: s.id, number: s.supplierNumber, farmer: farmer(s), litres: "" })) };
       }}
       toPayload={(v) => ({ date: v.date, session: v.session, deliveries: v.deliveries.filter((d) => d.litres !== "" && Number(d.litres) > 0).map((d) => ({ supplierId: d.supplierId, litres: d.litres })) })} />
   ),

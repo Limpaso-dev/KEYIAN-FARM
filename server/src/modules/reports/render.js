@@ -10,7 +10,7 @@ import PDFDocument from "pdfkit";
 // then a Summary table, one ruled table per section, the sign-off lines and,
 // on every page, "This is a system generated report." with the time.
 //
-// A report: { heading, summary: [{ label, value, type? }], sections: [{ title, columns, rows, totals?, totalLabel? }] }
+// A report: { heading, summary: [{ label, value, type? }], sections: [{ title, columns, rows, totals?, totalLabel?, emptyText? }] }
 
 export const ORGANISATION = "Keiyian Farmers Cooperative Society Ltd";
 export const MOTTO = "Nuru ya Jamii";
@@ -99,7 +99,7 @@ export const toCsv = (reports, meta) => {
       lines.push("");
       row([section.title]);
       row(section.columns.map((c) => c.label));
-      if (!section.rows.length) row(["No records"]);
+      if (!section.rows.length) row([section.emptyText || "No records"]);
       for (const data of section.rows) row(section.columns.map((c) => csvRaw(data[c.key], c.type)));
       if (section.totals) row(section.columns.map((c, i) => (i === 0 ? section.totalLabel || "Total" : section.totals[c.key] ?? "")));
     }
@@ -202,7 +202,7 @@ export const toPdf = (reports, meta) => new Promise((resolve, reject) => {
     drawRow(headerCells, { bold: true, fill: HEAD_FILL, isHeader: true });
     if (!section.rows.length) {
       const y = doc.y;
-      doc.fillColor(MUTED).font("Helvetica-Oblique").fontSize(8.5).text(emptyText, left + 4, y + 3.5, { width: tableWidth - 8 });
+      doc.fillColor(MUTED).font("Helvetica-Oblique").fontSize(8.5).text(section.emptyText || emptyText, left + 4, y + 3.5, { width: tableWidth - 8 });
       doc.lineWidth(0.5).strokeColor(GRID).rect(left, y, tableWidth, 17).stroke();
       doc.y = y + 17;
     }

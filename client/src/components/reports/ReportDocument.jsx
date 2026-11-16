@@ -36,7 +36,7 @@ const summaryText = (item) => {
   return number(item.value);
 };
 
-/** One table of a report: a title, column headings, rows and an optional totals row. */
+/** One table of a report: a title, column headings, rows, an optional totals row, and what to say when it is empty. */
 export const ReportTable = ({ section, emptyText = "No records for this period.", narrow = false }) => {
   // Wide tables (the cane status sheet has 12 columns) get tighter cells.
   const pad = section.columns.length > 8 ? "px-2 py-1.5" : "px-3 py-1.5";
@@ -54,7 +54,7 @@ export const ReportTable = ({ section, emptyText = "No records for this period."
           </thead>
           <tbody>
             {section.rows.length === 0 ? (
-              <tr><td colSpan={section.columns.length} className={cx("border border-slate-300 italic text-slate-400", pad)}>{emptyText}</td></tr>
+              <tr><td colSpan={section.columns.length} className={cx("border border-slate-300 italic text-slate-400", pad)}>{section.emptyText || emptyText}</td></tr>
             ) : section.rows.map((row, i) => (
               <tr key={i} className="hover:bg-slate-50">
                 {section.columns.map((c) => (

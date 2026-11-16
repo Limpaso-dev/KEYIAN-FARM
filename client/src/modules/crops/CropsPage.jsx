@@ -6,7 +6,6 @@ import { refs } from "../../lib/refs";
 import { useFetch } from "../../lib/useFetch";
 import { Spinner } from "../../components/ui/ui";
 import { useAuth } from "../../context/useAuth";
-import CropReports from "./CropReports";
 
 const isCane = (crop) => crop === "sugarcane";
 const isPlucked = (crop) => crop === "tea" || crop === "coffee";
@@ -35,7 +34,7 @@ const FarmHistory = ({ row }) => {
   return (
     <div className="space-y-5 text-sm">
       <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-        <Detail label="Long farm number">{row.longFarmNumber}</Detail>
+        <Detail label="Field ID">{row.fieldId}</Detail>
         <Detail label={row.cropType === "fodder" ? "Fodder" : "Variety / clone"}>{row.variety}</Detail>
         <Detail label="Size">{`${number(row.acreage)} acres · ${number(hectares(row))} ha`}</Detail>
         <Detail label="Planted">{date(row.plantingDate)}</Detail>
@@ -69,8 +68,8 @@ const crop = (test) => (values) => test(values.cropType);
 const registerFields = [
   { type: "section", label: "Farm", help: "Registered once. Status changes and harvests keep it up to date." },
   { name: "farmNumber", label: "Farm number (F.No.)", required: true, placeholder: "e.g. 397B" },
+  { name: "fieldId", label: "Field ID", required: true, placeholder: "e.g. 27431400", help: "The farm's unique identification number. Farms are searched by it." },
   { name: "cropType", label: "Crop", type: "select", options: "cropTypes", required: true },
-  { name: "longFarmNumber", label: "Long farm number", placeholder: "e.g. 27130300", help: "The miller's or factory's registration number", showIf: crop((c) => c !== "fodder") },
   { name: "variety", label: "Variety / clone", placeholder: "Optional", showIf: crop((c) => c !== "fodder") },
   { name: "variety", label: "Fodder grown", placeholder: "e.g. Boma rhodes, sorghum", required: true, showIf: crop((c) => c === "fodder") },
   { name: "location", label: "Location", required: true },
@@ -103,12 +102,13 @@ const farms = {
   resource: "cropFarms",
   endpoint: "/crops/farms",
   title: "Farms",
-  description: "The farm register: sugarcane, tea, coffee and fodder. Each sugarcane harvest moves the farm to its next ratoon.",
+  description: "The farm register: sugarcane, tea, coffee and fodder, each farm known by its Field ID. Each sugarcane harvest moves the farm to its next ratoon. The crop reports are under Reports.",
   singular: "Farm",
   createLabel: "Register farm",
-  filters: [{ type: "search", placeholder: "Farm no., long no., location" }, { name: "cropType", label: "Crop", options: "cropTypes" }, { name: "status", label: "Status", options: "farmStatus" }],
+  filters: [{ type: "search", label: "Field ID", placeholder: "Field ID" }, { name: "cropType", label: "Crop", options: "cropTypes" }, { name: "status", label: "Status", options: "farmStatus" }],
   columns: [
-    { key: "farmNumber", label: "Farm no.", render: (r) => <span className="font-medium text-slate-900">{r.farmNumber}{r.longFarmNumber ? <span className="block text-xs font-normal text-slate-500">{r.longFarmNumber}</span> : null}</span> },
+    { key: "farmNumber", label: "Farm no.", render: (r) => <span className="font-medium text-slate-900">{r.farmNumber}</span> },
+    { key: "fieldId", label: "Field ID", render: (r) => r.fieldId || <span className="text-xs text-amber-700">Not recorded</span> },
     { key: "cropType", label: "Crop", render: (r, c) => <span>{c.label("cropTypes", r.cropType)}{r.variety ? <span className="block text-xs text-slate-500">{r.variety}</span> : null}</span> },
     { key: "acreage", label: "Size", align: "right", render: (r) => <span className="tabular-nums">{number(r.acreage)} ac<span className="block text-xs text-slate-500">{number(hectares(r))} ha</span></span> },
     { key: "location", label: "Location" },
@@ -181,7 +181,7 @@ const harvests = {
   filters: [{ type: "dateRange" }],
   columns: [
     { key: "harvestDate", label: "Date", type: "date" },
-    { key: "farm", label: "Farm", render: (r) => r.farm?.farmNumber },
+    { key: "farm", label: "Farm", render: (r) => <span>{r.farm?.farmNumber}{r.farm?.fieldId ? <span className="block text-xs text-slate-500">Field ID {r.farm.fieldId}</span> : null}</span> },
     { key: "crop", label: "Crop", render: (r, c) => c.label("cropTypes", r.farm?.cropType) },
     { key: "quantity", label: "Quantity", render: (r) => `${number(r.quantity)} ${r.unit}`, align: "right" },
     { key: "target", label: "Target", align: "right", render: (r) => (r.target != null ? number(r.target) : "") },
@@ -217,7 +217,6 @@ const CropsPage = () => (
     sections={{
       farms: () => <ResourcePage config={farms} />,
       harvests: () => <ResourcePage config={harvests} />,
-      reports: () => <CropReports />,
     }}
   />
 );

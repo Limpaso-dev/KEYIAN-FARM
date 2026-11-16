@@ -4,6 +4,7 @@ import { ChevronDown, ChevronsLeft, ChevronsRight, X } from "lucide-react";
 import { useAuth } from "../../context/useAuth";
 import { currentSection, findNavItem, groupOf, linksOf, NAV_GROUPS, navigation, sectionPath, sectionsFor } from "../../navigation";
 import { cx } from "../../lib/cx";
+import { countWord, useNavCounts } from "../../lib/useNavCounts";
 
 // The sidebar folds to an icon rail on large screens only (Tailwind's lg).
 const LARGE = "(min-width: 1024px)";
@@ -32,33 +33,98 @@ const Brand = ({ collapsed }) => (
   </div>
 );
 
+/** How many things wait or are new somewhere: a small pill, read out with the label ("2 new"). */
+const Count = ({ value, word = "waiting", className }) => (value > 0 ? (
+  <span className={cx("inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-bold leading-none text-white tabular-nums", className)}>
+    {value > 99 ? "99+" : value}<span className="sr-only"> {word}</span>
+  </span>
+) : null);
+
+/** What waits across these sections. */
+const countOf = (sections, counts) => sections.reduce((total, section) => total + (section.count ? counts[section.count] || 0 : 0), 0);
+/** What that total counts. */
+const wordOf = (sections, counts) => countWord(sections.filter((section) => counts[section.count] > 0).map((section) => section.count));
+
+/**
+ * The sections in order, with neighbours that share a `group` gathered under
+ * it, as { key, group, items }. A group with one section left (the others
+ * hidden from this user) stays a plain section.
+ */
+const arrange = (sections) => {
+  const entries = [];
+  for (const section of sections) {
+    const last = entries[entries.length - 1];
+    if (section.group && last?.items && last.group === section.group) last.items.push(section);
+    else if (section.group) entries.push({ key: `group-${section.group}`, group: section.group, items: [section] });
+    else entries.push(section);
+  }
+  return entries.flatMap((entry) => (entry.items && entry.items.length < 2 ? entry.items : [entry]));
+};
+
+const slug = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
 /** A heading that groups the sections under it (the Reports dropdown, by department). */
 const SectionHeading = ({ label }) => (
   <li className="truncate px-2.5 pb-0.5 pt-2.5 text-[10.5px] font-semibold uppercase tracking-wider text-sidebar-muted">{label}</li>
 );
 
 /** One section of a department: in its dropdown, or in the rail's pop-out (menu). */
-const SectionLink = ({ to, label, current, menu = false, onNavigate }) => (
+const SectionLink = ({ to, label, current, count, word, menu = false, onNavigate }) => (
   <li>
     <Link
       to={to}
       onClick={onNavigate}
       aria-current={current ? "page" : undefined}
-      className={cx("relative flex h-8 items-center rounded-md px-2.5 text-[13px] transition-colors", current ? "bg-white/[0.08] font-medium text-white" : IDLE)}
+      className={cx("relative flex h-8 items-center gap-2 rounded-md px-2.5 text-[13px] transition-colors", current ? "bg-white/[0.08] font-medium text-white" : IDLE)}
     >
       {/* In the dropdown the marker sits on the guide line; in the pop-out, at the edge. */}
       {current && <Accent className={menu ? "inset-y-1.5 left-0 rounded-r-full" : "inset-y-1.5 -left-3 rounded-full"} />}
-      <span className="truncate">{label}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <Count value={count} word={word} />
     </Link>
   </li>
 );
+
+/**
+ * Sections gathered under a name inside a department's dropdown (MVA:
+ * Farmers; Production & Processing). It opens by itself when it holds the
+ * section on screen, and closes when another group opens; while closed it
+ * shows where you are and what waits in it.
+ */
+const SubGroup = ({ id, item, label, sections, activeKey, counts, open, onToggle, onNavigate }) => {
+  const here = sections.some((section) => section.key === activeKey);
+  const marked = here && !open;
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        className={cx("relative flex h-8 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] transition-colors", marked ? "bg-white/[0.08] font-medium text-white" : here ? "text-white hover:bg-white/[0.05]" : IDLE)}
+      >
+        {marked && <Accent className="inset-y-1.5 -left-3 rounded-full" />}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {!open && <Count value={countOf(sections, counts)} word={wordOf(sections, counts)} />}
+        <ChevronDown size={14} className={cx("shrink-0 text-sidebar-muted transition-transform duration-200", open && "rotate-180")} aria-hidden />
+      </button>
+      {open && (
+        <ul id={id} className="mb-0.5 ml-2.5 mt-0.5 space-y-0.5 border-l border-white/[0.14] pl-2.5 animate-slide-down">
+          {sections.map((section) => (
+            <SectionLink key={section.key} to={sectionPath(item, section)} label={section.label} current={section.key === activeKey} count={counts[section.count]} word={countWord([section.count])} onNavigate={onNavigate} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+};
 
 /**
  * A department's sections beside the icon rail. Focus moves into it and the
  * arrow keys move between sections; Escape, a click elsewhere, scrolling the
  * sidebar or tabbing out closes it.
  */
-const PopoutMenu = ({ id, item, sections, activeKey, position, trigger, onClose, onNavigate }) => {
+const PopoutMenu = ({ id, item, sections, activeKey, counts, position, trigger, onClose, onNavigate }) => {
   const box = useRef(null);
 
   useEffect(() => {
@@ -105,9 +171,10 @@ const PopoutMenu = ({ id, item, sections, activeKey, position, trigger, onClose,
     >
       <p className="border-b border-sidebar-border px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-muted">{item.label}</p>
       <ul className="space-y-0.5 p-1.5">
-        {sections.map((section) => (section.heading
+        {/* Groups show as headings here, their sections listed under them. */}
+        {arrange(sections).flatMap((entry) => (entry.items ? [{ key: entry.key, heading: true, label: entry.group }, ...entry.items] : [entry])).map((section) => (section.heading
           ? <SectionHeading key={section.key} label={section.label} />
-          : <SectionLink key={section.key} menu to={sectionPath(item, section)} label={section.label} current={section.key === activeKey} onNavigate={onNavigate} />
+          : <SectionLink key={section.key} menu to={sectionPath(item, section)} label={section.label} current={section.key === activeKey} count={counts[section.count]} word={countWord([section.count])} onNavigate={onNavigate} />
         ))}
       </ul>
     </div>
@@ -118,12 +185,25 @@ const PopoutMenu = ({ id, item, sections, activeKey, position, trigger, onClose,
  * A department with sections. On the full sidebar its name opens and closes
  * a dropdown of its sections; on the icon rail its icon opens a pop-out.
  */
-const DepartmentGroup = ({ item, sections, activeKey, here, open, rail, popout, onToggle, onPopout, onClosePopout, onNavigate }) => {
+const DepartmentGroup = ({ item, sections, activeKey, counts, here, open, rail, popout, onToggle, onPopout, onClosePopout, onNavigate }) => {
   const trigger = useRef(null);
   const listId = `nav-sections-${groupOf(item)}`;
   const expanded = rail ? Boolean(popout) : open;
-  // While its sections are out of sight, the department itself shows where you are.
+  // While its sections are out of sight, the department itself shows where you are and what waits.
   const marked = here && (rail || !open);
+  const waiting = countOf(sections, counts);
+  const waitingWord = wordOf(sections, counts);
+  const entries = arrange(sections);
+  // One group inside the dropdown is open at a time: opening one closes the other. Arriving on a
+  // section opens its group; moving to a section outside any group leaves the open one as it is,
+  // so the list does not jump.
+  const groupHere = entries.find((entry) => entry.items?.some((section) => section.key === activeKey))?.group || null;
+  const [openGroup, setOpenGroup] = useState(groupHere);
+  const [seenKey, setSeenKey] = useState(activeKey);
+  if (activeKey !== seenKey) {
+    setSeenKey(activeKey);
+    if (groupHere) setOpenGroup(groupHere);
+  }
 
   const onClick = () => {
     if (!rail) {
@@ -133,7 +213,7 @@ const DepartmentGroup = ({ item, sections, activeKey, here, open, rail, popout, 
     } else {
       const row = trigger.current.getBoundingClientRect();
       const right = trigger.current.closest("aside")?.getBoundingClientRect().right ?? row.right;
-      const height = Math.min(46 + sections.length * 34, window.innerHeight - 80);
+      const height = Math.min(46 + (sections.length + entries.filter((entry) => entry.items).length) * 34, window.innerHeight - 80);
       // Beside the icon, kept below the top bar and on screen.
       onPopout({ top: Math.max(72, Math.min(row.top, window.innerHeight - height - 8)), left: right + 6 });
     }
@@ -153,18 +233,38 @@ const DepartmentGroup = ({ item, sections, activeKey, here, open, rail, popout, 
         {marked && <Accent className="inset-y-2 left-0 rounded-r-full" />}
         <item.icon size={18} className={cx("shrink-0", here ? "text-primary-300" : "text-sidebar-muted group-hover:text-sidebar-text")} aria-hidden />
         <span className={cx("min-w-0 flex-1 truncate", rail && "sr-only")}>{item.label}</span>
+        {!rail && !open && <Count value={waiting} word={waitingWord} />}
+        {rail && <Count value={waiting} word={waitingWord} className="absolute right-1.5 top-0.5 ring-2 ring-sidebar" />}
         {!rail && <ChevronDown size={16} className={cx("shrink-0 text-sidebar-muted transition-transform duration-200", open && "rotate-180")} aria-hidden />}
       </button>
       {!rail && open && (
         <ul id={listId} className="mb-1 ml-5 mt-0.5 space-y-0.5 border-l border-white/[0.14] pl-2.5 animate-slide-down">
-          {sections.map((section) => (section.heading
-            ? <SectionHeading key={section.key} label={section.label} />
-            : <SectionLink key={section.key} to={sectionPath(item, section)} label={section.label} current={section.key === activeKey} onNavigate={onNavigate} />
-          ))}
+          {entries.map((entry) => {
+            if (entry.items) {
+              const isOpen = openGroup === entry.group;
+              return (
+                <SubGroup
+                  key={entry.key}
+                  id={`${listId}-${slug(entry.group)}`}
+                  item={item}
+                  label={entry.group}
+                  sections={entry.items}
+                  activeKey={activeKey}
+                  counts={counts}
+                  open={isOpen}
+                  onToggle={() => setOpenGroup(isOpen ? null : entry.group)}
+                  onNavigate={onNavigate}
+                />
+              );
+            }
+            return entry.heading
+              ? <SectionHeading key={entry.key} label={entry.label} />
+              : <SectionLink key={entry.key} to={sectionPath(item, entry)} label={entry.label} current={entry.key === activeKey} count={counts[entry.count]} word={countWord([entry.count])} onNavigate={onNavigate} />;
+          })}
         </ul>
       )}
       {rail && popout && (
-        <PopoutMenu id={listId} item={item} sections={sections} activeKey={activeKey} position={popout} trigger={trigger} onClose={onClosePopout} onNavigate={onNavigate} />
+        <PopoutMenu id={listId} item={item} sections={sections} activeKey={activeKey} counts={counts} position={popout} trigger={trigger} onClose={onClosePopout} onNavigate={onNavigate} />
       )}
     </li>
   );
@@ -185,6 +285,7 @@ const Sidebar = ({ mobileOpen = false, onClose = () => {}, collapsed = false, on
   const groups = NAV_GROUPS.map((group) => ({ ...group, items: items.filter((i) => i.group === group.key) })).filter((g) => g.items.length);
   const current = findNavItem(location.pathname);
   const activeKey = currentSection(current, auth, location.search)?.key;
+  const counts = useNavCounts(auth);
 
   // One department's sections show at a time: those of the department you are
   // in, unless you have opened or closed one since the page last changed.
@@ -239,6 +340,7 @@ const Sidebar = ({ mobileOpen = false, onClose = () => {}, collapsed = false, on
                         sections={sections}
                         here={current === item}
                         activeKey={current === item ? activeKey : null}
+                        counts={counts}
                         open={openDepartment === groupOf(item)}
                         rail={rail}
                         popout={openPopout?.department === groupOf(item) ? openPopout : null}

@@ -196,10 +196,20 @@ const Filters = ({ filters, query, setQuery, initial }) => {
     <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 bg-white px-4 py-3">
       {filters.map((f) => {
         if (f.type === "search") {
+          // A numeric search (a farmer number) keeps only the digits typed.
+          const typed = (text) => (f.numeric ? text.replace(/\D/g, "") : text);
           return (
-            <div key="search" className="relative w-full sm:w-72">
+            <div key="search" className={cx("relative w-full", f.numeric ? "sm:w-52" : "sm:w-72")}>
               <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden />
-              <Input type="search" aria-label="Search" placeholder={f.placeholder || "Search..."} className="pl-9" value={query.search || ""} onChange={(e) => setQuery({ ...query, search: e.target.value })} />
+              <Input
+                type="search"
+                aria-label={f.label || "Search"}
+                inputMode={f.numeric ? "numeric" : undefined}
+                placeholder={f.placeholder || "Search..."}
+                className={cx("pl-9", f.numeric && "tabular-nums")}
+                value={query.search || ""}
+                onChange={(e) => setQuery({ ...query, search: typed(e.target.value) })}
+              />
             </div>
           );
         }

@@ -5,6 +5,7 @@ import { audit } from "../../lib/audit.js";
 import { dateRange, inTransaction } from "../../lib/crud.js";
 import { badRequest, conflict, forbidden, notFound, ok } from "../../lib/http.js";
 import { nextNumber } from "../../lib/numbers.js";
+import { markSeen, seenAt } from "../../lib/seen.js";
 import { parseBody, parseItems, round2 } from "../../lib/validate.js";
 
 // Requisition flow:
@@ -12,6 +13,7 @@ import { parseBody, parseItems, round2 } from "../../lib/validate.js";
 //   Accounts head / GM -> approved | rejected | returned (with comment)
 //   requester          -> edits a returned one and resubmits (pending)
 //   Accounts           -> fulfilled (bought or paid for)
+// Each item carries its own purpose (why it is needed).
 // Stores raises none: it answers the departments' store requests.
 
 const router = express.Router();
@@ -23,7 +25,7 @@ const include = {
   purchaseOrders: { select: { id: true, poNumber: true, status: true, totalAmount: true } },
 };
 
-const itemFields = { description: "string!", quantity: "decimal!", unit: "string", unitCost: "decimal" };
+const itemFields = { description: "string!", quantity: "decimal!", unit: "string", unitCost: "decimal", purpose: "text!" };
 const buildItems = (raw) => {
   const items = parseItems(raw, itemFields, { label: "requested items" });
   if (items.some((i) => !(i.quantity > 0))) throw badRequest("Each item needs a quantity more than zero");
@@ -76,6 +78,46 @@ router.get("/inbox", async (req, res) => {
   return ok(res, rows.map(withFlags(user)));
 });
 
+// Answers to the department's requisitions - approved, returned or rejected
+// by someone else - since this user last looked at them (the count beside
+// To Accounts in the sidebar). Looking at the list marks them seen.
+const ANSWERS = "requisitionAnswers";
+const answersTo = (user, since) => ({
+  department: user.department,
+  status: { in: ["approved", "returned", "rejected", "fulfilled"] },
+  decidedAt: since ? { gt: since } : { not: null },
+  OR: [{ decidedById: null }, { decidedById: { not: user.id } }],
+});
+
+/** The answers since the user last looked: how many, and the latest. */
+const answersSince = async (user, since) => {
+  const where = answersTo(user, since);
+  const [count, rows] = await Promise.all([
+    prisma.requisition.count({ where }),
+    prisma.requisition.findMany({
+      where,
+      select: { id: true, requisitionNumber: true, title: true, status: true, decidedAt: true, decisionComment: true, requestedById: true },
+      orderBy: { decidedAt: "desc" },
+      take: 20,
+    }),
+  ]);
+  return { since, count, rows };
+};
+const none = { since: null, count: 0, rows: [] };
+
+router.get("/answers", async (req, res) => {
+  if (!requisitionRules.canRaise(req.user)) return ok(res, none);
+  return ok(res, await answersSince(req.user, await seenAt(prisma, req.user.id, ANSWERS)));
+});
+
+// Looking at the list: the answers until now, then they count as seen.
+router.post("/answers/seen", async (req, res) => {
+  if (!requisitionRules.canRaise(req.user)) return ok(res, none);
+  const answers = await answersSince(req.user, await seenAt(prisma, req.user.id, ANSWERS));
+  await markSeen(prisma, req.user.id, ANSWERS);
+  return ok(res, answers);
+});
+
 router.get("/:id", async (req, res) => {
   const requisition = await prisma.requisition.findUnique({ where: { id: req.params.id }, include });
   if (!requisition || !visible(req.user, requisition)) throw notFound("Requisition");
@@ -84,7 +126,7 @@ router.get("/:id", async (req, res) => {
 
 router.post("/", async (req, res) => {
   if (!requisitionRules.canRaise(req.user)) throw forbidden(req.user?.department === "stores" ? "Stores does not raise requisitions; departments ask Stores for items through store requests" : "Only department staff can raise requisitions");
-  const data = parseBody({ title: "string!", purpose: "text!", priority: "option:priorities" }, req.body);
+  const data = parseBody({ title: "string!", purpose: "text", priority: "option:priorities" }, req.body);
   const items = buildItems(req.body.items);
   const requisition = await inTransaction(async (tx) => {
     const created = await tx.requisition.create({
@@ -106,7 +148,7 @@ router.post("/", async (req, res) => {
 
 // Edit and resubmit a returned requisition.
 router.put("/:id", async (req, res) => {
-  const data = parseBody({ title: "string!", purpose: "text!", priority: "option:priorities" }, req.body);
+  const data = parseBody({ title: "string!", purpose: "text", priority: "option:priorities" }, req.body);
   const items = buildItems(req.body.items);
   const requisition = await inTransaction(async (tx) => {
     const existing = await load(tx, req.params.id);

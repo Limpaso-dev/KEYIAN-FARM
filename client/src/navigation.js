@@ -31,17 +31,19 @@ export const NAV_GROUPS = [
  * use) - and requests to Stores for its items. Each is named from where the
  * user stands. Those who decide requisitions see them first. Stores answers
  * its requests under Stores > Requests, so they are not listed here for it.
+ * To Accounts and To Stores count the answers (approved, rejected, dispatched
+ * ...) to the department's requests since the user last opened them.
  */
 const requisitionSections = (auth) => {
   const req = auth.permissions?.requisitions || {};
   const products = auth.permissions?.productRequests || {};
   const asks = (department) => Boolean(products.raiseTo?.includes(department));
   const handles = (department) => Boolean(products.handles?.includes(department));
-  const accounts = req.raise || req.seeAll || req.decide || req.fulfil ? [{ key: "accounts", label: req.seeAll ? "Requisitions" : "To Accounts" }] : [];
+  const accounts = req.raise || req.seeAll || req.decide || req.fulfil ? [{ key: "accounts", label: req.seeAll ? "Requisitions" : "To Accounts", ...(req.raise ? { count: "requisitionAnswers" } : {}) }] : [];
   const fromMva = asks("mva") || handles("mva") || products.seeAll ? [{ key: "mva", label: handles("mva") ? "Requests from Sales" : asks("mva") ? "Products from MVA" : "Sales requests to MVA" }] : [];
   const fromSales = asks("sales") || handles("sales") || products.seeAll ? [{ key: "sales", label: asks("sales") ? "Products from Sales" : "Office requests" }] : [];
   const store = auth.permissions?.storeRequests || {};
-  const toStores = store.raise || (store.seeAll && !store.handle) ? [{ key: "stores", label: store.raise ? "To Stores" : "Store requests" }] : [];
+  const toStores = store.raise || (store.seeAll && !store.handle) ? [{ key: "stores", label: store.raise ? "To Stores" : "Store requests", ...(store.raise ? { count: "storeRequestAnswers" } : {}) }] : [];
   return req.decide || req.seeAll ? [...accounts, ...fromMva, ...fromSales, ...toStores] : [...fromMva, ...fromSales, ...accounts, ...toStores];
 };
 
@@ -97,57 +99,59 @@ const reportKey = (params, auth) => {
 // the General Manager and administrators (permissions come from the server).
 // Its sections open from a dropdown under it in the sidebar, and each user
 // sees only the sections they can open. A section's key is its ?tab= in the address, so links such as
-// /stores?tab=items open that section directly.
+// /stores?tab=items open that section directly. Neighbouring sections with the same `group` fold
+// into a dropdown of their own, one open at a time; `count` names a figure shown beside a
+// section (lib/useNavCounts.js).
 export const navigation = [
   { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard, group: "overview", hint: "Today at a glance", visible: () => true },
   {
     label: "HR", path: "/hr", icon: UserCog, group: "departments", department: "hr", hint: "Staff, payroll, discipline, members", visible: member("hr"),
     sections: [
-      { key: "staff", label: "Staff", show: can("employees") },
-      { key: "establishment", label: "Staff establishment", show: can("jobAdverts") },
-      { key: "contracts", label: "Contracts", show: can("contracts") },
-      { key: "reviews", label: "Salary reviews", show: can("salaryReviews") },
-      { key: "payroll", label: "Payroll", show: can("payroll") },
-      { key: "discipline", label: "Disciplinary", show: can("disciplinary") },
-      { key: "terminations", label: "Terminations", show: can("terminations") },
-      { key: "members", label: "Members", show: can("members") },
-      { key: "succession", label: "Succession register", show: can("members") },
+      { key: "staff", label: "Staff", group: "Staffing", show: can("employees") },
+      { key: "establishment", label: "Staff establishment", group: "Staffing", show: can("jobAdverts") },
+      { key: "contracts", label: "Contracts", group: "Staffing", show: can("contracts") },
+      { key: "reviews", label: "Salary reviews", group: "Pay", show: can("salaryReviews") },
+      { key: "payroll", label: "Payroll", group: "Pay", show: can("payroll") },
+      { key: "discipline", label: "Disciplinary", group: "Discipline & exits", show: can("disciplinary") },
+      { key: "terminations", label: "Terminations", group: "Discipline & exits", show: can("terminations") },
+      { key: "members", label: "Members", group: "Membership", show: can("members") },
+      { key: "succession", label: "Succession register", group: "Membership", show: can("members") },
     ],
   },
   {
     label: "Livestock", path: "/livestock", icon: PawPrint, group: "departments", department: "livestock", hint: "Herd, health, milk records", visible: member("livestock"),
     sections: [
-      { key: "herd", label: "Herd", show: can("animals") },
-      { key: "lactations", label: "Calvings & lactations", show: can("lactations") },
-      { key: "vaccinations", label: "Vaccinations", show: can("vaccinations") },
-      { key: "health", label: "Health", show: can("healthRecords") },
-      { key: "milk", label: "Milk records", show: can("milkRecords") },
-      { key: "transfers", label: "To MVA", show: can("milkTransfers") },
+      { key: "herd", label: "Herd", group: "Animals", show: can("animals") },
+      { key: "lactations", label: "Calvings & lactations", group: "Animals", show: can("lactations") },
+      { key: "vaccinations", label: "Vaccinations", group: "Animal health", show: can("vaccinations") },
+      { key: "health", label: "Health", group: "Animal health", show: can("healthRecords") },
+      { key: "milk", label: "Milk records", group: "Milk", show: can("milkRecords") },
+      { key: "transfers", label: "To MVA", group: "Milk", show: can("milkTransfers") },
     ],
   },
   {
     label: "Milk Value Addition", short: "MVA", path: "/mva", icon: FlaskConical, group: "departments", department: "mva", hint: "Milk intake, processing, to Sales", visible: member("mva"),
     sections: [
-      { key: "collection", label: "Farmer milk", show: can("milkDeliveries") },
-      { key: "livestock", label: "From Livestock", show: (a) => a.can("milkTransfers", "receive") || a.user?.department === "mva" },
-      { key: "allocation", label: "Allocation", show: can("milkAllocations") },
-      { key: "processing", label: "Product output", show: can("processingBatches") },
+      { key: "collection", label: "Farmer milk", group: "Farmers", show: can("milkDeliveries") },
+      { key: "farmers", label: "Farmer register", group: "Farmers", show: can("milkSuppliers") },
+      { key: "prices", label: "Milk price", group: "Farmers", show: can("milkPrices") },
+      { key: "livestock", label: "From Livestock", count: "milkFromLivestock", show: (a) => a.can("milkTransfers", "receive") || a.user?.department === "mva" },
+      { key: "allocation", label: "Allocation", group: "Production & Processing", show: can("milkAllocations") },
+      { key: "processing", label: "Product output", group: "Production & Processing", show: can("processingBatches") },
       { key: "transfers", label: "To Sales", show: can("productTransfers") },
       { key: "stock", label: "Stock", show: can("mvaStock") },
-      { key: "farmers", label: "Farmers", show: can("milkSuppliers") },
-      { key: "prices", label: "Milk price", show: can("milkPrices") },
     ],
   },
   {
     label: "Sales", path: "/sales", icon: ShoppingCart, group: "departments", department: "sales", hint: "Local sales, vehicles, stock", visible: member("sales"),
     sections: [
       { key: "received", label: "From MVA", show: can("productTransfers", "receive") },
-      { key: "vehicles-out", label: "Vehicle sales", show: can("dispatches") },
-      { key: "sales", label: "Local sales", show: can("sales") },
-      { key: "damages", label: "Damages & returns", show: can("damages") },
+      { key: "vehicles-out", label: "Vehicle sales", group: "Sales & returns", show: can("dispatches") },
+      { key: "sales", label: "Local sales", group: "Sales & returns", show: can("sales") },
+      { key: "damages", label: "Damages & returns", group: "Sales & returns", show: can("damages") },
       { key: "stock", label: "Stock", show: can("salesStock") },
-      { key: "vehicles", label: "Vehicles", show: can("vehicles") },
-      { key: "products", label: "Prices", show: can("products") },
+      { key: "vehicles", label: "Vehicles", group: "Vehicles & prices", show: can("vehicles") },
+      { key: "products", label: "Prices", group: "Vehicles & prices", show: can("products") },
     ],
   },
   {
@@ -155,30 +159,30 @@ export const navigation = [
     sections: [
       { key: "stock", label: "Stock", show: can("storeItems") },
       { key: "requests", label: "Requests", show: (a) => Boolean(a.permissions?.storeRequests?.seeAll) },
-      { key: "receipts", label: "Goods received", show: can("storeReceipts") },
-      { key: "issues", label: "Stock out", show: can("storeIssues") },
+      { key: "receipts", label: "Goods received", group: "Goods in & out", show: can("storeReceipts") },
+      { key: "issues", label: "Stock out", group: "Goods in & out", show: can("storeIssues") },
       { key: "items", label: "Items", show: can("storeItems") },
     ],
   },
   {
-    label: "Crops", path: "/crops", icon: Sprout, group: "departments", department: "crops", hint: "Sugarcane, tea, coffee", visible: member("crops"),
+    // Its reports (a summary, then one per crop) are under Reports, like every department's.
+    label: "Crops", path: "/crops", icon: Sprout, group: "departments", department: "crops", hint: "Sugarcane, tea, coffee, fodder", visible: member("crops"),
     sections: [
       { key: "farms", label: "Farms", show: can("cropFarms") },
       { key: "harvests", label: "Harvests", show: can("cropHarvests") },
-      { key: "reports", label: "Reports", show: can("cropFarms") },
     ],
   },
   {
     label: "Accounts", path: "/accounts", icon: Wallet, group: "departments", department: "accounts", hint: "Income, expenses, payments", visible: member("accounts"),
     sections: [
-      { key: "entries", label: "Income & expenses", show: can("transactions") },
-      { key: "accounts", label: "Accounts", show: can("accounts") },
-      { key: "milk", label: "Farmer payments", show: can("milkPayments") },
-      { key: "farmers", label: "Farmers", show: can("farmerDetails") },
-      { key: "salaries", label: "Salaries", show: can("payroll", "pay") },
-      { key: "members", label: "Member payments", show: can("memberPayments") },
-      { key: "orders", label: "Purchase orders", show: can("purchaseOrders") },
-      { key: "suppliers", label: "Suppliers", show: can("suppliers") },
+      { key: "entries", label: "Income & expenses", group: "Books", show: can("transactions") },
+      { key: "accounts", label: "Accounts", group: "Books", show: can("accounts") },
+      { key: "milk", label: "Farmer payments", group: "Farmers", show: can("milkPayments") },
+      { key: "farmers", label: "Farmer details", group: "Farmers", show: can("farmerDetails") },
+      { key: "salaries", label: "Salaries", group: "Staff & members", show: can("payroll", "pay") },
+      { key: "members", label: "Member payments", group: "Staff & members", show: can("memberPayments") },
+      { key: "orders", label: "Purchase orders", group: "Purchasing", show: can("purchaseOrders") },
+      { key: "suppliers", label: "Suppliers", group: "Purchasing", show: can("suppliers") },
     ],
   },
   { label: "Requisitions", path: "/requisitions", icon: ClipboardList, group: "workflow", hint: "Request and approve; product requests", visible: (a) => requisitionSections(a).length > 0, sections: requisitionSections },

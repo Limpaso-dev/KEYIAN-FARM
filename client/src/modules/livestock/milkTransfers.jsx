@@ -1,24 +1,33 @@
 import { PackageCheck } from "lucide-react";
 import { number, today } from "../../lib/format";
 import { keepSession, sessionField } from "./dairies";
+import { MilkLeftNote } from "./MilkOnHand";
 
 const dairyField = { name: "dairy", label: "Dairy", type: "select", options: "dairies", required: true, onSelect: (_, values, meta) => keepSession(values, meta) };
+
+// Before the kilograms: what was recorded at that milking, and what is left to send.
+const milkLeft = { type: "note", render: (values) => <MilkLeftNote values={values} /> };
+const kgField = { name: "kg", label: "Kg sent", type: "number", required: true, help: "No more than is left of that milking" };
+
+/** The fields that send milk to MVA (also used by the Send buttons above the list). */
+export const sendMilkFields = [
+  { name: "date", label: "Date", type: "date", required: true, span: "third" },
+  { ...dairyField, span: "third" },
+  { ...sessionField, span: "third" },
+  milkLeft,
+  kgField,
+  { name: "notes", label: "Notes", type: "textarea" },
+];
 
 // Shared by the Livestock (send) and MVA (receive) screens. Milk is weighed in kilograms.
 export const milkTransfers = {
   resource: "milkTransfers",
   endpoint: "/livestock/milk-transfers",
   title: "Milk sent to MVA",
-  description: "Livestock records what it sends, in kilograms; MVA confirms what it received. Only received milk enters MVA stock.",
+  description: "Livestock sends milk recorded at a milking, in kilograms, and no more than was recorded; MVA confirms what it received. Only received milk enters MVA stock.",
   singular: "Transfer",
   createLabel: "Send milk to MVA",
-  createFields: [
-    { name: "date", label: "Date", type: "date", required: true },
-    dairyField,
-    sessionField,
-    { name: "kg", label: "Kg sent", type: "number", required: true },
-    { name: "notes", label: "Notes", type: "textarea" },
-  ],
+  createFields: sendMilkFields,
   createInitial: () => ({ date: today(), session: "morning" }),
   filters: [{ name: "status", label: "Status", options: "transferStatus" }, { name: "dairy", label: "Dairy", options: "dairies" }, { type: "dateRange" }],
   columns: [
@@ -33,7 +42,9 @@ export const milkTransfers = {
   ],
   editableWhen: (r) => r.status === "sent",
   deletableWhen: (r) => r.status === "sent",
-  editFields: [dairyField, sessionField, { name: "kg", label: "Kg sent", type: "number", required: true }, { name: "notes", label: "Notes", type: "textarea" }],
+  // Changing a transfer, the milk it already took counts as still there.
+  toForm: (row) => ({ ...row, date: String(row.date).slice(0, 10), kg: String(Number(row.kg)), _sent: { dairy: row.dairy, session: row.session, kg: Number(row.kg) } }),
+  editFields: [dairyField, sessionField, milkLeft, kgField, { name: "notes", label: "Notes", type: "textarea" }],
   actions: [{
     key: "receive", label: "Receive", icon: PackageCheck, variant: "primary",
     allowed: (c) => c.can("milkTransfers", "receive"), when: (r) => r.status === "sent",

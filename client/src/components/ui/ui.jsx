@@ -264,6 +264,11 @@ export const Badge = ({ tone, value, children, className }) => {
   );
 };
 
+/** Marks a row that changed since the user last looked, such as a request answered. */
+export const NewTag = ({ className }) => (
+  <span className={cx("inline-flex items-center rounded-full bg-primary-700 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-white", className)}>New</span>
+);
+
 export const Kbd = ({ children }) => (
   <kbd className="rounded border border-slate-300 bg-white px-1.5 py-px font-sans text-[11px] font-medium text-slate-500 shadow-sm">{children}</kbd>
 );

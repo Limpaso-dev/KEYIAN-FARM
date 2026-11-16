@@ -4,7 +4,7 @@ import { canReadReport } from "../../config/access.js";
 import { optionValues } from "../../config/catalog.js";
 import { badRequest, forbidden, ok } from "../../lib/http.js";
 import { periodInfo, resolvePeriod } from "../../lib/periods.js";
-import { BUILDERS } from "./builders.js";
+import { BUILDERS, fullSummary } from "./builders.js";
 import { MOTTO, ORGANISATION, toCsv, toPdf } from "./render.js";
 
 const router = express.Router();
@@ -50,7 +50,7 @@ const departmentReport = async (req, res) => {
         summary: report.summary.filter((item) => item.part === chosen.key),
         sections: report.sections.filter((s) => s.part === chosen.key),
       }
-      : { department, ...report, heading: `${report.title} report - ${range.label}` });
+      : { department, ...report, heading: `${report.title} report - ${range.label}`, summary: fullSummary(report) });
   }
 
   const generatedAt = new Date().toISOString();

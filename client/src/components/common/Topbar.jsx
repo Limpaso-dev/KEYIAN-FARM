@@ -4,6 +4,8 @@ import { ArrowLeft, Bell, CheckCheck, ChevronDown, ChevronRight, ClipboardList, 
 import { useAuth } from "../../context/useAuth";
 import { get } from "../../lib/api";
 import { dateTime, money } from "../../lib/format";
+import { COUNTS_CHANGED } from "../../lib/useNavCounts";
+import { requestLines } from "../../modules/stores/requestLines";
 import { currentSection, findNavItem, NAV_GROUPS } from "../../navigation";
 import { cx } from "../../lib/cx";
 import { Kbd } from "../ui/ui";
@@ -11,7 +13,7 @@ import { Kbd } from "../ui/ui";
 const productLines = (items) => (items || []).map((i) => `${i.product?.name} ${Number(i.quantity)}`).join(", ");
 const storeLines = (items) => (items || []).map((i) => `${i.item?.name} ${Number(i.quantity)} ${i.item?.unit || ""}`.trim()).join(", ");
 
-/** Requisitions, product requests and store requests needing this user's attention. */
+/** Requisitions, product requests and store requests needing this user's attention, and answers to their department's. */
 const useNotifications = (user, permissions, label) => {
   const [items, setItems] = useState([]);
   const [failed, setFailed] = useState(false);
@@ -26,15 +28,21 @@ const useNotifications = (user, permissions, label) => {
       // Product requests: those waiting for this user's department, and products MVA has sent to Sales on request.
       const handles = permissions?.productRequests?.handles || [];
       // Store requests waiting for Stores to dispatch.
-      const [toHandle, sent, toDispatch] = await Promise.all([
+      // Answers to the department's requisitions and store requests since the user last looked at them.
+      const [toHandle, sent, toDispatch, answered, storeAnswered] = await Promise.all([
         Promise.all(handles.map((to) => get("/product-requests", { to, status: "pending" }))).then((lists) => lists.flat()),
         permissions?.productRequests?.raiseTo?.includes("mva") ? get("/product-requests", { to: "mva", status: "sent" }) : [],
         permissions?.storeRequests?.handle ? get("/store-requests", { status: "pending" }) : [],
+        permissions?.requisitions?.raise ? get("/requisitions/answers") : { rows: [] },
+        permissions?.storeRequests?.raise ? get("/store-requests/answers") : { rows: [] },
       ]);
+      const yoursReturned = (r) => r.status === "returned" && r.requestedById === user.id;
       const toAccounts = "/requisitions?tab=accounts";
       setItems([
         ...inbox.map((r) => ({ id: `d-${r.id}`, title: "Requisition waiting for your approval", detail: `${r.requisitionNumber} · ${r.title}`, amount: r.totalAmount, at: r.createdAt, to: toAccounts })),
         ...mine.filter((r) => r.requestedById === user.id).map((r) => ({ id: `r-${r.id}`, title: "Your requisition was returned", detail: `${r.requisitionNumber} · ${r.decisionComment || r.title}`, at: r.decidedAt, to: toAccounts })),
+        ...answered.rows.filter((r) => !yoursReturned(r)).map((r) => ({ id: `a-${r.id}`, title: `Requisition ${label("requisitionStatus", r.status).toLowerCase()}`, detail: `${r.requisitionNumber} · ${r.decisionComment || r.title}`, at: r.decidedAt, to: toAccounts })),
+        ...storeAnswered.rows.map((r) => ({ id: `b-${r.id}`, title: r.status === "declined" ? "Store request declined" : "Store request dispatched", detail: `${r.requestNumber} · ${r.status === "declined" ? r.declineReason : requestLines(r)}`, at: r.handledAt, to: "/requisitions?tab=stores" })),
         ...toFulfil.map((r) => ({ id: `f-${r.id}`, title: "Approved requisition to fulfil", detail: `${r.requisitionNumber} · ${r.title} (${r.department})`, amount: r.totalAmount, at: r.decidedAt, to: toAccounts })),
         ...toHandle.map((r) => ({ id: `p-${r.id}`, title: r.toDepartment === "mva" ? "Sales asked for products" : "Office request from the administration", detail: `${r.requestNumber} · ${productLines(r.items)}`, at: r.createdAt, to: `/requisitions?tab=${r.toDepartment}` })),
         ...sent.map((r) => ({ id: `s-${r.id}`, title: "MVA sent the products you asked for", detail: `${r.requestNumber} · receive them under From MVA`, at: r.handledAt, to: "/sales?tab=received" })),
@@ -48,9 +56,12 @@ const useNotifications = (user, permissions, label) => {
   useEffect(() => {
     const first = setTimeout(refresh, 0);
     const timer = setInterval(refresh, 60000);
+    // Opening a list of answers clears them here too.
+    window.addEventListener(COUNTS_CHANGED, refresh);
     return () => {
       clearTimeout(first);
       clearInterval(timer);
+      window.removeEventListener(COUNTS_CHANGED, refresh);
     };
   }, [refresh]);
   return { items, failed, refresh };
@@ -169,7 +180,7 @@ const Notifications = () => {
             <div className="px-4 py-10 text-center">
               <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-emerald-50 text-emerald-600"><CheckCheck size={20} /></span>
               <p className="mt-3 text-sm font-medium text-slate-700">{failed ? "Could not load notifications" : "You're all caught up"}</p>
-              <p className="mt-0.5 text-xs text-slate-500">Requisitions and requests that need you will appear here.</p>
+              <p className="mt-0.5 text-xs text-slate-500">Requisitions and requests that need you, and answers to your department's, will appear here.</p>
             </div>
           )}
         </section>

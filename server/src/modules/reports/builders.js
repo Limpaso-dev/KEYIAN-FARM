@@ -2,6 +2,7 @@ import { DAIRY_SESSIONS, optionLabel, optionValues, REPORT_PARTS } from "../../c
 import { addDays, bucketsOf, dayText } from "../../lib/periods.js";
 import { stockSummary } from "../../lib/stock.js";
 import { round2 } from "../../lib/validate.js";
+import { ageText as cropAge, cycleName, standingSince } from "../crops/cropCycle.js";
 import { outputFigures, productionDays } from "../mva/production.js";
 
 // Department reports for any period (see lib/periods.js): a day, a week, two
@@ -19,7 +20,7 @@ import { outputFigures, productionDays } from "../mva/production.js";
 const DAY_MS = 86400000;
 const sum = (rows, key) => round2(rows.reduce((total, row) => total + Number(row[key] || 0), 0));
 const name = (person) => (person ? `${person.firstName} ${person.lastName}` : "");
-const col = (key, label, type) => ({ key, label, ...(type ? { type } : {}) });
+const col = (key, label, type, weight) => ({ key, label, ...(type ? { type } : {}), ...(weight ? { weight } : {}) });
 const within = (range) => ({ gte: range.from, lt: range.to });
 const listsEachRecord = (range) => range.bucket === "day";
 
@@ -111,6 +112,8 @@ const HERD_CLASSES = [
   ["bull", "Bulls", "Bull"],
   ["maleCalf", "Male calves", "Male calf"],
 ];
+/** Where the herd table counts the males: they are not kept in a dairy. */
+const NO_DAIRY = "Not in a dairy";
 const CLASS_NAME = Object.fromEntries(HERD_CLASSES.map(([key, , one]) => [key, one]));
 
 const tagOf = (animal) => (animal ? `${animal.tagNumber}${animal.name ? ` ${animal.name}` : ""}` : "");
@@ -171,7 +174,7 @@ const livestock = async (db, range) => {
     db.milkRecord.groupBy({ by: ["animalId"], where: { date: { lt: end } }, _max: { date: true } }),
   ]);
   const dairies = optionValues("dairies");
-  const dairyName = (dairy) => optionLabel("dairies", dairy);
+  const dairyName = (dairy) => (dairy ? optionLabel("dairies", dairy) : "");
 
   // ---- Herd: as it stood at the end of the period, and what changed in it.
   const calvingsOf = new Map();
@@ -179,11 +182,13 @@ const livestock = async (db, range) => {
   const lastMilkedOn = new Map(lastMilk.map((row) => [row.animalId, row._max.date]));
   const herd = animals.filter((a) => inHerdAt(a, end))
     .map((animal) => ({ animal, cls: herdClass(animal, end, calvingsOf.get(animal.id) || [], lastMilkedOn.get(animal.id)) }))
-    .sort((a, b) => a.animal.dairy.localeCompare(b.animal.dairy) || a.animal.tagNumber.localeCompare(b.animal.tagNumber));
+    // By dairy, then the males (in no dairy), each by tag.
+    .sort((a, b) => Number(!a.animal.dairy) - Number(!b.animal.dairy) || (a.animal.dairy || "").localeCompare(b.animal.dairy || "") || a.animal.tagNumber.localeCompare(b.animal.tagNumber));
   const count = (rows, cls) => rows.filter((row) => row.cls === cls).length;
-  const byDairy = dairies.map((dairy) => {
-    const rows = herd.filter((row) => row.animal.dairy === dairy);
-    return { dairy: dairyName(dairy), ...Object.fromEntries(HERD_CLASSES.map(([key]) => [key, count(rows, key)])), total: rows.length };
+  // Each dairy, then the bulls and bull calves, which are not kept in a dairy.
+  const byDairy = [...dairies, null].map((dairy) => {
+    const rows = herd.filter((row) => (row.animal.dairy || null) === dairy);
+    return { dairy: dairy ? dairyName(dairy) : NO_DAIRY, ...Object.fromEntries(HERD_CLASSES.map(([key]) => [key, count(rows, key)])), total: rows.length };
   });
   const joined = animals.filter((a) => inPeriod(joinedOn(a))).map((a) => ({ date: joinedOn(a), change: JOINED[a.source] || "Joined", animal: a }));
   const left = animals.filter((a) => inPeriod(a.exitDate)).map((a) => ({ date: a.exitDate, change: LEFT[a.status] || "Left", animal: a }));
@@ -694,46 +699,91 @@ const stores = async (db, range) => {
 };
 
 // ---------------------------------------------------------------------
+// Crops: the summary (farms and acres by crop), then a report for each crop
+// listing its farms as they stood at the end of the period: farm number,
+// Field ID, location, age of the standing crop, acres, ratoon (sugarcane)
+// and status.
+// ---------------------------------------------------------------------
+const naturalOrder = (a, b) => a.localeCompare(b, "en", { numeric: true, sensitivity: "base" });
+
 const crops = async (db, range) => {
   const span = within(range);
-  const [harvests, statusLogs, farms] = await Promise.all([
-    db.cropHarvest.findMany({ where: { harvestDate: span }, include: { farm: true }, orderBy: { harvestDate: "asc" } }),
-    db.cropStatusLog.findMany({ where: { date: span }, include: { farm: true }, orderBy: { date: "asc" } }),
-    db.cropFarm.findMany({ orderBy: [{ cropType: "asc" }, { farmNumber: "asc" }] }),
+  const end = addDays(range.asAt, 1);
+  const [harvests, statusUpdates, farms, lastHarvests, laterCuts] = await Promise.all([
+    db.cropHarvest.findMany({ where: { harvestDate: span }, select: { amount: true } }),
+    db.cropStatusLog.count({ where: { date: span } }),
+    // The register as it stood: farms with a status by then (each is logged
+    // from when its crop started), and any older ones registered without one.
+    db.cropFarm.findMany({
+      where: { OR: [{ statusLogs: { some: { date: { lt: end } } } }, { statusLogs: { none: {} }, createdAt: { lt: end } }] },
+      include: { statusLogs: { where: { date: { lt: end } }, orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 1 } },
+    }),
+    db.cropHarvest.groupBy({ by: ["farmId"], where: { harvestDate: { lt: end } }, _max: { harvestDate: true } }),
+    db.cropHarvest.groupBy({ by: ["farmId"], where: { harvestDate: { gte: end }, farm: { cropType: "sugarcane" } }, _count: true }),
   ]);
-  const byCrop = optionValues("cropTypes").map((crop) => {
+  farms.sort((a, b) => naturalOrder(a.farmNumber, b.farmNumber));
+  const lastHarvest = new Map(lastHarvests.map((row) => [row.farmId, row._max.harvestDate]));
+  // Each cut after the period moved the cane on to its next ratoon.
+  const cutsSince = new Map(laterCuts.map((row) => [row.farmId, row._count]));
+  const statusOf = (farm) => {
+    const log = farm.statusLogs[0];
+    return [optionLabel("farmStatus", log ? log.status : farm.status), log ? log.note : farm.statusNote].filter(Boolean).join(" - ");
+  };
+
+  const cropTypes = optionValues("cropTypes");
+  const byCrop = cropTypes.map((crop) => {
     const list = farms.filter((f) => f.cropType === crop);
     return { crop: optionLabel("cropTypes", crop), farms: list.length, acreage: sum(list, "acreage") };
   });
-  const harvestTotals = new Map();
-  for (const h of harvests) {
-    const key = `${h.farm.cropType}:${h.unit}`;
-    const entry = harvestTotals.get(key) || { crop: optionLabel("cropTypes", h.farm.cropType), unit: optionLabel("harvestUnits", h.unit), records: 0, quantity: 0, amount: 0 };
-    entry.records += 1;
-    entry.quantity = round2(entry.quantity + Number(h.quantity));
-    entry.amount = round2(entry.amount + Number(h.amount));
-    harvestTotals.set(key, entry);
-  }
+
+  const asAt = dayText(range.asAt);
+  const perCrop = cropTypes.map((crop) => {
+    const label = optionLabel("cropTypes", crop);
+    const cane = crop === "sugarcane";
+    const list = farms.filter((f) => f.cropType === crop);
+    const rows = list.map((farm) => ({
+      farmNumber: farm.farmNumber,
+      fieldId: farm.fieldId || "",
+      location: farm.location,
+      age: cropAge(standingSince(farm, lastHarvest.get(farm.id), range.asAt), range.asAt),
+      acreage: Number(farm.acreage),
+      ...(cane ? { ratoon: cycleName(farm.ratoonCount - (cutsSince.get(farm.id) || 0)) } : {}),
+      status: statusOf(farm),
+    }));
+    const columns = [
+      col("farmNumber", "Farm no.", null, 1),
+      col("fieldId", "Field ID", null, 1.2),
+      col("location", "Location", null, 1.4),
+      col("age", "Age", null, 1.1),
+      col("acreage", "Acres", "number", 0.8),
+      ...(cane ? [col("ratoon", "Ratoon", null, 0.8)] : []),
+      col("status", "Status", null, 2.6),
+    ];
+    return {
+      // Shown with the crop's own report only; the summary has them by crop.
+      summary: [
+        inPart(crop, { label: `${label} farms`, value: list.length, partOnly: true }),
+        inPart(crop, { label: "Acres", value: sum(list, "acreage"), partOnly: true }),
+      ],
+      section: inPart(crop, { ...section(`${label} farms as at ${asAt}`, columns, rows, ["acreage"]), emptyText: `No ${label.toLowerCase()} farms in the register as at ${asAt}.` }),
+    };
+  });
+
   return {
     title: "Crops",
+    parts: REPORT_PARTS.crops,
     summary: [
-      { label: "Harvest records", value: harvests.length },
-      { label: "Harvest value", value: sum(harvests, "amount"), type: "money" },
-      { label: "Farm status updates", value: statusLogs.length },
-      { label: "Total farms", value: farms.length },
-      { label: "Total acreage", value: sum(farms, "acreage") },
+      inPart("summary", { label: "Harvest records", value: harvests.length }),
+      inPart("summary", { label: "Harvest value", value: sum(harvests, "amount"), type: "money" }),
+      inPart("summary", { label: "Farm status updates", value: statusUpdates }),
+      inPart("summary", { label: "Total farms", value: farms.length }),
+      inPart("summary", { label: "Total acreage", value: sum(farms, "acreage") }),
+      ...perCrop.flatMap((report) => report.summary),
     ],
     sections: [
-      section("Farms by crop", [col("crop", "Crop"), col("farms", "Farms", "number"), col("acreage", "Acres", "number")], byCrop, ["farms", "acreage"]),
-      section("Harvests by crop", [col("crop", "Crop"), col("unit", "Unit"), col("records", "Records", "number"), col("quantity", "Quantity", "number"), col("amount", "Value", "money")],
-        [...harvestTotals.values()], ["records", "amount"]),
-      listsEachRecord(range) && section("Harvests", [col("date", "Date", "date"), col("farm", "Farm"), col("crop", "Crop"), col("quantity", "Quantity", "number"), col("unit", "Unit"), col("buyer", "Buyer"), col("amount", "Value", "money")],
-        harvests.map((h) => ({ date: h.harvestDate, farm: h.farm.farmNumber, crop: optionLabel("cropTypes", h.farm.cropType), quantity: Number(h.quantity), unit: h.unit, buyer: h.buyer || "", amount: Number(h.amount) })), ["amount"]),
-      listsEachRecord(range) && section("Status updates", [col("date", "Date", "date"), col("farm", "Farm"), col("crop", "Crop"), col("status", "New status"), col("note", "Note")],
-        statusLogs.map((s) => ({ date: s.date, farm: s.farm.farmNumber, crop: optionLabel("cropTypes", s.farm.cropType), status: optionLabel("farmStatus", s.status), note: s.note || "" }))),
-      section("All farms", [col("farmNumber", "Farm no."), col("crop", "Crop"), col("location", "Location"), col("acreage", "Acres", "number"), col("ratoon", "Ratoon", "number"), col("status", "Status")],
-        farms.map((f) => ({ farmNumber: f.farmNumber, crop: optionLabel("cropTypes", f.cropType), location: f.location, acreage: Number(f.acreage), ratoon: f.ratoonCount, status: optionLabel("farmStatus", f.status) }))),
-    ].filter(Boolean),
+      inPart("summary", section("Farms by crop", [col("crop", "Crop"), col("farms", "Farms", "number"), col("acreage", "Acres", "number")], byCrop, ["farms", "acreage"])),
+      ...perCrop.map((report) => report.section),
+    ],
   };
 };
 
@@ -790,3 +840,6 @@ const accounts = async (db, range) => {
 };
 
 export const BUILDERS = { hr, livestock, mva, sales, stores, crops, accounts };
+
+/** A report's summary as a whole: without the figures meant for one part only (a crop's own farms and acres). */
+export const fullSummary = (report) => report.summary.filter((item) => !item.partOnly);

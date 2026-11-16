@@ -5,10 +5,12 @@ import { audit } from "../../lib/audit.js";
 import { crud, inTransaction } from "../../lib/crud.js";
 import { badRequest, conflict, notFound, ok } from "../../lib/http.js";
 import { parseBody } from "../../lib/validate.js";
-import { cropReport } from "./crops.reports.js";
 
 const router = express.Router();
-const farmBrief = { select: { id: true, farmNumber: true, cropType: true, location: true } };
+const farmBrief = { select: { id: true, farmNumber: true, fieldId: true, cropType: true, location: true } };
+
+/** The Field ID as kept: in capitals, trimmed, with single spaces ("kf  7730 " -> "KF 7730"). */
+const normaliseFieldId = (value) => (value == null ? value : String(value).trim().replace(/\s+/g, " ").toUpperCase());
 
 // ---------------------------------------------------------------------
 // Farms (sugarcane, tea, coffee, fodder). Registered once, then kept up to
@@ -49,7 +51,7 @@ router.use("/farms", crud({
   label: "Farm",
   fields: {
     farmNumber: "string!",
-    longFarmNumber: "string",
+    fieldId: "string!",
     cropType: "option:cropTypes!",
     variety: "string",
     acreage: "decimal!",
@@ -67,7 +69,7 @@ router.use("/farms", crud({
   // Status changes go through POST /:id/status so they are logged.
   updateFields: {
     farmNumber: "string!",
-    longFarmNumber: "string",
+    fieldId: "string!",
     cropType: "option:cropTypes!",
     variety: "string",
     acreage: "decimal!",
@@ -81,10 +83,16 @@ router.use("/farms", crud({
     notes: "text",
   },
   include: { _count: { select: { harvests: true } } },
-  search: ["farmNumber", "longFarmNumber", "location", "variety"],
+  // The Field ID is the farm's unique identification number: farms are searched by it.
+  search: ["fieldId"],
   filters: ["cropType", "status"],
   orderBy: { farmNumber: "asc" },
-  prepare: (data) => {
+  prepare: async (data, { tx, existing }) => {
+    if (data.fieldId !== undefined) {
+      data.fieldId = normaliseFieldId(data.fieldId);
+      const holder = await tx.cropFarm.findFirst({ where: { fieldId: data.fieldId, ...(existing ? { id: { not: existing.id } } : {}) }, select: { farmNumber: true } });
+      if (holder) throw conflict(`Field ID ${data.fieldId} is already registered to farm ${holder.farmNumber}`);
+    }
     if (data.acreage !== undefined && !(data.acreage > 0)) throw badRequest("Acreage must be more than zero");
     if (data.ratoonCount !== undefined && data.ratoonCount !== null && data.ratoonCount < 0) throw badRequest("Ratoon count cannot be negative");
     if (data.hectares !== undefined && data.hectares !== null && data.acreage !== undefined && data.hectares > data.acreage) throw badRequest("Hectares cannot be more than the acreage");
@@ -163,10 +171,7 @@ router.use("/harvests", crud({
   },
 }));
 
-// ---------------------------------------------------------------------
-// Period reports: monthly, quarterly, half-year and annual.
-// GET /api/crops/reports?crop=tea&period=month&year=2024&index=5&format=json|pdf|csv
-// ---------------------------------------------------------------------
-router.get("/reports", allow("cropFarms", "read"), cropReport);
+// Crop reports (a summary, then one per crop) are department reports:
+// GET /api/reports/department?department=crops&part=sugarcane (modules/reports).
 
 export default router;
