@@ -1,6 +1,6 @@
-import { DAIRY_SESSIONS, optionLabel, optionValues, REPORT_PARTS } from "../../config/catalog.js";
+import { DAIRY_SESSIONS, optionLabel, optionValues, RAW_MILK, REPORT_PARTS } from "../../config/catalog.js";
 import { addDays, bucketsOf, dayText } from "../../lib/periods.js";
-import { stockSummary } from "../../lib/stock.js";
+import { productOrder } from "../../lib/stock.js";
 import { round2 } from "../../lib/validate.js";
 import { ageText as cropAge, cycleName, standingSince } from "../crops/cropCycle.js";
 import { outputFigures, productionDays } from "../mva/production.js";
@@ -98,7 +98,7 @@ const hr = async (db, range) => {
 // ---------------------------------------------------------------------
 // Livestock: the herd, milk, calvings, vaccinations and health, which print
 // together or one at a time (?part=herd|milk|calvings|vaccinations|health).
-// Milk is in kilograms.
+// Milk is in litres.
 
 /** Under a year old is a calf. */
 const CALF_DAYS = 365;
@@ -201,8 +201,8 @@ const livestock = async (db, range) => {
       dairy: dairyName(dairy),
       session: optionLabel("milkSessions", session),
       cows: new Set(records.map((m) => m.animalId)).size,
-      kg: sum(records, "kg"),
-      sent: sum(transfers.filter((t) => t.dairy === dairy && t.session === session), "kg"),
+      litres: sum(records, "litres"),
+      sent: sum(transfers.filter((t) => t.dairy === dairy && t.session === session), "litres"),
     };
   }));
   const perCow = new Map();
@@ -216,13 +216,13 @@ const livestock = async (db, range) => {
       ...Object.fromEntries(["morning", "midday", "evening"].map((s) => [s, sessions.includes(s) ? 0 : ""])),
       total: 0,
     };
-    entry[record.session] = round2(Number(entry[record.session] || 0) + Number(record.kg));
-    entry.total = round2(entry.total + Number(record.kg));
+    entry[record.session] = round2(Number(entry[record.session] || 0) + Number(record.litres));
+    entry.total = round2(entry.total + Number(record.litres));
     perCow.set(key, entry);
   }
-  const totalMilk = sum(milk, "kg");
-  const totalSent = sum(transfers, "kg");
-  const milkAt = (dairy) => sum(milk.filter((m) => m.dairy === dairy), "kg");
+  const totalMilk = sum(milk, "litres");
+  const totalSent = sum(transfers, "litres");
+  const milkAt = (dairy) => sum(milk.filter((m) => m.dairy === dairy), "litres");
 
   // ---- Calvings, vaccinations, health.
   const calfText = (calf) => (calf ? `${calf.tagNumber} (${optionLabel("animalSex", calf.sex)})` : "");
@@ -251,10 +251,10 @@ const livestock = async (db, range) => {
       inPart("herd", { label: "Dry cows", value: count(herd, "dry") }),
       inPart("herd", { label: "Joined the herd", value: joined.length }),
       inPart("herd", { label: "Left the herd", value: left.length }),
-      inPart("milk", { label: "Milk recorded (kg)", value: totalMilk }),
-      ...dairies.map((dairy) => inPart("milk", { label: `${dairyName(dairy)} (kg)`, value: milkAt(dairy) })),
-      inPart("milk", { label: "Sent to MVA (kg)", value: totalSent }),
-      inPart("milk", { label: "Not yet sent (kg)", value: round2(totalMilk - totalSent) }),
+      inPart("milk", { label: "Milk recorded (litres)", value: totalMilk }),
+      ...dairies.map((dairy) => inPart("milk", { label: `${dairyName(dairy)} (litres)`, value: milkAt(dairy) })),
+      inPart("milk", { label: "Sent to MVA (litres)", value: totalSent }),
+      inPart("milk", { label: "Not yet sent (litres)", value: round2(totalMilk - totalSent) }),
       inPart("calvings", { label: "Calvings", value: lactations.length }),
       inPart("calvings", { label: "Calves born", value: lactations.filter((l) => l.calfId).length + twins }),
       inPart("calvings", { label: "Twin births", value: twins }),
@@ -283,18 +283,18 @@ const livestock = async (db, range) => {
       inPart("herd", section("Joined and left the herd", [col("date", "Date", "date"), col("change", "Change"), col("tag", "Tag"), col("name", "Name"), col("dairy", "Dairy"), col("sex", "Sex"), col("mother", "Mother")],
         changes.map(({ date, change, animal: a }) => ({ date, change, tag: a.tagNumber, name: a.name || "", dairy: dairyName(a.dairy), sex: optionLabel("animalSex", a.sex), mother: change === "Born" ? tagOf(a.dam) : "" })))),
 
-      inPart("milk", section("Milk by dairy and session (kg)", [col("dairy", "Dairy"), col("session", "Session"), col("cows", "Cows milked", "number"), col("kg", "Kg", "number"), col("sent", "Sent to MVA (kg)", "number")], sessionRows, ["kg", "sent"])),
-      inPart("milk", breakdown(range, "Milk (kg)", [...dairies.map((dairy) => col(dairy, dairyName(dairy), "number")), col("total", "Total", "number"), col("sent", "Sent to MVA", "number")],
+      inPart("milk", section("Milk by dairy and session (litres)", [col("dairy", "Dairy"), col("session", "Session"), col("cows", "Cows milked", "number"), col("litres", "Litres", "number"), col("sent", "Sent to MVA (litres)", "number")], sessionRows, ["litres", "sent"])),
+      inPart("milk", breakdown(range, "Milk (litres)", [...dairies.map((dairy) => col(dairy, dairyName(dairy), "number")), col("total", "Total", "number"), col("sent", "Sent to MVA", "number")],
         { milk: { rows: milk, date: "date" }, sent: { rows: transfers, date: "date" } },
         ({ milk: records, sent }) => ({
-          ...Object.fromEntries(dairies.map((dairy) => [dairy, sum(records.filter((m) => m.dairy === dairy), "kg")])),
-          total: sum(records, "kg"),
-          sent: sum(sent, "kg"),
+          ...Object.fromEntries(dairies.map((dairy) => [dairy, sum(records.filter((m) => m.dairy === dairy), "litres")])),
+          total: sum(records, "litres"),
+          sent: sum(sent, "litres"),
         }), [...dairies, "total", "sent"])),
-      inPart("milk", section("Milk per cow (kg)", [col("tag", "Tag"), col("name", "Name"), col("dairy", "Dairy"), col("morning", "Morning", "number"), col("midday", "Midday", "number"), col("evening", "Evening", "number"), col("total", "Total", "number")],
+      inPart("milk", section("Milk per cow (litres)", [col("tag", "Tag"), col("name", "Name"), col("dairy", "Dairy"), col("morning", "Morning", "number"), col("midday", "Midday", "number"), col("evening", "Evening", "number"), col("total", "Total", "number")],
         [...perCow.values()].sort((a, b) => a.dairy.localeCompare(b.dairy) || a.tag.localeCompare(b.tag)), ["morning", "midday", "evening", "total"])),
-      inPart("milk", listsEachRecord(range) && section("Milk sent to MVA", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("dairy", "Dairy"), col("session", "Session"), col("kg", "Kg sent", "number"), col("received", "Received by MVA", "number"), col("status", "Status")],
-        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, dairy: dairyName(t.dairy), session: optionLabel("milkSessions", t.session), kg: Number(t.kg), received: t.receivedKg == null ? "" : Number(t.receivedKg), status: optionLabel("transferStatus", t.status) })), ["kg"])),
+      inPart("milk", listsEachRecord(range) && section("Milk sent to MVA", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("dairy", "Dairy"), col("session", "Session"), col("litres", "Litres sent", "number"), col("received", "Received by MVA", "number"), col("status", "Status")],
+        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, dairy: dairyName(t.dairy), session: optionLabel("milkSessions", t.session), litres: Number(t.litres), received: t.receivedLitres == null ? "" : Number(t.receivedLitres), status: optionLabel("transferStatus", t.status) })), ["litres"])),
 
       inPart("calvings", section("Calvings", [col("date", "Date", "date"), col("dam", "Mother"), col("dairy", "Dairy"), col("lactation", "Lactation no.", "number"), col("calf", "Calf"), col("twin", "Twin"), col("sire", "Father")],
         lactations.map((l) => ({
@@ -339,8 +339,8 @@ const productionRegister = (range, days) => {
   ], rows, keys);
 };
 
-// MVA's product output, as on the department's sheet.
-const OUTPUT_KEYS = ["malaKg", "malaLitres", "malaPieces", "malaVariance", "yoghurtKg", "yoghurtLitres", "yoghurt500", "yoghurt250", "yoghurt150", "yoghurtVariance", "fresh250"];
+// MVA's product output, as on the department's sheet. Milk is in litres.
+const OUTPUT_KEYS = ["malaLitres", "malaPieces", "bulkMala", "malaVariance", "yoghurtLitres", "yoghurt1000", "yoghurt500", "yoghurt250", "yoghurt150", "bulkYoghurt", "yoghurtVariance", "fresh250"];
 const outputRegister = (range, figures) => {
   const rows = bucketsOf(range).flatMap((bucket) => {
     const inBucket = figures.filter((row) => row.date >= bucket.from && row.date < bucket.to);
@@ -348,80 +348,130 @@ const outputRegister = (range, figures) => {
   });
   return section("Product output", [
     dateColumn(range),
-    col("malaKg", "Mala processed (kg)", "number"),
     col("malaLitres", "Mala processed (L)", "number"),
     col("malaPieces", "Mala output (pcs)", "number"),
+    col("bulkMala", "Bulk Mala (L)", "number"),
     col("malaVariance", "Mala variance (L)", "number"),
-    col("yoghurtKg", "Yoghurt processed (kg)", "number"),
     col("yoghurtLitres", "Yoghurt processed (L)", "number"),
-    col("yoghurt500", "Yog 500", "number"),
-    col("yoghurt250", "Yog 250", "number"),
-    col("yoghurt150", "Yog 150", "number"),
+    col("yoghurt1000", "Yog 1 litre", "number"),
+    col("yoghurt500", "Yog 500 ml", "number"),
+    col("yoghurt250", "Yog 250 ml", "number"),
+    col("yoghurt150", "Yog 150 ml", "number"),
+    col("bulkYoghurt", "Bulk Yoghurt (L)", "number"),
     col("yoghurtVariance", "Yoghurt variance (L)", "number"),
-    col("fresh250", "Fresh 250 (pcs)", "number"),
+    col("fresh250", "Fresh Pasteurised Milk (packets)", "number"),
   ], rows, OUTPUT_KEYS);
 };
 
+/**
+ * A stock register for the period: each item's opening stock, what came in
+ * and went out (by kind of movement, see flows) and its closing stock.
+ * before / within: the ledger summed by item (and movement type, within).
+ */
+const stockRegister = (title, items, before, within, flows, firstLabel) => {
+  const opening = new Map(before.map((row) => [row.id, round2(Number(row._sum.quantity || 0))]));
+  const columnOf = (type) => flows.find((flow) => flow.types.includes(type))?.key || "adjusted";
+  const rows = items.flatMap((item) => {
+    const moved = within.filter((row) => row.id === item.id);
+    const totals = Object.fromEntries([...flows.map((flow) => flow.key), "adjusted"].map((key) => [key, 0]));
+    for (const row of moved) {
+      const key = columnOf(row.movementType);
+      const sign = flows.find((flow) => flow.key === key)?.sign ?? 1;
+      totals[key] = round2(totals[key] + sign * Number(row._sum.quantity || 0));
+    }
+    const start = opening.get(item.id) || 0;
+    const closing = round2(start + moved.reduce((total, row) => total + Number(row._sum.quantity || 0), 0));
+    return item.isActive || start !== 0 || moved.length ? [{ item: item.name, unit: item.unit, opening: start, ...totals, closing }] : [];
+  });
+  const adjusted = rows.some((row) => row.adjusted !== 0);
+  return section(title, [
+    col("item", firstLabel),
+    col("unit", "Unit"),
+    col("opening", "Opening stock", "number"),
+    ...flows.map((flow) => col(flow.key, flow.label, "number")),
+    ...(adjusted ? [col("adjusted", "Count adjustment", "number")] : []),
+    col("closing", "Closing stock", "number"),
+  ], rows);
+};
+
+// Raw materials: raw milk in and out at MVA, and the cups; then the products MVA makes.
+const RAW_FLOWS = [
+  { key: "received", label: "Received", sign: 1, types: ["farmer_delivery", "farmer_delivery_reversal", "livestock_transfer", "received"] },
+  { key: "used", label: "Used / allocated", sign: -1, types: ["allocation", "transfer_to_sales", "processing_input", "production", "production_reversal"] },
+];
+const PRODUCT_FLOWS = [
+  { key: "made", label: "Made", sign: 1, types: ["processing_output", "processing_reversal"] },
+  { key: "sent", label: "Sent to Sales", sign: -1, types: ["transfer_to_sales", "transfer_cancelled"] },
+];
+
 const mva = async (db, range) => {
   const span = within(range);
-  const [days, transfers, deliveries, batches, outgoing, stock] = await Promise.all([
+  const [days, transfers, deliveries, batches, outgoing, products, materials, stockBefore, stockWithin, cupsBefore, cupsWithin] = await Promise.all([
     productionDays(db, { date: span }),
     db.milkTransfer.findMany({ where: { date: span, status: "received" }, orderBy: { date: "asc" } }),
     db.milkDelivery.findMany({ where: { date: span }, include: { supplier: true }, orderBy: [{ date: "asc" }, { supplier: { supplierNumber: "asc" } }] }),
     db.processingBatch.findMany({ where: { date: span }, include: { outputs: { include: { product: true } } }, orderBy: { date: "asc" } }),
     db.productTransfer.findMany({ where: { date: span }, include: { items: { include: { product: true } } } }),
-    stockSummary(db, "mva", { upTo: range.asAt }),
+    db.product.findMany({ orderBy: { name: "asc" } }),
+    db.rawMaterial.findMany({ orderBy: { code: "asc" } }),
+    db.stockMovement.groupBy({ by: ["productId"], where: { location: "mva", date: { lt: range.from } }, _sum: { quantity: true } }),
+    db.stockMovement.groupBy({ by: ["productId", "movementType"], where: { location: "mva", date: span }, _sum: { quantity: true } }),
+    db.rawMaterialMovement.groupBy({ by: ["materialId"], where: { date: { lt: range.from } }, _sum: { quantity: true } }),
+    db.rawMaterialMovement.groupBy({ by: ["materialId", "movementType"], where: { date: span }, _sum: { quantity: true } }),
   ]);
   const figures = batches.map((batch) => ({ date: batch.date, ...outputFigures(batch) }));
-  const fromLivestock = sum(transfers, "receivedKg");
+  const fromLivestock = sum(transfers, "receivedLitres");
   const fromFarmers = sum(deliveries, "litres");
+  // A delivery of 0 litres is milk that was all rejected; it carries the remarks.
+  const rejected = deliveries.filter((d) => d.notes);
   const perFarmer = new Map();
-  for (const d of deliveries) {
+  for (const d of deliveries.filter((delivery) => Number(delivery.litres) > 0)) {
     const entry = perFarmer.get(d.supplierId) || { number: d.supplier.supplierNumber, farmer: name(d.supplier), morning: 0, midday: 0, evening: 0, litres: 0, amount: 0 };
     entry[d.session] = round2(entry[d.session] + Number(d.litres));
     entry.litres = round2(entry.litres + Number(d.litres));
     entry.amount = round2(entry.amount + Number(d.amount));
     perFarmer.set(d.supplierId, entry);
   }
-  const outputs = new Map();
-  for (const batch of batches) {
-    for (const o of batch.outputs) outputs.set(o.product.name, round2((outputs.get(o.product.name) || 0) + Number(o.quantity)));
-  }
-  const sent = new Map();
-  for (const t of outgoing) {
-    for (const item of t.items) sent.set(item.product.name, round2((sent.get(item.product.name) || 0) + Number(item.quantity)));
-  }
+  // The stock registers: raw milk and the cups, then what MVA makes.
+  const byProduct = (rows) => rows.map((row) => ({ ...row, id: row.productId }));
+  const byMaterial = (rows) => rows.map((row) => ({ ...row, id: row.materialId }));
+  const rawMilk = products.find((p) => p.code === RAW_MILK);
+  const cupSize = (m) => Number(/_(\d+)$/.exec(m.usedFor || "")?.[1] || 0);
+  const cups = [...materials].sort((a, b) => cupSize(a) - cupSize(b));
+  const rawMaterials = stockRegister("Raw materials", [rawMilk, ...cups].filter(Boolean), [...byProduct(stockBefore), ...byMaterial(cupsBefore)], [...byProduct(stockWithin), ...byMaterial(cupsWithin)], RAW_FLOWS, "Item");
   return {
     title: "Milk Value Addition",
     parts: REPORT_PARTS.mva,
     summary: [
-      inPart("production", { label: "Milk from Livestock (kg)", value: fromLivestock }),
+      inPart("production", { label: "Milk from Livestock (litres)", value: fromLivestock }),
       inPart("production", { label: "Milk from farmers (litres)", value: fromFarmers }),
       inPart("production", { label: "Farmers delivering", value: perFarmer.size }),
-      inPart("production", { label: "Total intake", value: sum(days, "total") }),
-      inPart("production", { label: "Milk allocated", value: sum(days, "allocated") }),
+      inPart("production", { label: "Total intake (litres)", value: sum(days, "total") }),
+      inPart("production", { label: "Milk allocated (litres)", value: sum(days, "allocated") }),
       inPart("production", { label: "Production variance (L)", value: sum(days, "variance") }),
       inPart("output", { label: "Product output variance (L)", value: round2(sum(figures, "malaVariance") + sum(figures, "yoghurtVariance")) }),
       { label: "Transfers to Sales", value: outgoing.length },
       { label: "Farmer milk value", value: sum(deliveries, "amount"), type: "money" },
+      { label: "Milk rejected at collection", value: rejected.length },
     ],
     sections: [
       inPart("production", productionRegister(range, days)),
       inPart("output", outputRegister(range, figures)),
       section("Farmer deliveries", [col("number", "No."), col("farmer", "Farmer"), col("morning", "Morning", "number"), col("midday", "Midday", "number"), col("evening", "Evening", "number"), col("litres", "Litres", "number"), col("amount", "Value", "money")],
         [...perFarmer.values()], ["morning", "midday", "evening", "litres", "amount"]),
-      listsEachRecord(range) && section("Received from Livestock", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("dairy", "Dairy"), col("session", "Session"), col("sent", "Sent (kg)", "number"), col("received", "Received (kg)", "number")],
-        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, dairy: optionLabel("dairies", t.dairy), session: optionLabel("milkSessions", t.session), sent: Number(t.kg), received: Number(t.receivedKg) })), ["sent", "received"]),
-      section("Products made and sent to Sales", [col("product", "Product"), col("made", "Made", "number"), col("sent", "Sent to Sales", "number")],
-        [...new Set([...outputs.keys(), ...sent.keys()])].map((product) => ({ product, made: outputs.get(product) || 0, sent: sent.get(product) || 0 }))),
-      section(`MVA stock at ${dayText(range.asAt)}`, [col("name", "Product"), col("unit", "Unit"), col("onHand", "On hand", "number")], stock),
+      section("Milk rejected at collection", [col("date", "Date", "date"), col("session", "Session"), col("number", "No."), col("farmer", "Farmer"), col("litres", "Litres accepted", "number"), col("remarks", "Remarks", undefined, 3)],
+        rejected.map((d) => ({ date: d.date, session: optionLabel("milkSessions", d.session), number: d.supplier.supplierNumber, farmer: name(d.supplier), litres: Number(d.litres), remarks: d.notes }))),
+      listsEachRecord(range) && section("Received from Livestock", [col("date", "Date", "date"), col("transferNumber", "Transfer"), col("dairy", "Dairy"), col("session", "Session"), col("sent", "Sent (litres)", "number"), col("received", "Received (litres)", "number")],
+        transfers.map((t) => ({ date: t.date, transferNumber: t.transferNumber, dairy: optionLabel("dairies", t.dairy), session: optionLabel("milkSessions", t.session), sent: Number(t.litres), received: Number(t.receivedLitres) })), ["sent", "received"]),
+      rawMaterials,
+      stockRegister("Products", products.filter((p) => p.code !== RAW_MILK).sort(productOrder), byProduct(stockBefore), byProduct(stockWithin), PRODUCT_FLOWS, "Product"),
     ].filter(Boolean),
   };
 };
 
 // ---------------------------------------------------------------------
 // Products always on the local sales register, in the order of the paper sheet.
-const LOCAL_SHEET = ["MALA", "RAW_MILK", "YOGHURT_500", "YOGHURT_250", "YOGHURT_150"];
+const LOCAL_SHEET = ["MALA", "RAW_MILK", "YOGHURT_1000", "YOGHURT_500", "YOGHURT_250", "YOGHURT_150"];
 
 // The Store column each kind of stock movement belongs to. Stock going out
 // reads as a positive quantity in its column. Anything else (a count

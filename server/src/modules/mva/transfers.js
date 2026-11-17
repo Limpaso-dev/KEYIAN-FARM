@@ -18,7 +18,7 @@ export const sendToSales = async (tx, { date, notes, items }) => {
   if (!items.length) throw badRequest("Enter a quantity for at least one product");
   if (new Set(items.map((i) => i.productId)).size !== items.length) throw badRequest("List each product only once");
   const rawMilk = await productByCode(tx, RAW_MILK);
-  if (items.some((line) => line.productId === rawMilk.id)) throw badRequest("Raw milk goes to Sales through the L.Sale allocation");
+  if (items.some((line) => line.productId === rawMilk.id)) throw badRequest("Raw milk goes to Sales through the local sale allocation");
   const created = await tx.productTransfer.create({
     data: { date, notes, transferNumber: await nextNumber(tx, "PTR", date), items: { create: items } },
     include: transferInclude,

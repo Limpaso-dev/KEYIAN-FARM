@@ -136,11 +136,13 @@ export const navigation = [
       { key: "collection", label: "Farmer milk", group: "Farmers", show: can("milkDeliveries") },
       { key: "farmers", label: "Farmer register", group: "Farmers", show: can("milkSuppliers") },
       { key: "prices", label: "Milk price", group: "Farmers", show: can("milkPrices") },
-      { key: "livestock", label: "From Livestock", count: "milkFromLivestock", show: (a) => a.can("milkTransfers", "receive") || a.user?.department === "mva" },
+      { key: "livestock", label: "Keiyian Livestock Section", count: "milkFromLivestock", show: (a) => a.can("milkTransfers", "receive") || a.user?.department === "mva" },
       { key: "allocation", label: "Allocation", group: "Production & Processing", show: can("milkAllocations") },
       { key: "processing", label: "Product output", group: "Production & Processing", show: can("processingBatches") },
       { key: "transfers", label: "To Sales", show: can("productTransfers") },
-      { key: "stock", label: "Stock", show: can("mvaStock") },
+      // Stock in two: what production uses (raw milk, the yoghurt cups) and what it makes.
+      { key: "materials", label: "Raw materials", group: "Stock", show: can("rawMaterials") },
+      { key: "stock", label: "Products", group: "Stock", show: can("mvaStock") },
     ],
   },
   {

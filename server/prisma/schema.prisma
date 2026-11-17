@@ -395,7 +395,7 @@ model HealthRecord {
   @@index([disease])
 }
 
-/// Milk per cow per session, weighed in kilograms. Dairy A milks in the
+/// Milk per cow per session, in litres. Dairy A milks in the
 /// morning and evening, Dairy C also at midday (config/catalog.js DAIRY_SESSIONS).
 model MilkRecord {
   id        String   @id @default(uuid())
@@ -404,7 +404,7 @@ model MilkRecord {
   /// The dairy the cow was milked at (she may move later).
   dairy     String   @default("dairy_a")
   session   String
-  kg        Decimal  @db.Decimal(10, 2)
+  litres    Decimal  @db.Decimal(10, 2)
   createdAt DateTime @default(now())
   animal    Animal   @relation(fields: [animalId], references: [id], onDelete: Restrict)
 
@@ -412,16 +412,16 @@ model MilkRecord {
   @@index([date])
 }
 
-/// Milk sent from Livestock to MVA, in kilograms. MVA confirms what it received.
+/// Milk sent from Livestock to MVA, in litres. MVA confirms what it received.
 model MilkTransfer {
   id             String    @id @default(uuid())
   transferNumber String    @unique
   date           DateTime  @db.Date
   session        String
   dairy          String    @default("dairy_a")
-  kg             Decimal   @db.Decimal(10, 2)
+  litres         Decimal   @db.Decimal(10, 2)
   status         String    @default("sent")
-  receivedKg     Decimal?  @db.Decimal(10, 2)
+  receivedLitres Decimal?  @db.Decimal(10, 2)
   receivedAt     DateTime?
   receivedById   String?
   notes          String?
@@ -472,6 +472,8 @@ model MilkDelivery {
   pricePerLitre Decimal         @db.Decimal(10, 2)
   amount        Decimal         @db.Decimal(18, 2)
   paymentRunId  String?
+  /// Remarks on milk rejected at collection. A farmer whose milk was all
+  /// rejected has a delivery of 0 litres carrying the remarks.
   notes         String?
   createdAt     DateTime        @default(now())
   supplier      MilkSupplier    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
@@ -480,8 +482,7 @@ model MilkDelivery {
   @@index([date, supplierId])
 }
 
-/// One processing run: raw milk in, finished products out.
-/// Where one day's milk went: Mala, Yoghurt, NKCC, Own use, L.Sale, Staff,
+/// Where one day's milk went: Mala, Yoghurt, NKCC, Own use, Local sale, Staff,
 /// Police, School, Spoilage (the list is in config/catalog.js).
 model MilkAllocation {
   id        String               @id @default(uuid())
@@ -503,17 +504,19 @@ model MilkAllocationLine {
   @@unique([allocationId, destination])
 }
 
+/// One day's product output: the litres of milk processed into Mala and
+/// Yoghurt, and the packs (and bulk litres) made from them.
 model ProcessingBatch {
-  id           String             @id @default(uuid())
-  batchNumber  String             @unique
-  date         DateTime           @db.Date
-  rawMilkInput Decimal            @db.Decimal(10, 2)
-  malaKg       Decimal            @default(0) @db.Decimal(10, 2)
-  yoghurtKg    Decimal            @default(0) @db.Decimal(10, 2)
-  fresh250     Int                @default(0)
-  notes        String?
-  createdAt    DateTime           @default(now())
-  outputs      ProcessingOutput[]
+  id            String             @id @default(uuid())
+  batchNumber   String             @unique
+  date          DateTime           @db.Date
+  rawMilkInput  Decimal            @db.Decimal(10, 2)
+  malaLitres    Decimal            @default(0) @db.Decimal(10, 2)
+  yoghurtLitres Decimal            @default(0) @db.Decimal(10, 2)
+  fresh250      Int                @default(0)
+  notes         String?
+  createdAt     DateTime           @default(now())
+  outputs       ProcessingOutput[]
 
   @@index([date])
 }
@@ -595,6 +598,41 @@ model StockMovement {
 
   @@index([productId, location])
   @@index([date, location])
+  @@index([referenceType, referenceId])
+}
+
+/// What MVA uses up in production besides the milk itself: the cups yoghurt
+/// is packed in (150 ml, 250 ml, 500 ml and 1 litre). Each piece of the
+/// product named in usedFor takes one.
+model RawMaterial {
+  id        String                @id @default(uuid())
+  code      String                @unique
+  name      String
+  unit      String
+  /// The product code each piece of which uses one of these (YOGHURT_500 a 500 ml cup).
+  usedFor   String?               @unique
+  isActive  Boolean               @default(true)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+  movements RawMaterialMovement[]
+}
+
+/// Every change to a raw material's stock is one signed row: received (+),
+/// used in production (-), an output deleted (+), a count adjustment (+/-).
+model RawMaterialMovement {
+  id            String      @id @default(uuid())
+  materialId    String
+  quantity      Decimal     @db.Decimal(12, 2)
+  movementType  String
+  referenceType String?
+  referenceId   String?
+  date          DateTime    @db.Date
+  notes         String?
+  createdAt     DateTime    @default(now())
+  material      RawMaterial @relation(fields: [materialId], references: [id], onDelete: Restrict)
+
+  @@index([materialId])
+  @@index([date])
   @@index([referenceType, referenceId])
 }
 
@@ -956,13 +994,13 @@ model Account {
 /// One income or expense entry. category is one of the fixed income or
 /// expense heads configured in src/config/accounts.js.
 model Transaction {
-  id          String      @id @default(uuid())
-  reference   String      @unique
-  date        DateTime    @db.Date
+  id          String   @id @default(uuid())
+  reference   String   @unique
+  date        DateTime @db.Date
   type        String
   category    String
   accountId   String
-  amount      Decimal     @db.Decimal(18, 2)
+  amount      Decimal  @db.Decimal(18, 2)
   description String
   party       String?
   /// One of Accounts' departments (catalog ACCOUNT_DEPARTMENTS): the staff
@@ -970,13 +1008,13 @@ model Transaction {
   department  String?
   sourceType  String?
   sourceId    String?
-  status      String      @default("posted")
+  status      String   @default("posted")
   voidReason  String?
   createdById String?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  account     Account     @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  createdBy   User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([date, type, category])
   @@index([sourceType, sourceId])
@@ -1026,29 +1064,42 @@ model MemberPayment {
 
 /// A department asks for something; Accounts or the General Manager decides.
 model Requisition {
-  id                String            @id @default(uuid())
-  requisitionNumber String            @unique
+  id                String               @id @default(uuid())
+  requisitionNumber String               @unique
   department        Department
   title             String
   /// The purpose given for the whole requisition before each item carried its own.
   purpose           String?
-  priority          String            @default("normal")
-  totalAmount       Decimal           @db.Decimal(18, 2)
-  status            String            @default("pending")
+  priority          String               @default("normal")
+  totalAmount       Decimal              @db.Decimal(18, 2)
+  status            String               @default("pending")
   requestedById     String
   decidedById       String?
   decidedAt         DateTime?
   decisionComment   String?
   fulfilledAt       DateTime?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
-  requestedBy       User              @relation("RequisitionRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
-  decidedBy         User?             @relation("RequisitionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  requestedBy       User                 @relation("RequisitionRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy         User?                @relation("RequisitionDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
   items             RequisitionItem[]
   storeIssues       StoreIssue[]
   purchaseOrders    PurchaseOrder[]
+  proforma          RequisitionProforma?
 
   @@index([department, status, createdAt])
+}
+
+/// The supplier's proforma invoice (a PDF) sent with a requisition, kept
+/// apart so lists of requisitions do not carry the file.
+model RequisitionProforma {
+  id            String      @id @default(uuid())
+  requisitionId String      @unique
+  fileName      String
+  size          Int
+  data          Bytes
+  createdAt     DateTime    @default(now())
+  requisition   Requisition @relation(fields: [requisitionId], references: [id], onDelete: Cascade)
 }
 
 model RequisitionItem {

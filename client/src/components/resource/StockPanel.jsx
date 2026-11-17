@@ -7,38 +7,23 @@ import { ActionButton } from "./ActionButton";
 import { ResourcePage } from "./ResourcePage";
 import { Alert, Spinner } from "../ui/ui";
 import { KeyFigures } from "../ui/KeyFigures";
+import { MOVEMENT_LABELS } from "./movementLabels";
 
-const MOVEMENT_LABELS = {
-  livestock_transfer: "From Livestock",
-  farmer_delivery: "Farmer delivery",
-  farmer_delivery_reversal: "Farmer delivery deleted",
-  processing_input: "Used in processing",
-  processing_output: "Made in processing",
-  transfer_to_sales: "Sent to Sales",
-  transfer_cancelled: "Transfer cancelled",
-  received_from_mva: "Received from MVA",
-  local_sale: "Local sale",
-  sale_reversal: "Sale deleted",
-  vehicle_dispatch: "Loaded on vehicle",
-  vehicle_return: "Returned by vehicle",
-  dispatch_cancelled: "Dispatch cancelled",
-  damage: "Damage / write-off",
-  replacement: "Customer replacement",
-  adjustment: "Stock count adjustment",
-  office: "Office use",
-  allocation: "Allocated",
-  processing_reversal: "Output deleted",
-};
-
-/** Stock on hand at MVA or Sales, with adjustments (heads) and history. */
-export const StockPanel = ({ location }) => {
+/**
+ * Stock on hand at MVA or Sales, with adjustments (heads) and history.
+ * except: product codes left out (MVA's Products page leaves out raw milk,
+ * which is on its Raw materials page).
+ */
+export const StockPanel = ({ location, except = [], title }) => {
   const { can } = useAuth();
   const resource = location === "mva" ? "mvaStock" : "salesStock";
-  const { data, loading, error, reload } = useFetch(`/stock/${location}`);
+  const params = except.length ? { except: except.join(",") } : undefined;
+  const { data, loading, error, reload } = useFetch(`/stock/${location}`, params);
 
   const movements = {
     resource,
     endpoint: `/stock/${location}/movements`,
+    params,
     title: "Stock movements",
     deletable: false,
     editFields: false,
@@ -59,12 +44,12 @@ export const StockPanel = ({ location }) => {
       {/* Stock on hand: a ruled strip of figures on the page, no box. */}
       <section>
         <div className="mb-2.5 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-[15px] font-semibold text-slate-900">Stock on hand at {location === "mva" ? "MVA" : "Sales"}</h2>
+          <h2 className="text-[15px] font-semibold text-slate-900">{title || `Stock on hand at ${location === "mva" ? "MVA" : "Sales"}`}</h2>
           {can(resource, "adjust") && (
             <ActionButton label="Adjust after count" icon={SlidersHorizontal} path={`/stock/${location}/adjustments`} onDone={reload}
               intro={<Alert tone="warning">Use this only to correct stock after a physical count. Enter a negative number to reduce stock.</Alert>}
               fields={[
-                { name: "productId", label: "Product", type: "select", ref: refs.allProducts, required: true, span: 2 },
+                { name: "productId", label: "Product", type: "select", ref: except.length ? { ...refs.allProducts, filter: (p) => !except.includes(p.code) } : refs.allProducts, required: true, span: 2 },
                 { name: "quantity", label: "Quantity to add (+) or remove (-)", type: "number", min: -1000000, required: true },
                 { name: "date", label: "Date", type: "date", required: true },
                 { name: "reason", label: "Reason", type: "textarea", required: true },

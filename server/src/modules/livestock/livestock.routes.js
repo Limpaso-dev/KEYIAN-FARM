@@ -69,11 +69,11 @@ const placeInDairy = (data, existing = {}) => {
 };
 
 // ---------------------------------------------------------------------
-// What is left of a milking to send to MVA: the kilograms recorded for it
+// What is left of a milking to send to MVA: the litres recorded for it
 // less what was already sent. Recording and sending take the same lock, so
 // two clerks cannot send the same milk at once.
 // ---------------------------------------------------------------------
-const kgText = (kg) => `${Number(kg.toFixed(2))} kg`;
+const litresText = (litres) => `${Number(litres.toFixed(2))} L`;
 const milkingName = ({ date, dairy, session }) =>
   `${optionLabel("dairies", dairy)} ${optionLabel("milkSessions", session).toLowerCase()} milking of ${date.toISOString().slice(0, 10)}`;
 
@@ -83,25 +83,25 @@ const lockMilking = (tx, { date, dairy, session }) =>
 const milkingTotals = async (tx, milking, { exceptTransfer } = {}) => {
   const { date, dairy, session } = milking;
   const [recorded, sent] = await Promise.all([
-    tx.milkRecord.aggregate({ where: { date, dairy, session }, _sum: { kg: true } }),
-    tx.milkTransfer.aggregate({ where: { date, dairy, session, ...(exceptTransfer && { id: { not: exceptTransfer } }) }, _sum: { kg: true } }),
+    tx.milkRecord.aggregate({ where: { date, dairy, session }, _sum: { litres: true } }),
+    tx.milkTransfer.aggregate({ where: { date, dairy, session, ...(exceptTransfer && { id: { not: exceptTransfer } }) }, _sum: { litres: true } }),
   ]);
-  const recordedKg = Number(recorded._sum.kg || 0);
-  const sentKg = Number(sent._sum.kg || 0);
-  return { recorded: recordedKg, sent: sentKg, left: round2(recordedKg - sentKg) };
+  const recordedLitres = Number(recorded._sum.litres || 0);
+  const sentLitres = Number(sent._sum.litres || 0);
+  return { recorded: recordedLitres, sent: sentLitres, left: round2(recordedLitres - sentLitres) };
 };
 
 /** Milk can be sent only from what was recorded at that milking and not sent yet. */
-const checkMilkToSend = async (tx, milking, kg, options) => {
+const checkMilkToSend = async (tx, milking, litres, options) => {
   const { recorded, sent, left } = await milkingTotals(tx, milking, options);
-  if (kg <= left + 0.001) return;
+  if (litres <= left + 0.001) return;
   if (!recorded) throw badRequest(`No milk is recorded for the ${milkingName(milking)}. Record the milking first.`);
-  throw badRequest(`Only ${kgText(Math.max(left, 0))} of the ${milkingName(milking)} is left to send (${kgText(recorded)} recorded, ${kgText(sent)} already sent).`);
+  throw badRequest(`Only ${litresText(Math.max(left, 0))} of the ${milkingName(milking)} is left to send (${litresText(recorded)} recorded, ${litresText(sent)} already sent).`);
 };
 
 /**
  * A milking's records cannot drop below what was already sent from it to
- * MVA. `change`: the kilograms about to be added to its records (less than
+ * MVA. `change`: the litres about to be added to its records (less than
  * zero when taken off), or 0 once saved, with `before` the total before the
  * save. Raising the records is always allowed, even for milk sent before
  * this rule, when more could be sent than was recorded.
@@ -112,7 +112,7 @@ const checkMilkStillCovers = async (tx, milking, change = 0, before = null) => {
   const after = round2(recorded + change);
   if (after + 0.001 >= sent) return;
   if (before !== null && after + 0.001 >= before) return;
-  throw conflict(`${kgText(sent)} of the ${milkingName(milking)} has already been sent to MVA, so the milk recorded for it cannot go down to ${kgText(after)}. Change the transfer first.`);
+  throw conflict(`${litresText(sent)} of the ${milkingName(milking)} has already been sent to MVA, so the milk recorded for it cannot go down to ${litresText(after)}. Change the transfer first.`);
 };
 
 router.use("/animals", crud({
@@ -325,16 +325,16 @@ router.use("/health-records", crud({
 }));
 
 // ---------------------------------------------------------------------
-// Milk records: kilograms per cow per session, entered in bulk for one
+// Milk records: litres per cow per session, entered in bulk for one
 // dairy's milking.
 // ---------------------------------------------------------------------
 const milkRouter = express.Router();
 milkRouter.post("/", allow("milkRecords", "write"), async (req, res) => {
   const { date, dairy, session } = parseBody({ date: "date!", dairy: "option:dairies!", session: "option:milkSessions!" }, req.body);
   checkSession(dairy, session);
-  const lines = parseItems(req.body.records, { animalId: "id!", kg: "decimal!" }, { label: "milk records" })
-    .filter((line) => line.kg > 0);
-  if (!lines.length) throw badRequest("Enter the kilograms for at least one cow");
+  const lines = parseItems(req.body.records, { animalId: "id!", litres: "decimal!" }, { label: "milk records" })
+    .filter((line) => line.litres > 0);
+  if (!lines.length) throw badRequest("Enter the litres for at least one cow");
   const result = await inTransaction(async (tx) => {
     await lockMilking(tx, { date, dairy, session });
     const { recorded: before } = await milkingTotals(tx, { date, dairy, session });
@@ -346,11 +346,11 @@ milkRouter.post("/", allow("milkRecords", "write"), async (req, res) => {
     for (const line of lines) {
       saved.push(await tx.milkRecord.upsert({
         where: { animalId_date_session: { animalId: line.animalId, date, session } },
-        create: { animalId: line.animalId, date, dairy, session, kg: line.kg },
-        update: { kg: line.kg, dairy },
+        create: { animalId: line.animalId, date, dairy, session, litres: line.litres },
+        update: { litres: line.litres, dairy },
       }));
     }
-    // Weighing a cow again can lower the milking's total, but not below what went to MVA.
+    // Measuring a cow again can lower the milking's total, but not below what went to MVA.
     await checkMilkStillCovers(tx, { date, dairy, session }, 0, before);
     await audit(tx, { user: req.user, action: "record_milk", entity: "milkRecord", metadata: { date, dairy, session, cows: saved.length } });
     return saved;
@@ -361,16 +361,16 @@ milkRouter.post("/", allow("milkRecords", "write"), async (req, res) => {
 // Daily totals by dairy and session, plus what was already sent to MVA.
 milkRouter.get("/daily", allow("milkRecords", "read"), async (req, res) => {
   const where = dateRange("date", req.query);
-  const records = await prisma.milkRecord.groupBy({ by: ["date", "dairy", "session"], where, _sum: { kg: true }, _count: true, orderBy: { date: "desc" } });
-  const transfers = await prisma.milkTransfer.groupBy({ by: ["date", "dairy", "session"], where, _sum: { kg: true } });
+  const records = await prisma.milkRecord.groupBy({ by: ["date", "dairy", "session"], where, _sum: { litres: true }, _count: true, orderBy: { date: "desc" } });
+  const transfers = await prisma.milkTransfer.groupBy({ by: ["date", "dairy", "session"], where, _sum: { litres: true } });
   const keyOf = (row) => `${row.date.toISOString()}|${row.dairy}|${row.session}`;
-  const sent = new Map(transfers.map((row) => [keyOf(row), Number(row._sum.kg || 0)]));
+  const sent = new Map(transfers.map((row) => [keyOf(row), Number(row._sum.litres || 0)]));
   ok(res, records.map((row) => ({
     date: row.date,
     dairy: row.dairy,
     session: row.session,
     cows: row._count,
-    kg: Number(row._sum.kg || 0),
+    litres: Number(row._sum.litres || 0),
     sentToMva: sent.get(keyOf(row)) || 0,
   })));
 });
@@ -380,7 +380,7 @@ router.use("/milk-records", crud({
   resource: "milkRecords",
   model: "milkRecord",
   fields: {},
-  updateFields: { kg: "decimal!" },
+  updateFields: { litres: "decimal!" },
   include: { animal: animalBrief },
   dateField: "date",
   filters: ["animalId", "session", "dairy"],
@@ -388,28 +388,28 @@ router.use("/milk-records", crud({
   create: false,
   // A milking's records cannot drop below what was sent from it to MVA.
   prepare: async (data, { tx, existing }) => {
-    if (data.kg === undefined) return;
+    if (data.litres === undefined) return;
     await lockMilking(tx, existing);
-    await checkMilkStillCovers(tx, existing, data.kg - Number(existing.kg));
+    await checkMilkStillCovers(tx, existing, data.litres - Number(existing.litres));
   },
   beforeDelete: async (record, { tx }) => {
     await lockMilking(tx, record);
-    await checkMilkStillCovers(tx, record, -Number(record.kg));
+    await checkMilkStillCovers(tx, record, -Number(record.litres));
   },
 }));
 
 // ---------------------------------------------------------------------
-// Milk transfers to MVA, in kilograms. Livestock sends; MVA confirms what
-// arrived, and only then does the milk enter MVA's raw milk stock (kg).
+// Milk transfers to MVA, in litres. Livestock sends; MVA confirms what
+// arrived, and only then does the milk enter MVA's raw milk stock.
 // ---------------------------------------------------------------------
 const transferRouter = express.Router();
 transferRouter.post("/", allow("milkTransfers", "write"), async (req, res) => {
-  const data = parseBody({ date: "date!", dairy: "option:dairies!", session: "option:milkSessions!", kg: "decimal!", notes: "text" }, req.body);
+  const data = parseBody({ date: "date!", dairy: "option:dairies!", session: "option:milkSessions!", litres: "decimal!", notes: "text" }, req.body);
   checkSession(data.dairy, data.session);
-  if (!(data.kg > 0)) throw badRequest("The kilograms sent must be more than zero");
+  if (!(data.litres > 0)) throw badRequest("The litres sent must be more than zero");
   const transfer = await inTransaction(async (tx) => {
     await lockMilking(tx, data);
-    await checkMilkToSend(tx, data, data.kg);
+    await checkMilkToSend(tx, data, data.litres);
     const created = await tx.milkTransfer.create({
       data: { ...data, transferNumber: await nextNumber(tx, "MTR", data.date) },
     });
@@ -420,18 +420,18 @@ transferRouter.post("/", allow("milkTransfers", "write"), async (req, res) => {
 });
 
 transferRouter.post("/:id/receive", allow("milkTransfers", "receive"), async (req, res) => {
-  const { receivedKg, notes } = parseBody({ receivedKg: "decimal!", notes: "text" }, req.body);
+  const { receivedLitres, notes } = parseBody({ receivedLitres: "decimal!", notes: "text" }, req.body);
   const transfer = await inTransaction(async (tx) => {
     const existing = await tx.milkTransfer.findUnique({ where: { id: req.params.id } });
     if (!existing) throw notFound("Milk transfer");
     if (existing.status !== "sent") throw conflict("This transfer has already been received");
-    if (receivedKg > Number(existing.kg)) throw badRequest("The kilograms received cannot be more than the kilograms sent");
+    if (receivedLitres > Number(existing.litres)) throw badRequest("The litres received cannot be more than the litres sent");
     const rawMilk = await productByCode(tx, RAW_MILK);
     const updated = await tx.milkTransfer.update({
       where: { id: existing.id },
       data: {
         status: "received",
-        receivedKg,
+        receivedLitres,
         receivedAt: new Date(),
         receivedById: req.user.id,
         notes: [existing.notes, notes].filter(Boolean).join(" | ") || null,
@@ -440,7 +440,7 @@ transferRouter.post("/:id/receive", allow("milkTransfers", "receive"), async (re
     await moveStock(tx, {
       productId: rawMilk.id,
       location: "mva",
-      quantity: receivedKg,
+      quantity: receivedLitres,
       movementType: "livestock_transfer",
       referenceType: "milkTransfer",
       referenceId: existing.id,
@@ -458,23 +458,23 @@ router.use("/milk-transfers", crud({
   resource: "milkTransfers",
   model: "milkTransfer",
   fields: {},
-  updateFields: { dairy: "option:dairies!", session: "option:milkSessions!", kg: "decimal!", notes: "text" },
+  updateFields: { dairy: "option:dairies!", session: "option:milkSessions!", litres: "decimal!", notes: "text" },
   dateField: "date",
   filters: ["status", "session", "dairy"],
   orderBy: [{ date: "desc" }, { createdAt: "desc" }],
   create: false,
   prepare: async (data, { tx, existing }) => {
     if (existing.status !== "sent") throw conflict("A received transfer cannot be changed");
-    if (data.kg !== undefined && !(data.kg > 0)) throw badRequest("The kilograms sent must be more than zero");
+    if (data.litres !== undefined && !(data.litres > 0)) throw badRequest("The litres sent must be more than zero");
     const merged = { ...existing, ...data };
     checkSession(merged.dairy, merged.session);
     // Sending more, or from another milking: what it sends must still be there, not counting
     // what this transfer already took. (Notes, or less milk, can always be changed - even on
     // a transfer from before this rule, sent without the milking recorded.)
     const sameMilking = merged.dairy === existing.dairy && merged.session === existing.session;
-    if (sameMilking && Number(merged.kg) <= Number(existing.kg)) return;
+    if (sameMilking && Number(merged.litres) <= Number(existing.litres)) return;
     await lockMilking(tx, merged);
-    await checkMilkToSend(tx, merged, Number(merged.kg), { exceptTransfer: existing.id });
+    await checkMilkToSend(tx, merged, Number(merged.litres), { exceptTransfer: existing.id });
   },
   beforeDelete: (transfer) => {
     if (transfer.status !== "sent") throw conflict("A received transfer cannot be deleted");

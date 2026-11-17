@@ -1,0 +1,26 @@
+// What each kind of stock movement is called in the stock histories (MVA, Sales, MVA's raw materials).
+export const MOVEMENT_LABELS = {
+  livestock_transfer: "From Livestock",
+  farmer_delivery: "Farmer delivery",
+  farmer_delivery_reversal: "Farmer delivery deleted",
+  processing_input: "Used in processing",
+  processing_output: "Made in processing",
+  transfer_to_sales: "Sent to Sales",
+  transfer_cancelled: "Transfer cancelled",
+  received_from_mva: "Received from MVA",
+  local_sale: "Local sale",
+  sale_reversal: "Sale deleted",
+  vehicle_dispatch: "Loaded on vehicle",
+  vehicle_return: "Returned by vehicle",
+  dispatch_cancelled: "Dispatch cancelled",
+  damage: "Damage / write-off",
+  replacement: "Customer replacement",
+  adjustment: "Stock count adjustment",
+  office: "Office use",
+  allocation: "Allocated",
+  processing_reversal: "Output deleted",
+  // MVA's raw materials (the yoghurt cups).
+  received: "Received",
+  production: "Used in production",
+  production_reversal: "Output deleted, cups back",
+};

@@ -13,7 +13,9 @@ import { parseBody, parseItems, round2 } from "../../lib/validate.js";
 //   Accounts head / GM -> approved | rejected | returned (with comment)
 //   requester          -> edits a returned one and resubmits (pending)
 //   Accounts           -> fulfilled (bought or paid for)
-// Each item carries its own purpose (why it is needed).
+// Each item carries its own purpose (why it is needed). A requisition can
+// carry the supplier's proforma invoice, a PDF, sent with it and replaced or
+// removed when a returned one is changed.
 // Stores raises none: it answers the departments' store requests. Accounts
 // raises none either: it decides them.
 
@@ -24,6 +26,27 @@ const include = {
   decidedBy: { select: { id: true, name: true, role: true } },
   storeIssues: { select: { id: true, issueNumber: true, quantity: true, item: { select: { name: true, unit: true } } } },
   purchaseOrders: { select: { id: true, poNumber: true, status: true, totalAmount: true } },
+  // The file itself is fetched on its own (GET /:id/proforma).
+  proforma: { select: { id: true, fileName: true, size: true, createdAt: true } },
+};
+
+const MAX_PROFORMA_BYTES = 5 * 1024 * 1024;
+
+/**
+ * The proforma invoice sent with a requisition: { name, data } with the PDF
+ * in base64. Not sent: leave it as it is (undefined). null: remove it.
+ */
+const readProforma = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  if (typeof value !== "object" || typeof value.data !== "string") throw badRequest("The proforma invoice could not be read. Attach it again.");
+  const data = Buffer.from(value.data.replace(/^data:[^,]*,/, ""), "base64");
+  if (!data.length) throw badRequest("The proforma invoice is empty. Attach it again.");
+  if (data.length > MAX_PROFORMA_BYTES) throw badRequest("The proforma invoice is larger than 5 MB. Attach a smaller PDF, for example scanned at a lower resolution.");
+  // A PDF starts with %PDF- (within its first kilobyte).
+  if (data.subarray(0, 1024).indexOf("%PDF-") === -1) throw badRequest("The proforma invoice must be a PDF file.");
+  const name = String(value.name || "").replace(/[\\/:*?"<>|\r\n\t]+/g, " ").trim().slice(0, 120) || "proforma-invoice";
+  return { fileName: /\.pdf$/i.test(name) ? name : `${name}.pdf`, size: data.length, data };
 };
 
 const itemFields = { description: "string!", quantity: "decimal!", unit: "string", unitCost: "decimal", purpose: "text!" };
@@ -119,6 +142,20 @@ router.post("/answers/seen", async (req, res) => {
   return ok(res, answers);
 });
 
+// The proforma invoice, to view or save.
+router.get("/:id/proforma", async (req, res) => {
+  const requisition = await prisma.requisition.findUnique({ where: { id: req.params.id }, include: { proforma: true } });
+  if (!requisition || !visible(req.user, requisition)) throw notFound("Requisition");
+  if (!requisition.proforma) throw notFound("Proforma invoice");
+  const { fileName, data } = requisition.proforma;
+  // The name as plain ASCII for old browsers, and in full (RFC 5987) for the rest.
+  const plain = fileName.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "'");
+  const encoded = encodeURIComponent(fileName).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  res.set("Content-Type", "application/pdf");
+  res.set("Content-Disposition", `inline; filename="${plain}"; filename*=UTF-8''${encoded}`);
+  res.send(Buffer.from(data));
+});
+
 router.get("/:id", async (req, res) => {
   const requisition = await prisma.requisition.findUnique({ where: { id: req.params.id }, include });
   if (!requisition || !visible(req.user, requisition)) throw notFound("Requisition");
@@ -135,6 +172,7 @@ router.post("/", async (req, res) => {
   }
   const data = parseBody({ title: "string!", purpose: "text", priority: "option:priorities" }, req.body);
   const items = buildItems(req.body.items);
+  const proforma = readProforma(req.body.proforma);
   const requisition = await inTransaction(async (tx) => {
     const created = await tx.requisition.create({
       data: {
@@ -144,6 +182,7 @@ router.post("/", async (req, res) => {
         requestedById: req.user.id,
         totalAmount: round2(items.reduce((s, i) => s + i.total, 0)),
         items: { create: items },
+        ...(proforma ? { proforma: { create: proforma } } : {}),
       },
       include,
     });
@@ -157,11 +196,15 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const data = parseBody({ title: "string!", purpose: "text", priority: "option:priorities" }, req.body);
   const items = buildItems(req.body.items);
+  const proforma = readProforma(req.body.proforma);
   const requisition = await inTransaction(async (tx) => {
     const existing = await load(tx, req.params.id);
     if (existing.requestedById !== req.user.id) throw forbidden("Only the person who raised it can change this requisition");
     if (existing.status !== "returned") throw conflict("Only a returned requisition can be changed");
     await tx.requisitionItem.deleteMany({ where: { requisitionId: existing.id } });
+    // A new proforma replaces the old one; null takes it off.
+    if (proforma !== undefined) await tx.requisitionProforma.deleteMany({ where: { requisitionId: existing.id } });
+    if (proforma) await tx.requisitionProforma.create({ data: { ...proforma, requisitionId: existing.id } });
     const updated = await tx.requisition.update({
       where: { id: existing.id },
       data: {

@@ -10,14 +10,14 @@ import { useFetch } from "../../lib/useFetch";
 // Milk can go to MVA only from what was recorded at that milking (date, dairy
 // and session) and not sent yet; the server holds to the same rule.
 
-const kg = (value) => `${number(value)} kg`;
+const litres = (value) => `${number(value)} L`;
 const DAILY = "/livestock/milk-records/daily";
 const DAYS_SHOWN = 7;
 
 /** What is left of one milking, from the daily totals (recorded and sent per milking). */
 const milkingOf = (rows, { date: day, dairy, session }) => {
   const row = (rows || []).find((r) => String(r.date).slice(0, 10) === day && r.dairy === dairy && r.session === session);
-  const recorded = row?.kg || 0;
+  const recorded = row?.litres || 0;
   const sent = row?.sentToMva || 0;
   return { recorded, sent };
 };
@@ -25,7 +25,7 @@ const milkingOf = (rows, { date: day, dairy, session }) => {
 /**
  * In the send form: the milk recorded at the chosen milking, what has gone
  * to MVA from it and what is left, with a warning when more is entered.
- * Changing a transfer, its own kilograms count as still here, and it can
+ * Changing a transfer, its own litres count as still here, and it can
  * always be lowered - even one sent before milk had to be recorded first.
  */
 export const MilkLeftNote = ({ values }) => {
@@ -36,22 +36,22 @@ export const MilkLeftNote = ({ values }) => {
   if (loading && !data) return <Skeleton className="h-10 w-full" />;
 
   const totals = milkingOf(data, values);
-  const own = values._sent && values._sent.dairy === values.dairy && values._sent.session === values.session ? values._sent.kg : 0;
+  const own = values._sent && values._sent.dairy === values.dairy && values._sent.session === values.session ? values._sent.litres : 0;
   const sent = Math.round((totals.sent - own) * 100) / 100;
   const left = Math.round((totals.recorded - sent) * 100) / 100;
   // What this form may send: what is left, or - changing a transfer - no more than it already sent.
   const allowed = Math.max(left, own);
-  const typed = values.kg === "" || values.kg == null ? null : Number(values.kg);
+  const typed = values.litres === "" || values.litres == null ? null : Number(values.litres);
   const over = typed !== null && typed > allowed + 0.001;
   const milking = `${label("dairies", values.dairy)} ${label("milkSessions", values.session).toLowerCase()} milking, ${date(values.date)}`;
-  const overLine = over && <p className="mt-1 font-medium text-rose-700">That is more than the {kg(Math.max(allowed, 0))} {own > left ? "this transfer already sent" : "left at this milking"}.</p>;
+  const overLine = over && <p className="mt-1 font-medium text-rose-700">That is more than the {litres(Math.max(allowed, 0))} {own > left ? "this transfer already sent" : "left at this milking"}.</p>;
 
   if (!totals.recorded) {
     return (
       <div role="status" className={cx("border-l-2 pl-3 text-sm", over ? "border-rose-500" : "border-amber-400")}>
         <p className="text-amber-800">
           {own
-            ? `No milk is recorded for the ${milking}: this transfer was sent before milk had to be recorded. Its notes can be changed and its kilograms lowered, not raised.`
+            ? `No milk is recorded for the ${milking}: this transfer was sent before milk had to be recorded. Its notes can be changed and its litres lowered, not raised.`
             : `No milk is recorded for the ${milking}. Record the milking under Milk records before sending it.`}
         </p>
         {overLine}
@@ -61,8 +61,8 @@ export const MilkLeftNote = ({ values }) => {
   return (
     <div role="status" className={cx("border-l-2 pl-3 text-sm", over ? "border-rose-500" : left > 0 ? "border-primary-500" : "border-slate-300")}>
       <p className="text-slate-600">
-        {milking}: <span className="tabular-nums">{kg(totals.recorded)}</span> recorded, <span className="tabular-nums">{kg(sent)}</span> already sent.{" "}
-        <strong className="font-semibold tabular-nums text-slate-900">{left > 0 ? `${kg(left)} left to send` : "Nothing left to send"}</strong>
+        {milking}: <span className="tabular-nums">{litres(totals.recorded)}</span> recorded, <span className="tabular-nums">{litres(sent)}</span> already sent.{" "}
+        <strong className="font-semibold tabular-nums text-slate-900">{left > 0 ? `${litres(left)} left to send` : "Nothing left to send"}</strong>
       </p>
       {overLine}
     </div>
@@ -79,10 +79,10 @@ export const MilkToSend = ({ ctx, sendFields }) => {
   const rows = data || [];
   const sessionOrder = (meta?.milkSessions || []).map((s) => s.value);
   const todayRows = rows.filter((r) => String(r.date).slice(0, 10) === today());
-  const recordedToday = todayRows.reduce((s, r) => s + r.kg, 0);
+  const recordedToday = todayRows.reduce((s, r) => s + r.litres, 0);
   const sentToday = todayRows.reduce((s, r) => s + r.sentToMva, 0);
   const waiting = rows
-    .map((r) => ({ ...r, day: String(r.date).slice(0, 10), left: Math.round((r.kg - r.sentToMva) * 100) / 100 }))
+    .map((r) => ({ ...r, day: String(r.date).slice(0, 10), left: Math.round((r.litres - r.sentToMva) * 100) / 100 }))
     .filter((r) => r.left > 0)
     .sort((a, b) => b.day.localeCompare(a.day) || a.dairy.localeCompare(b.dairy) || sessionOrder.indexOf(a.session) - sessionOrder.indexOf(b.session));
   const leftInAll = waiting.reduce((s, r) => s + r.left, 0);
@@ -93,9 +93,9 @@ export const MilkToSend = ({ ctx, sendFields }) => {
       <KeyFigures
         loading={loading && !data ? 3 : 0}
         items={[
-          { label: "Milk recorded today", value: kg(recordedToday) },
-          { label: "Sent to MVA today", value: kg(sentToday) },
-          { label: "Left to send", value: kg(leftInAll), tone: leftInAll > 0 ? "warn" : undefined, hint: waiting.length ? `${waiting.length} milking${waiting.length === 1 ? "" : "s"}, last ${DAYS_SHOWN} days` : `Last ${DAYS_SHOWN} days` },
+          { label: "Milk recorded today", value: litres(recordedToday) },
+          { label: "Sent to MVA today", value: litres(sentToday) },
+          { label: "Left to send", value: litres(leftInAll), tone: leftInAll > 0 ? "warn" : undefined, hint: waiting.length ? `${waiting.length} milking${waiting.length === 1 ? "" : "s"}, last ${DAYS_SHOWN} days` : `Last ${DAYS_SHOWN} days` },
         ]}
       />
       {data && (
@@ -118,9 +118,9 @@ export const MilkToSend = ({ ctx, sendFields }) => {
                   {waiting.map((r) => (
                     <tr key={`${r.day}|${r.dairy}|${r.session}`}>
                       <td className="py-2 pr-4 text-slate-800">{date(r.day)} · {label("dairies", r.dairy)} {label("milkSessions", r.session).toLowerCase()}</td>
-                      <td className="hidden py-2 pr-4 text-right tabular-nums sm:table-cell">{kg(r.kg)}</td>
-                      <td className="hidden py-2 pr-4 text-right tabular-nums sm:table-cell">{kg(r.sentToMva)}</td>
-                      <td className="whitespace-nowrap py-2 pr-4 text-right font-semibold tabular-nums text-slate-900">{kg(r.left)}</td>
+                      <td className="hidden py-2 pr-4 text-right tabular-nums sm:table-cell">{litres(r.litres)}</td>
+                      <td className="hidden py-2 pr-4 text-right tabular-nums sm:table-cell">{litres(r.sentToMva)}</td>
+                      <td className="whitespace-nowrap py-2 pr-4 text-right font-semibold tabular-nums text-slate-900">{litres(r.left)}</td>
                       {canSend && (
                         <td className="py-1.5 text-right">
                           <ActionButton
@@ -129,7 +129,7 @@ export const MilkToSend = ({ ctx, sendFields }) => {
                             icon={Send}
                             path="/livestock/milk-transfers"
                             fields={sendFields}
-                            initial={{ date: r.day, dairy: r.dairy, session: r.session, kg: String(r.left) }}
+                            initial={{ date: r.day, dairy: r.dairy, session: r.session, litres: String(r.left) }}
                             submitLabel="Send to MVA"
                             onDone={() => ctx.notify("Milk sent to MVA")}
                           />

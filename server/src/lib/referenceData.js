@@ -1,10 +1,10 @@
-import { DEFAULT_PRODUCTS } from "../config/catalog.js";
+import { DEFAULT_PRODUCTS, RAW_MATERIALS } from "../config/catalog.js";
 
 const PRODUCTS_ADDED = "default_products_added";
 
 /**
  * Make sure the records the system cannot work without exist: the milk
- * products and a Cash on Hand account. Safe to run on every start; existing
+ * products, MVA's raw materials (the yoghurt cups) and a Cash on Hand account. Safe to run on every start; existing
  * records (and edited prices) are left alone. The default products are added
  * only once, so a product Sales deletes stays deleted.
  */
@@ -14,6 +14,9 @@ export const ensureReferenceData = async (prisma) => {
       await prisma.product.upsert({ where: { code: product.code }, update: {}, create: product });
     }
     await prisma.sequence.create({ data: { key: PRODUCTS_ADDED, value: 1 } });
+  }
+  for (const material of RAW_MATERIALS) {
+    await prisma.rawMaterial.upsert({ where: { code: material.code }, update: {}, create: material });
   }
   await prisma.account.upsert({
     where: { name: "Cash on Hand" },

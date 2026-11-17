@@ -152,7 +152,8 @@ milkRouter.post("/", allow("milkPayments", "write"), async (req, res) => {
   const { periodStart, periodEnd } = parseBody({ periodStart: "date!", periodEnd: "date!" }, req.body);
   if (periodEnd < periodStart) throw badRequest("The period end is before its start");
   const run = await inTransaction(async (tx) => {
-    const where = { date: { gte: periodStart, lte: periodEnd }, paymentRunId: null };
+    // Milk that was all rejected (0 litres, with remarks) is not paid for.
+    const where = { date: { gte: periodStart, lte: periodEnd }, paymentRunId: null, litres: { gt: 0 } };
     const groups = await tx.milkDelivery.groupBy({ by: ["supplierId"], where, _sum: { litres: true, amount: true } });
     if (!groups.length) throw conflict("There are no unpaid milk deliveries in this period");
     const lines = groups.map((g) => {

@@ -91,7 +91,7 @@ router.post("/", async (req, res) => {
     for (const line of items) {
       const found = products.find((p) => p.id === line.productId);
       if (!found || !found.isActive) throw badRequest("Choose products that are still sold");
-      if (data.to === "mva" && found.code === RAW_MILK) throw badRequest("Raw milk comes to Sales through MVA's L.Sale allocation");
+      if (data.to === "mva" && found.code === RAW_MILK) throw badRequest("Raw milk comes to Sales through MVA's local sale allocation");
     }
     const date = data.date || nairobiToday();
     const created = await tx.productRequest.create({

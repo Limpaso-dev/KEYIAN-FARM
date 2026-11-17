@@ -44,6 +44,8 @@ export const RESOURCES = {
   milkAllocations: { dept: "mva" },
   productTransfers: { dept: "mva", read: ["sales"], actions: { receive: { depts: ["sales"] } } },
   mvaStock: { dept: "mva", read: ["sales"], actions: { adjust: { depts: ["mva"], headOnly: true } } },
+  // Raw milk and the yoghurt cups; a head corrects them after a count.
+  rawMaterials: { dept: "mva", actions: { adjust: { depts: ["mva"], headOnly: true } } },
 
   // Sales
   products: { dept: "sales", read: ["mva"] },

@@ -80,3 +80,6 @@ export const timeAgo = (value) => {
   if (days < 7) return `${days} days ago`;
   return date(value);
 };
+
+/** A file's size: "820 KB", "2.4 MB". */
+export const fileSize = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);

@@ -14,7 +14,7 @@ import { refs } from "../../lib/refs";
 import { useFetch } from "../../lib/useFetch";
 
 const tag = (a) => (a ? `${a.tagNumber}${a.name ? ` - ${a.name}` : ""}` : "");
-const kg = (value) => `${number(value)} kg`;
+const litres = (value) => `${number(value)} L`;
 
 const isMale = (v) => v.sex === "male";
 
@@ -201,11 +201,11 @@ const health = {
   toForm: (row) => ({ ...row, date: inputDate(row.date) }),
 };
 
-// Bulk milk entry: kilograms for each cow at the chosen dairy, for one session.
+// Bulk milk entry: litres for each cow at the chosen dairy, for one session.
 const CALF_DAYS = 365;
 const milkingCows = (cows, dairy) => (cows || [])
   .filter((c) => c.dairy === dairy && !(c.dateOfBirth && (Date.now() - new Date(c.dateOfBirth)) / 86400000 < CALF_DAYS))
-  .map((c) => ({ animalId: c.id, cow: tag(c), lactation: c.lactationCount, kg: "" }));
+  .map((c) => ({ animalId: c.id, cow: tag(c), lactation: c.lactationCount, litres: "" }));
 
 const milkEntryFields = [
   { name: "date", label: "Date", type: "date", required: true, span: "third" },
@@ -215,14 +215,14 @@ const milkEntryFields = [
   },
   { ...sessionField, span: "third" },
   {
-    name: "records", label: "Kilograms per cow", type: "items", fixedRows: true, help: "The dairy's cows. Leave a cow blank if she was not milked.",
+    name: "records", label: "Litres per cow", type: "items", fixedRows: true, help: "The dairy's cows. Leave a cow blank if she was not milked.",
     columns: [
       { name: "cow", label: "Cow", type: "display" },
       { name: "lactation", label: "Lactations", type: "display", width: 90 },
-      { name: "kg", label: "Kg", type: "number", width: 140 },
+      { name: "litres", label: "Litres", type: "number", width: 140 },
     ],
-    total: (row) => row.kg,
-    formatTotal: kg,
+    total: (row) => row.litres,
+    formatTotal: litres,
   },
 ];
 
@@ -231,17 +231,17 @@ const MilkTotals = () => {
   const { data } = useFetch("/livestock/milk-records/daily", { from: daysAgo(6), to: today() });
   const rows = data || [];
   const todayRows = rows.filter((r) => String(r.date).slice(0, 10) === today());
-  const total = todayRows.reduce((s, r) => s + r.kg, 0);
+  const total = todayRows.reduce((s, r) => s + r.litres, 0);
   const sent = todayRows.reduce((s, r) => s + r.sentToMva, 0);
   const dairies = [...new Set(todayRows.map((r) => r.dairy))].sort();
-  const perDairy = dairies.map((d) => `${label("dairies", d)} ${kg(todayRows.filter((r) => r.dairy === d).reduce((s, r) => s + r.kg, 0))}`).join(" · ");
+  const perDairy = dairies.map((d) => `${label("dairies", d)} ${litres(todayRows.filter((r) => r.dairy === d).reduce((s, r) => s + r.litres, 0))}`).join(" · ");
   return (
     <KeyFigures
       items={[
-        { label: "Milk today", value: kg(total), hint: perDairy || undefined },
-        { label: "Sent to MVA today", value: kg(sent) },
-        { label: "Not yet sent", value: kg(total - sent), tone: total - sent > 0 ? "warn" : undefined },
-        { label: "Last 7 days", value: kg(rows.reduce((s, r) => s + r.kg, 0)) },
+        { label: "Milk today", value: litres(total), hint: perDairy || undefined },
+        { label: "Sent to MVA today", value: litres(sent) },
+        { label: "Not yet sent", value: litres(total - sent), tone: total - sent > 0 ? "warn" : undefined },
+        { label: "Last 7 days", value: litres(rows.reduce((s, r) => s + r.litres, 0)) },
       ]}
     />
   );
@@ -251,7 +251,7 @@ const milkRecords = {
   resource: "milkRecords",
   endpoint: "/livestock/milk-records",
   title: "Milk records",
-  description: "Milk is weighed in kilograms. Dairy A milks in the morning and evening; Dairy C also at midday.",
+  description: "Milk is measured in litres. Dairy A milks in the morning and evening; Dairy C also at midday.",
   singular: "Milk record",
   defaultQuery: { from: today(), to: today() },
   filters: [{ name: "dairy", label: "Dairy", options: "dairies" }, { name: "session", label: "Session", options: "milkSessions" }, { type: "dateRange" }],
@@ -260,10 +260,10 @@ const milkRecords = {
     { key: "dairy", label: "Dairy", type: "option:dairies" },
     { key: "session", label: "Session", type: "option:milkSessions" },
     { key: "animal", label: "Cow", render: (r) => tag(r.animal) },
-    { key: "kg", label: "Kg", type: "number" },
+    { key: "litres", label: "Litres", type: "number" },
   ],
-  editFields: [{ name: "kg", label: "Kg", type: "number", required: true }],
-  footer: (rows) => rows.length > 0 && <div className="border-t border-slate-100 px-4 py-3 text-right text-sm">Total: <strong>{kg(rows.reduce((s, r) => s + Number(r.kg), 0))}</strong></div>,
+  editFields: [{ name: "litres", label: "Litres", type: "number", required: true }],
+  footer: (rows) => rows.length > 0 && <div className="border-t border-slate-100 px-4 py-3 text-right text-sm">Total: <strong>{litres(rows.reduce((s, r) => s + Number(r.litres), 0))}</strong></div>,
   toolbar: (ctx) => ctx.can("milkRecords", "write") && (
     <ActionButton label="Record milking" icon={Droplets} variant="primary" path="/livestock/milk-records" modalSize="lg" onDone={(r) => ctx.notify(r?.message)}
       fields={milkEntryFields}
@@ -274,7 +274,7 @@ const milkRecords = {
         const dairy = held.length === 1 ? held[0] : "";
         return { date: today(), dairy, session: dairy ? currentSession(ctx.meta, dairy) : "", _cows: cows, records: milkingCows(cows, dairy) };
       }}
-      toPayload={(v) => ({ date: v.date, dairy: v.dairy, session: v.session, records: v.records.filter((r) => r.kg !== "" && Number(r.kg) > 0).map((r) => ({ animalId: r.animalId, kg: r.kg })) })} />
+      toPayload={(v) => ({ date: v.date, dairy: v.dairy, session: v.session, records: v.records.filter((r) => r.litres !== "" && Number(r.litres) > 0).map((r) => ({ animalId: r.animalId, litres: r.litres })) })} />
   ),
 };
 

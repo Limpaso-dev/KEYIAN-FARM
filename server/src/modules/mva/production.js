@@ -1,8 +1,9 @@
-import { KG_TO_LITRES, MALA_YIELD, optionValues, PACK_LITRES, YOGHURT_YIELD } from "../../config/catalog.js";
+import { MALA_YIELD, optionValues, PACK_LITRES, YOGHURT_YIELD } from "../../config/catalog.js";
 import { isoDay } from "../../lib/periods.js";
 import { round2 } from "../../lib/validate.js";
 
 // The figures on MVA's production sheets, worked out the way the sheets do.
+// All milk is in litres.
 
 const round1 = (value) => Math.round((value + Number.EPSILON) * 10) / 10;
 
@@ -25,7 +26,7 @@ export const productionDays = async (db, where) => {
   for (const transfer of transfers) {
     const day = dayOf(transfer.date);
     const key = transfer.dairy === "dairy_c" ? "dairyC" : "dairyA";
-    day[key] = round2(day[key] + Number(transfer.receivedKg ?? transfer.kg));
+    day[key] = round2(day[key] + Number(transfer.receivedLitres ?? transfer.litres));
   }
   for (const delivery of deliveries) {
     const day = dayOf(delivery.date);
@@ -46,28 +47,33 @@ export const productionDays = async (db, where) => {
   });
 };
 
-const piecesOf = (batch, code) => Number(batch.outputs.find((output) => output.product.code === code)?.quantity || 0);
+const madeOf = (batch, code) => Number(batch.outputs.find((output) => output.product.code === code)?.quantity || 0);
 
-/** One batch's figures for the Product Output sheet. Needs outputs with their product. */
+/** The yoghurt pack sizes, largest first: the product code and the field it is entered in. */
+export const YOGHURT_PACKS = [["YOGHURT_1000", "yoghurt1000"], ["YOGHURT_500", "yoghurt500"], ["YOGHURT_250", "yoghurt250"], ["YOGHURT_150", "yoghurt150"]];
+
+/**
+ * One batch's figures for the Product Output sheet. Needs outputs with their
+ * product. The variance is what came out (packs and bulk litres) less what
+ * the litres processed should have given.
+ */
 export const outputFigures = (batch) => {
-  const malaKg = Number(batch.malaKg);
-  const yoghurtKg = Number(batch.yoghurtKg);
-  const malaPieces = piecesOf(batch, "MALA");
-  const yoghurt500 = piecesOf(batch, "YOGHURT_500");
-  const yoghurt250 = piecesOf(batch, "YOGHURT_250");
-  const yoghurt150 = piecesOf(batch, "YOGHURT_150");
-  const yoghurtOut = yoghurt500 * PACK_LITRES.YOGHURT_500 + yoghurt250 * PACK_LITRES.YOGHURT_250 + yoghurt150 * PACK_LITRES.YOGHURT_150;
+  const malaLitres = Number(batch.malaLitres);
+  const yoghurtLitres = Number(batch.yoghurtLitres);
+  const malaPieces = madeOf(batch, "MALA");
+  const bulkMala = madeOf(batch, "BULK_MALA");
+  const packs = Object.fromEntries(YOGHURT_PACKS.map(([code, key]) => [key, madeOf(batch, code)]));
+  const bulkYoghurt = madeOf(batch, "BULK_YOGHURT");
+  const yoghurtOut = YOGHURT_PACKS.reduce((total, [code, key]) => total + packs[key] * PACK_LITRES[code], 0) + bulkYoghurt;
   return {
-    malaKg,
-    malaLitres: round1(malaKg * KG_TO_LITRES),
+    malaLitres,
     malaPieces,
-    malaVariance: round1(malaPieces * PACK_LITRES.MALA - malaKg * KG_TO_LITRES * MALA_YIELD),
-    yoghurtKg,
-    yoghurtLitres: round1(yoghurtKg * KG_TO_LITRES),
-    yoghurt500,
-    yoghurt250,
-    yoghurt150,
-    yoghurtVariance: round1(yoghurtOut - yoghurtKg * KG_TO_LITRES * YOGHURT_YIELD),
+    bulkMala,
+    malaVariance: round1(malaPieces * PACK_LITRES.MALA + bulkMala - malaLitres * MALA_YIELD),
+    yoghurtLitres,
+    ...packs,
+    bulkYoghurt,
+    yoghurtVariance: round1(yoghurtOut - yoghurtLitres * YOGHURT_YIELD),
     fresh250: batch.fresh250,
   };
 };

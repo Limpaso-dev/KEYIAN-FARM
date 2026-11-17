@@ -274,7 +274,7 @@ if (!url) {
   });
 
   let rawMilkId; let freshId; let malaId; let yoghurtId;
-  test("livestock: dairies, calvings and twins, vaccines and diseases from lists, milk in kg, transfer to MVA", async () => {
+  test("livestock: dairies, calvings and twins, vaccines and diseases from lists, milk in litres, transfer to MVA", async () => {
     // Every female belongs to a dairy; a male is not kept in a dairy, whatever is sent.
     await call("livestock", "POST", "/livestock/animals", { tagNumber: "X", sex: "female" }, { expect: 400 });
     const cow = await call("livestock", "POST", "/livestock/animals", { tagNumber: "KE-001", name: "Daisy", sex: "female", breed: "Friesian", dairy: "dairy_a" });
@@ -323,45 +323,45 @@ if (!url) {
     assert.equal(herdCheck.disease, null);
     assert.ok((await call("livestock", "GET", "/livestock/health-records?disease=mastitis")).every((h) => h.disease === "mastitis"));
 
-    // Dairy A milks in the morning and evening, Dairy C also at midday; milk is weighed in kg.
+    // Dairy A milks in the morning and evening, Dairy C also at midday; milk is measured in litres.
     assert.deepEqual(meta.dairySessions, { dairy_a: ["morning", "evening"], dairy_c: ["morning", "midday", "evening"] });
-    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "midday", records: [{ animalId: cow.id, kg: 5 }] }, { expect: 400 });
-    await call("livestock", "POST", "/livestock/milk-records", { date: today, session: "morning", records: [{ animalId: cow.id, kg: 5 }] }, { expect: 400 });
-    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_c", session: "morning", records: [{ animalId: cow.id, kg: 5 }] }, { expect: 400 });
-    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: bull.id, kg: 3 }] }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "midday", records: [{ animalId: cow.id, litres: 5 }] }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-records", { date: today, session: "morning", records: [{ animalId: cow.id, litres: 5 }] }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_c", session: "morning", records: [{ animalId: cow.id, litres: 5 }] }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: bull.id, litres: 3 }] }, { expect: 400 });
     // Nothing recorded yet: no milk to send.
-    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 5 }, { expect: 400 });
-    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: cow.id, kg: 52.5 }] });
-    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_c", session: "midday", records: [{ animalId: cCow.id, kg: 6 }] });
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", litres: 5 }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: cow.id, litres: 52.5 }] });
+    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_c", session: "midday", records: [{ animalId: cCow.id, litres: 6 }] });
     const daily = await call("livestock", "GET", `/livestock/milk-records/daily?from=${today}&to=${today}`);
-    assert.deepEqual(daily.map((d) => [d.dairy, d.session, d.kg]).sort(), [["dairy_a", "morning", 52.5], ["dairy_c", "midday", 6]]);
-    assert.deepEqual((await call("livestock", "GET", "/livestock/milk-records?dairy=dairy_c")).map((m) => [m.animal.tagNumber, Number(m.kg)]), [["KE-C1", 6]]);
+    assert.deepEqual(daily.map((d) => [d.dairy, d.session, d.litres]).sort(), [["dairy_a", "morning", 52.5], ["dairy_c", "midday", 6]]);
+    assert.deepEqual((await call("livestock", "GET", "/livestock/milk-records?dairy=dairy_c")).map((m) => [m.animal.tagNumber, Number(m.litres)]), [["KE-C1", 6]]);
 
-    // Milk sent to MVA, in kg, at a milking its dairy has.
-    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", kg: 50 }, { expect: 400 });
-    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "midday", dairy: "dairy_a", kg: 50 }, { expect: 400 });
+    // Milk sent to MVA, in litres, at a milking its dairy has.
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", litres: 50 }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "midday", dairy: "dairy_a", litres: 50 }, { expect: 400 });
     // Only milk recorded at that milking, and not sent yet, can be sent.
-    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 53 }, { expect: 400 });
-    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "evening", dairy: "dairy_a", kg: 1 }, { expect: 400 });
-    const transfer = await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 50 });
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", litres: 53 }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "evening", dairy: "dairy_a", litres: 1 }, { expect: 400 });
+    const transfer = await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", litres: 50 });
     await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { session: "midday" }, { expect: 400 });
-    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 3 }, { expect: 400 });
-    const rest = await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", kg: 2.5 });
-    await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { kg: 51 }, { expect: 400 });
+    await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", litres: 3 }, { expect: 400 });
+    const rest = await call("livestock", "POST", "/livestock/milk-transfers", { date: today, session: "morning", dairy: "dairy_a", litres: 2.5 });
+    await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { litres: 51 }, { expect: 400 });
     await call("root", "DELETE", `/livestock/milk-transfers/${rest.id}`);
-    assert.equal(Number((await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { kg: 52.5 })).kg), 52.5);
-    await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { kg: 50 });
+    assert.equal(Number((await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { litres: 52.5 })).litres), 52.5);
+    await call("livestock", "PUT", `/livestock/milk-transfers/${transfer.id}`, { litres: 50 });
     // The milk recorded cannot drop below what was sent: weighed again, edited or deleted.
     const [morningRecord] = await call("livestock", "GET", `/livestock/milk-records?dairy=dairy_a&from=${today}&to=${today}`);
-    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: cow.id, kg: 40 }] }, { expect: 409 });
-    await call("livestock", "PUT", `/livestock/milk-records/${morningRecord.id}`, { kg: 49 }, { expect: 409 });
+    await call("livestock", "POST", "/livestock/milk-records", { date: today, dairy: "dairy_a", session: "morning", records: [{ animalId: cow.id, litres: 40 }] }, { expect: 409 });
+    await call("livestock", "PUT", `/livestock/milk-records/${morningRecord.id}`, { litres: 49 }, { expect: 409 });
     await call("root", "DELETE", `/livestock/milk-records/${morningRecord.id}`, null, { expect: 409 });
-    assert.equal(Number((await call("livestock", "PUT", `/livestock/milk-records/${morningRecord.id}`, { kg: 52.5 })).kg), 52.5);
-    await call("livestock", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedKg: 48 }, { expect: 403 });
-    await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedKg: 51 }, { expect: 400 });
-    const received = await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedKg: 48 });
-    assert.deepEqual([Number(received.kg), Number(received.receivedKg)], [50, 48]);
-    await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedKg: 48 }, { expect: 409 });
+    assert.equal(Number((await call("livestock", "PUT", `/livestock/milk-records/${morningRecord.id}`, { litres: 52.5 })).litres), 52.5);
+    await call("livestock", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedLitres: 48 }, { expect: 403 });
+    await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedLitres: 51 }, { expect: 400 });
+    const received = await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedLitres: 48 });
+    assert.deepEqual([Number(received.litres), Number(received.receivedLitres)], [50, 48]);
+    await call("mva", "POST", `/livestock/milk-transfers/${transfer.id}/receive`, { receivedLitres: 48 }, { expect: 409 });
 
     // When animals join and leave the herd: a sale records the day it left (today when not given); back in the herd clears it.
     const soldNow = await call("livestock", "PUT", `/livestock/animals/${bull.id}`, { status: "sold" });
@@ -398,13 +398,13 @@ if (!url) {
     const before = values(await part("herd", `period=day&date=${yesterday}`));
     assert.deepEqual([before[0], before[3], before[4]], [["Animals in the herd", 3], ["Joined the herd", 0], ["Left the herd", 0]]);
 
-    // Milk, in kg, by dairy and its milkings.
+    // Milk, in litres, by dairy and its milkings.
     const milk = await part("milk");
-    assert.deepEqual(milk.sections.map((s) => s.title), ["Milk by dairy and session (kg)", "Milk per cow (kg)", "Milk sent to MVA"]);
-    assert.deepEqual(milk.sections[0].rows.map((r) => [r.dairy, r.session, r.kg, r.sent]), [["Dairy A", "Morning", 52.5, 50], ["Dairy A", "Evening", 0, 0], ["Dairy C", "Morning", 0, 0], ["Dairy C", "Midday", 6, 0], ["Dairy C", "Evening", 0, 0]]);
+    assert.deepEqual(milk.sections.map((s) => s.title), ["Milk by dairy and session (litres)", "Milk per cow (litres)", "Milk sent to MVA"]);
+    assert.deepEqual(milk.sections[0].rows.map((r) => [r.dairy, r.session, r.litres, r.sent]), [["Dairy A", "Morning", 52.5, 50], ["Dairy A", "Evening", 0, 0], ["Dairy C", "Morning", 0, 0], ["Dairy C", "Midday", 6, 0], ["Dairy C", "Evening", 0, 0]]);
     assert.deepEqual(milk.sections[1].rows.map((r) => [r.tag, r.dairy, r.morning, r.midday, r.evening, r.total]), [["KE-001", "Dairy A", 52.5, "", 0, 52.5], ["KE-C1", "Dairy C", 0, 6, 0, 6]]);
-    assert.deepEqual(values(milk), [["Milk recorded (kg)", 58.5], ["Dairy A (kg)", 52.5], ["Dairy C (kg)", 6], ["Sent to MVA (kg)", 50], ["Not yet sent (kg)", 8.5]]);
-    assert.ok((await part("milk", `period=week&date=${today}`)).sections.some((s) => s.title === "Milk (kg) by day"));
+    assert.deepEqual(values(milk), [["Milk recorded (litres)", 58.5], ["Dairy A (litres)", 52.5], ["Dairy C (litres)", 6], ["Sent to MVA (litres)", 50], ["Not yet sent (litres)", 8.5]]);
+    assert.ok((await part("milk", `period=week&date=${today}`)).sections.some((s) => s.title === "Milk (litres) by day"));
 
     // Calvings, with the twins.
     const calvings = await part("calvings");
@@ -446,6 +446,12 @@ if (!url) {
     await call("mva", "POST", "/mva/milk-prices", { effectiveDate: "2026-01-01", pricePerLitre: 50 });
     const deliveries = await call("mva", "POST", "/mva/milk-deliveries", { date: today, session: "morning", deliveries: [{ supplierId: farmer.id, litres: 60 }, { supplierId: second.id, litres: 40 }] });
     assert.equal(deliveries[0].amount, 3000);
+    // Remarks on milk rejected at collection; a farmer whose milk was all rejected is recorded with 0 litres and is not paid.
+    const third = await call("mva", "POST", "/mva/milk-suppliers", { firstName: "Mary", lastName: "Wanjiru" });
+    await call("mva", "POST", "/mva/milk-deliveries", { date: today, session: "evening", deliveries: [{ supplierId: third.id, litres: "" }] }, { expect: 400 });
+    const rejectedMilk = await call("mva", "POST", "/mva/milk-deliveries", { date: today, session: "evening", deliveries: [{ supplierId: third.id, litres: "", notes: "Rejected: failed the alcohol test (8 L)" }, { supplierId: second.id, litres: "" }] });
+    assert.deepEqual(rejectedMilk.map((d) => [d.supplier.supplierNumber, Number(d.litres), Number(d.amount), d.notes]), [[132, 0, 0, "Rejected: failed the alcohol test (8 L)"]]);
+    assert.deepEqual((await call("mva", "GET", `/mva/milk-deliveries/statement?from=${today}&to=${today}`)).map((r) => r.supplier.supplierNumber), [130, 131]);
     // A farmer is found by the farmer number, which identifies them across the cooperative: their deliveries, and the register.
     const numbers = (rows) => rows.map((d) => d.supplier.supplierNumber);
     assert.deepEqual(numbers(await call("mva", "GET", `/mva/milk-deliveries?search=131&from=${today}&to=${today}`)), [131]);
@@ -459,6 +465,11 @@ if (!url) {
 
     let stock = await call("mva", "GET", "/stock/mva");
     assert.equal(stock.find((s) => s.code === "RAW_MILK").onHand, 148);
+    // The Products page leaves raw milk out: it is a raw material.
+    assert.ok(!(await call("mva", "GET", "/stock/mva?except=RAW_MILK")).some((s) => s.code === "RAW_MILK"));
+    const materials = async () => call("mva", "GET", "/mva/raw-materials");
+    assert.deepEqual((await materials()).map((m) => [m.name, m.unit, m.onHand]), [["Raw milk", "litres", 148], ["Yoghurt cups 150 ml", "cups", 0], ["Yoghurt cups 250 ml", "cups", 0], ["Yoghurt cups 500 ml", "cups", 0], ["Yoghurt cups 1 litre", "cups", 0]]);
+    await call("sales", "GET", "/mva/raw-materials", null, { expect: 403 });
 
     // MVA keeps the farmer's name and number; ID and payment details are with Accounts.
     await call("accounts", "PUT", `/accounts/farmers/${farmer.id}`, { nationalId: "28111222", bankName: "KCB", accountNumber: "0011223344", paymentMethod: "bank", firstName: "Changed" });
@@ -486,7 +497,7 @@ if (!url) {
     const [sheetDay] = await call("mva", "GET", `/mva/milk-allocations?from=${today}&to=${today}`);
     assert.deepEqual([sheetDay.dairyA, sheetDay.dairyC, sheetDay.farmers, sheetDay.total, sheetDay.mala, sheetDay.staff, sheetDay.variance], [48, 0, 100, 148, 60, 7, 18]);
 
-    // L.Sale goes to Sales as raw milk by itself, and only that way.
+    // Local sale goes to Sales as raw milk by itself, and only that way.
     await call("mva", "POST", "/mva/product-transfers", { date: today, items: [{ productId: rawMilkId, quantity: 1 }] }, { expect: 400 });
     const [rawToSales] = await call("sales", "GET", "/mva/product-transfers?status=sent");
     assert.ok(rawToSales.allocationId);
@@ -500,24 +511,52 @@ if (!url) {
 
     // Product output, using the sheet's own figures for 8 October.
     await call("mva", "POST", "/mva/processing-batches", { date: today }, { expect: 400 });
-    const output = { date: today, malaKg: 972.1, malaPieces: 1642, yoghurtKg: 409.4, yoghurt500: 374, yoghurt250: 561, fresh250: 520 };
+    const output = { date: today, malaLitres: 941, malaPieces: 1642, bulkMala: 20, yoghurtLitres: 396.3, yoghurt1000: 10, yoghurt500: 374, yoghurt250: 561, bulkYoghurt: 15, fresh250: 520 };
+    // Yoghurt is packed in cups: none received yet, so the output cannot be recorded.
+    const noCups = await call("mva", "POST", "/mva/processing-batches", output, { raw: true });
+    assert.equal(noCups.status, 409);
+    assert.match((await noCups.json()).message, /Not enough Yoghurt cups 1 litre at MVA: 0 cups on hand, 10 needed\. Record the cups received/);
+    const cupId = Object.fromEntries((await materials()).map((m) => [m.code, m.id]));
+    await call("mva", "POST", "/mva/raw-materials/receipts", { date: today, items: [{ materialId: cupId.CUP_500, quantity: 0 }] }, { expect: 400 });
+    await call("sales", "POST", "/mva/raw-materials/receipts", { date: today, items: [{ materialId: cupId.CUP_500, quantity: 400 }] }, { expect: 403 });
+    const receipt = await call("mva", "POST", "/mva/raw-materials/receipts", { date: today, reference: "Delivery note 552", items: [{ materialId: cupId.CUP_1000, quantity: 20 }, { materialId: cupId.CUP_500, quantity: 400 }, { materialId: cupId.CUP_250, quantity: 600 }, { materialId: cupId.CUP_150, quantity: "" }] });
+    assert.match(receipt.receiptNumber, /^RMR-\d{4}-0001$/);
     const made = await call("mva", "POST", "/mva/processing-batches", output);
+    const cupsLeft = async () => Object.fromEntries((await materials()).filter((m) => m.kind === "material").map((m) => [m.code, m.onHand]));
+    assert.deepEqual(await cupsLeft(), { CUP_150: 0, CUP_250: 39, CUP_500: 26, CUP_1000: 10 });
     const [figures] = await call("mva", "GET", `/mva/processing-batches?from=${today}&to=${today}`);
-    assert.deepEqual([figures.malaLitres, figures.malaVariance, figures.yoghurtLitres, figures.yoghurtVariance, figures.fresh250], [941, -82.4, 396.3, -57.2, 520]);
+    // Mala: 1642 x 0.5 + 20 bulk - 941 x 0.96; Yoghurt: 10 x 1 + 374 x 0.5 + 561 x 0.25 + 15 bulk - 396.3 x 0.97.
+    assert.deepEqual([figures.malaLitres, figures.bulkMala, figures.malaVariance, figures.yoghurtLitres, figures.yoghurt1000, figures.bulkYoghurt, figures.yoghurtVariance, figures.fresh250], [941, 20, -62.4, 396.3, 10, 15, -32.2, 520]);
     stock = await call("mva", "GET", "/stock/mva");
     assert.equal(stock.find((s) => s.code === "MALA").onHand, 1642);
     assert.equal(stock.find((s) => s.code === "MALA").unit, "pieces");
     assert.equal(stock.find((s) => s.code === "YOGHURT_500").onHand, 374);
+    assert.deepEqual(["name", "unit", "onHand"].map((k) => stock.find((s) => s.code === "YOGHURT_1000")[k]), ["Yoghurt 1 litre", "pieces", 10]);
+    assert.deepEqual(["BULK_MALA", "BULK_YOGHURT"].map((code) => ["name", "unit", "onHand"].map((k) => stock.find((s) => s.code === code)[k])), [["Bulk Mala", "litres", 20], ["Bulk Yoghurt", "litres", 15]]);
     assert.equal(stock.find((s) => s.code === "RAW_MILK").onHand, 18);
-    // Raw milk is measured in kg; fresh milk is packed in 250 ml packets, which go into stock.
-    assert.equal(stock.find((s) => s.code === "RAW_MILK").unit, "kg");
-    assert.deepEqual(["name", "unit", "onHand"].map((k) => stock.find((s) => s.code === "FRESH_MILK")[k]), ["Fresh milk 250 ml", "packets", 520]);
+    // All milk is in litres; fresh milk is packed in 250 ml packets, which go into stock.
+    assert.equal(stock.find((s) => s.code === "RAW_MILK").unit, "litres");
+    assert.deepEqual(["name", "unit", "onHand"].map((k) => stock.find((s) => s.code === "FRESH_MILK")[k]), ["Fresh Pasteurised Milk 250 ml", "packets", 520]);
+    // Deleting the output takes its products out of stock and puts the cups back.
     await call("root", "DELETE", `/mva/processing-batches/${made.id}`);
     assert.equal((await call("mva", "GET", "/stock/mva")).find((s) => s.code === "MALA").onHand, 0);
     assert.equal((await call("mva", "GET", "/stock/mva")).find((s) => s.code === "FRESH_MILK").onHand, 0);
+    assert.deepEqual(await cupsLeft(), { CUP_150: 0, CUP_250: 600, CUP_500: 400, CUP_1000: 20 });
     await call("mva", "POST", "/mva/processing-batches", output);
+    // A head corrects the cups after a count; never below none.
+    await call("mva", "POST", "/mva/raw-materials/adjustments", { itemId: cupId.CUP_500, quantity: -1, date: today, reason: "Count" }, { expect: 403 });
+    await call("mvaHead", "POST", "/mva/raw-materials/adjustments", { itemId: cupId.CUP_500, quantity: -27, date: today, reason: "Count" }, { expect: 409 });
+    await call("mvaHead", "POST", "/mva/raw-materials/adjustments", { itemId: cupId.CUP_500, quantity: -1, date: today, reason: "Crushed cup" });
+    await call("mvaHead", "POST", "/mva/raw-materials/adjustments", { itemId: rawMilkId, quantity: -0.5, date: today, reason: "Spilt" });
+    assert.deepEqual((await materials()).slice(0, 4).map((m) => m.onHand), [17.5, 0, 39, 25]);
+    const moves = await call("mva", "GET", `/mva/raw-materials/movements?from=${today}&to=${today}`);
+    assert.deepEqual(moves.filter((m) => m.item === "Yoghurt cups 500 ml").map((m) => [m.movementType, m.quantity]), [["adjustment", -1], ["production", -374], ["production_reversal", 374], ["production", -374], ["received", 400]]);
+    assert.ok(moves.some((m) => m.item === "Raw milk" && m.movementType === "farmer_delivery"));
 
-    // Finished products go across by hand.
+    // Finished products go across by hand, the bulk ones by the litre.
+    await call("mva", "POST", "/mva/product-transfers", { date: today, items: [{ productId: byCode.BULK_MALA, quantity: 20.5 }] }, { expect: 409 });
+    const bulk = await call("mva", "POST", "/mva/product-transfers", { date: today, items: [{ productId: byCode.BULK_MALA, quantity: 12.5 }, { productId: byCode.BULK_YOGHURT, quantity: 15 }, { productId: byCode.YOGHURT_1000, quantity: 4 }] });
+    await call("sales", "POST", `/mva/product-transfers/${bulk.id}/receive`, {});
     const transfer = await call("mva", "POST", "/mva/product-transfers", { date: today, items: [{ productId: freshId, quantity: 50 }] });
     stock = await call("mva", "GET", "/stock/mva");
     assert.equal(stock.find((s) => s.code === "FRESH_MILK").onHand, 470);
@@ -525,14 +564,27 @@ if (!url) {
     const sales = await call("sales", "GET", "/stock/sales");
     assert.equal(sales.find((s) => s.code === "FRESH_MILK").onHand, 50);
     assert.equal(sales.find((s) => s.code === "RAW_MILK").onHand, 20);
+    assert.deepEqual(["BULK_MALA", "BULK_YOGHURT", "YOGHURT_1000"].map((code) => sales.find((s) => s.code === code).onHand), [12.5, 15, 4]);
 
     // The report, laid out like the sheet.
     const { reports: [report] } = await call("mva", "GET", `/reports/department?department=mva&period=day&date=${today}`);
     const table = (title) => report.sections.find((s) => s.title === title);
-    assert.deepEqual(table("Production report").columns.map((c) => c.label), ["Date", "Dairy A", "Dairy C", "Farmers", "Total", "Mala", "Yoghurt", "NKCC", "Own use", "L.Sale", "Staff", "Police", "School", "Spoilage", "Variance"]);
+    assert.deepEqual(table("Production report").columns.map((c) => c.label), ["Date", "Dairy A", "Dairy C", "Farmers", "Total", "Mala", "Yoghurt", "NKCC", "Own use", "Local sale", "Staff", "Police", "School", "Spoilage", "Variance"]);
     assert.equal(table("Production report").rows[0].local_sale, 20);
-    assert.equal(table("Product output").rows[0].malaVariance, -82.4);
-    assert.equal(report.summary.find((s) => s.label === "Product output variance (L)").value, -139.6);
+    assert.deepEqual(table("Product output").columns.map((c) => c.label), ["Date", "Mala processed (L)", "Mala output (pcs)", "Bulk Mala (L)", "Mala variance (L)", "Yoghurt processed (L)", "Yog 1 litre", "Yog 500 ml", "Yog 250 ml", "Yog 150 ml", "Bulk Yoghurt (L)", "Yoghurt variance (L)", "Fresh Pasteurised Milk (packets)"]);
+    assert.deepEqual(["malaVariance", "yoghurt1000", "bulkMala", "bulkYoghurt"].map((k) => table("Product output").rows[0][k]), [-62.4, 10, 20, 15]);
+    assert.equal(report.summary.find((s) => s.label === "Product output variance (L)").value, -94.6);
+    assert.equal(report.summary.find((s) => s.label === "Milk from Livestock (litres)").value, 48);
+    // Milk rejected at collection, with its remarks; the farmer is not counted as delivering.
+    assert.equal(report.summary.find((s) => s.label === "Farmers delivering").value, 2);
+    assert.deepEqual(table("Milk rejected at collection").rows.map((r) => [r.number, r.litres, r.remarks]), [[132, 0, "Rejected: failed the alcohol test (8 L)"]]);
+    // Stock in two: the raw materials (raw milk and cups), then the products.
+    const raw = table("Raw materials");
+    assert.deepEqual(raw.columns.map((c) => c.label), ["Item", "Unit", "Opening stock", "Received", "Used / allocated", "Count adjustment", "Closing stock"]);
+    assert.deepEqual(raw.rows.map((r) => [r.item, r.received, r.used, r.adjusted, r.closing]), [["Raw milk", 148, 130, -0.5, 17.5], ["Yoghurt cups 150 ml", 0, 0, 0, 0], ["Yoghurt cups 250 ml", 600, 561, 0, 39], ["Yoghurt cups 500 ml", 400, 374, -1, 25], ["Yoghurt cups 1 litre", 20, 10, 0, 10]]);
+    const productRows = Object.fromEntries(table("Products").rows.map((r) => [r.item, [r.made, r.sent, r.closing]]));
+    assert.deepEqual([productRows.Mala, productRows["Bulk Mala"], productRows["Yoghurt 1 litre"], productRows["Fresh Pasteurised Milk 250 ml"]], [[1642, 0, 1642], [20, 12.5, 7.5], [10, 4, 6], [520, 50, 470]]);
+    assert.ok(!table("Products").rows.some((r) => r.item === "Raw milk"));
   });
 
   test("Sales: two price lists, a day's trading, stock events at any time, and the registers", async () => {
@@ -606,21 +658,21 @@ if (!url) {
     const day = await report(`period=day&date=${today}`);
     assert.deepEqual(table(day, "Vehicles").columns.map((c) => c.label), ["Date", "Product", "Dispatch", "Replacement", "Returns", "Damages", "Day sales", "Amount"]);
     const road = table(day, "Vehicles").rows[0];
-    assert.deepEqual([road.product, road.dispatched, road.replaced, road.returned, road.damaged, road.sold, road.amount], ["Fresh milk 250 ml", 40, 1, 5, 2, 32, 2880]);
+    assert.deepEqual([road.product, road.dispatched, road.replaced, road.returned, road.damaged, road.sold, road.amount], ["Fresh Pasteurised Milk 250 ml", 40, 1, 5, 2, 32, 2880]);
     const trip = table(day, "Vehicle trips and money").rows.find((r) => r.dispatchNumber === dispatch.dispatchNumber);
     assert.deepEqual([trip.cash, trip.mpesa, trip.bank, trip.handedIn, trip.variance], [2000, 600, 200, 2800, -80]);
     assert.equal(day.summary.find((s) => s.label === "Vehicle money handed in (cash, M-Pesa, bank)").value, 2800);
     assert.equal(day.summary.find((s) => s.label === "Of which banked").value, 200);
     assert.deepEqual(table(day, "Store").columns.map((c) => c.label), ["Date", "Product", "Production", "Opening Stock", "Packed", "Local sales", "Office", "Damages & replacements", "Return", "Closing stock"]);
-    const fresh = table(day, "Store").rows.find((r) => r.product === "Fresh milk 250 ml");
+    const fresh = table(day, "Store").rows.find((r) => r.product === "Fresh Pasteurised Milk 250 ml");
     assert.deepEqual([fresh.production, fresh.opening, fresh.packed, fresh.local, fresh.office, fresh.damages, fresh.returned, fresh.closing], [50, 0, 40, 2, 2, 2, 5, 9]);
-    assert.deepEqual(table(day, "Local sales").columns.map((c) => c.label), ["Date", "Mala", "Raw milk", "Yoghurt 500 ml", "Yoghurt 250 ml", "Yoghurt 150 ml", "Fresh milk 250 ml", "Amount", "Ref. Number"]);
+    assert.deepEqual(table(day, "Local sales").columns.map((c) => c.label), ["Date", "Mala", "Raw milk", "Yoghurt 1 litre", "Yoghurt 500 ml", "Yoghurt 250 ml", "Yoghurt 150 ml", "Fresh Pasteurised Milk 250 ml", "Amount", "Ref. Number"]);
     const local = table(day, "Local sales");
     assert.equal(local.rows[0].RAW_MILK, 5);
     assert.equal(local.rows[0].reference, "RCPT-1");
     assert.equal(local.totals.amount, 460);
     const month = await report(`period=month&date=${today}`);
-    assert.equal(table(month, "Store totals for the period").rows.find((r) => r.product === "Fresh milk 250 ml").closing, 9);
+    assert.equal(table(month, "Store totals for the period").rows.find((r) => r.product === "Fresh Pasteurised Milk 250 ml").closing, 9);
     assert.ok(table(day, "Store").rows.some((r) => r.product === "Yoghurt 500 ml"));
     assert.ok(!table(day, "Store totals for the period"));
   });
@@ -800,6 +852,33 @@ if (!url) {
     });
     assert.equal(req.totalAmount, 25000);
     assert.equal(req.purpose, null);
+    assert.equal(req.proforma, null);
+    // The supplier's proforma invoice goes with a requisition, as a PDF.
+    const pdfBytes = (text) => Buffer.from(`%PDF-1.4\n% ${text}\n%%EOF\n`);
+    const pdfFile = (text) => pdfBytes(text).toString("base64");
+    const withProforma = (proforma) => ({ title: "Cups", items: [{ description: "Yoghurt cups 500 ml", quantity: 1000, unitCost: 6, purpose: "Packing yoghurt" }], proforma });
+    await call("mva", "POST", "/requisitions", withProforma({ name: "quote.pdf", data: Buffer.from("not a pdf").toString("base64") }), { expect: 400 });
+    await call("mva", "POST", "/requisitions", withProforma({ name: "big.pdf", data: Buffer.concat([Buffer.from("%PDF-"), Buffer.alloc(5 * 1024 * 1024)]).toString("base64") }), { expect: 400 });
+    const cups = await call("mva", "POST", "/requisitions", withProforma({ name: "Proforma: Packaging Ltd.pdf", data: `data:application/pdf;base64,${pdfFile("first")}` }));
+    assert.deepEqual([cups.proforma.fileName, cups.proforma.size, "data" in cups.proforma], ["Proforma  Packaging Ltd.pdf", pdfBytes("first").length, false]);
+    const opened = await call("accHead", "GET", `/requisitions/${cups.id}/proforma`, null, { raw: true });
+    assert.equal(opened.status, 200);
+    assert.equal(opened.headers.get("content-type"), "application/pdf");
+    assert.match(opened.headers.get("content-disposition"), /^inline; filename="Proforma  Packaging Ltd\.pdf"/);
+    assert.match(Buffer.from(await opened.arrayBuffer()).toString(), /first/);
+    assert.equal((await call("crops", "GET", `/requisitions/${cups.id}/proforma`, null, { raw: true })).status, 404);
+    assert.equal((await call("livestock", "GET", `/requisitions/${req.id}/proforma`, null, { raw: true })).status, 404);
+    // Returned, it can be changed: kept as it is unless a new one is sent, or taken off with null.
+    await call("accHead", "POST", `/requisitions/${cups.id}/decision`, { decision: "return", comment: "Attach the second quote" });
+    const kept = await call("mva", "PUT", `/requisitions/${cups.id}`, withProforma(undefined));
+    assert.equal(kept.proforma.fileName, "Proforma  Packaging Ltd.pdf");
+    await call("accHead", "POST", `/requisitions/${cups.id}/decision`, { decision: "return", comment: "Attach the second quote" });
+    const replaced = await call("mva", "PUT", `/requisitions/${cups.id}`, withProforma({ name: "second", data: pdfFile("second") }));
+    assert.equal(replaced.proforma.fileName, "second.pdf");
+    assert.match(Buffer.from(await (await call("accHead", "GET", `/requisitions/${cups.id}/proforma`, null, { raw: true })).arrayBuffer()).toString(), /second/);
+    await call("accHead", "POST", `/requisitions/${cups.id}/decision`, { decision: "return", comment: "No quote needed" });
+    assert.equal((await call("mva", "PUT", `/requisitions/${cups.id}`, withProforma(null))).proforma, null);
+    await call("mva", "POST", `/requisitions/${cups.id}/cancel`);
     assert.deepEqual(req.items.map((i) => [i.description, i.purpose]).sort(), [["Dairy meal", "Dairy meal for the milking cows this week"], ["Mineral lick", "Lick blocks for Dairy C"]]);
     // The department hears of each answer (approved, returned, rejected) until it looks at its requisitions.
     const answers = async (who, kind = "requisitions") => call(who, "GET", `/${kind}/answers`);
@@ -1064,6 +1143,7 @@ if (!url) {
   test("Accounts: farmer milk payment run", async () => {
     const run = await call("accounts", "POST", "/accounts/milk-payments", { periodStart: today, periodEnd: today });
     assert.equal(run.totalAmount, 5000);
+    assert.equal(run.lines.length, 2, "the farmer whose milk was all rejected is not on the run");
     await call("accounts", "PUT", `/accounts/milk-payments/${run.id}/lines/${run.lines[0].id}`, { deductions: 500 });
     const paid = await call("accounts", "POST", `/accounts/milk-payments/${run.id}/pay`, { accountId: cashId, date: today });
     assert.equal(paid.totalAmount, 4500);
@@ -1166,7 +1246,7 @@ if (!url) {
     const mvaPart = async (part) => (await call("mva", "GET", `/reports/department?department=mva&part=${part}&period=month&date=${today}`)).reports[0];
     assert.deepEqual((await mvaPart("production")).sections.map((s) => s.title), ["Production report"]);
     assert.deepEqual((await mvaPart("output")).sections.map((s) => s.title), ["Product output"]);
-    assert.ok((await mvaPart("production")).summary.some((s) => s.label === "Total intake"));
+    assert.ok((await mvaPart("production")).summary.some((s) => s.label === "Total intake (litres)"));
     // The full report still carries everything.
     assert.ok((await call("sales", "GET", `/reports/department?department=sales&period=day&date=${today}`)).reports[0].sections.some((s) => s.title.startsWith("Damages")));
 

@@ -231,7 +231,10 @@ const FitWidth = ({ children }) => {
   const ref = useCallback((node) => {
     observer.current?.disconnect();
     if (!node) return;
-    observer.current = new ResizeObserver(() => setZoom(Math.min(1, node.clientWidth / (SHEET_WIDTH + 2))));
+    const fit = () => setZoom(Math.min(1, node.clientWidth / (SHEET_WIDTH + 2)));
+    // Scaled before the first paint too, so a phone never flashes the full-width page.
+    fit();
+    observer.current = new ResizeObserver(fit);
     observer.current.observe(node);
   }, []);
   return (

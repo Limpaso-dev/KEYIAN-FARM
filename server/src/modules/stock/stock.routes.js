@@ -10,6 +10,10 @@ import { parseBody } from "../../lib/validate.js";
 const router = express.Router();
 const RESOURCE = { mva: "mvaStock", sales: "salesStock" };
 
+// ?except=RAW_MILK leaves a product out: MVA's Products page shows what it
+// makes; raw milk is on its Raw materials page.
+const exceptCodes = (query) => String(query.except || "").split(",").map((code) => code.trim()).filter(Boolean);
+
 const checkLocation = (req, action) => {
   const { location } = req.params;
   if (!LOCATIONS.includes(location)) throw badRequest("Location must be mva or sales");
@@ -19,13 +23,19 @@ const checkLocation = (req, action) => {
 
 router.get("/:location", async (req, res) => {
   const location = checkLocation(req, "read");
-  ok(res, await stockSummary(prisma, location));
+  const except = exceptCodes(req.query);
+  ok(res, (await stockSummary(prisma, location)).filter((row) => !except.includes(row.code)));
 });
 
 router.get("/:location/movements", async (req, res) => {
   const location = checkLocation(req, "read");
   const rows = await prisma.stockMovement.findMany({
-    where: { location, ...dateRange("date", req.query), ...(req.query.productId ? { productId: req.query.productId } : {}) },
+    where: {
+      location,
+      ...dateRange("date", req.query),
+      ...(req.query.productId ? { productId: req.query.productId } : {}),
+      ...(exceptCodes(req.query).length ? { product: { code: { notIn: exceptCodes(req.query) } } } : {}),
+    },
     include: { product: { select: { code: true, name: true, unit: true } } },
     orderBy: [{ date: "desc" }, { createdAt: "desc" }],
     take: Math.min(Number(req.query.limit) || 500, 2000),

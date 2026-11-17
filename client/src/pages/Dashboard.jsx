@@ -43,7 +43,6 @@ const chartRows = (days, seriesMaps) =>
   }));
 
 const litres = (v) => `${number(v, 1)} L`;
-const kg = (v) => `${number(v, 1)} kg`;
 const summaryValue = (cards, department, label) => cards?.find((c) => c.department === department)?.summary.find((s) => s.label === label)?.value;
 const plural = (n, word) => `${word}${n === 1 ? "" : "s"}`;
 
@@ -298,14 +297,13 @@ const Dashboard = () => {
   const cards = data?.cards || [];
 
   // ---- Series ---------------------------------------------------------
-  // The own herd's milk is weighed in kg, the farmers' measured in litres, so the two are never added together.
-  const milkByDay = { herd: sumByDay(herd.data, "kg"), farmers: sumByDay(farmers.data, "litres") };
+  // All milk is in litres, the own herd's and the local farmers', so the two add up.
+  const milkByDay = { herd: sumByDay(herd.data, "litres"), farmers: sumByDay(farmers.data, "litres") };
   const milkSeries = [
-    ...(herd.data ? [{ key: "herd", label: "Own herd", unit: "kg", as: kg }] : []),
-    ...(farmers.data ? [{ key: "farmers", label: "Local farmers", unit: "L", as: litres }] : []),
+    ...(herd.data ? [{ key: "herd", label: "Own herd", as: litres }] : []),
+    ...(farmers.data ? [{ key: "farmers", label: "Local farmers", as: litres }] : []),
   ];
-  const mixedMilk = milkSeries.length > 1;
-  const milkText = (pick, digits = 1) => milkSeries.map((s) => `${number(pick(milkByDay[s.key]), digits)} ${s.unit}`).join(" · ");
+  const milkText = (pick) => litres(milkSeries.reduce((sum, s) => sum + pick(milkByDay[s.key]), 0));
   const salesByDay = { local: sumByDay(sales.data, "totalAmount"), vehicles: sumByDay(dispatches.data, "expectedAmount", (d) => d.status !== "cancelled") };
   const posted = (type) => (row) => row.status === "posted" && row.type === type;
   const cashByDay = { income: sumByDay(ledger.data, "amount", posted("income")), expense: sumByDay(ledger.data, "amount", posted("expense")) };
@@ -322,8 +320,8 @@ const Dashboard = () => {
     const t = on(milkByDay, day);
     kpis.push({
       label: "Milk collected today",
-      value: milkText((m) => m[day] || 0, mixedMilk ? 0 : 1),
-      foot: mixedMilk ? <span className="text-slate-500">Own herd in kg · farmers in litres</span> : <Change now={t} before={on(milkByDay, yesterday)} />,
+      value: milkText((m) => m[day] || 0),
+      foot: <Change now={t} before={on(milkByDay, yesterday)} />,
     });
   }
   if (showSales) {
@@ -368,8 +366,8 @@ const Dashboard = () => {
   if (salaries.data?.length) attention.push({ key: "salaries", severity: "medium", count: salaries.data.length, title: `Staff ${salaries.data.length === 1 ? "salary" : "salaries"} to pay`, detail: `${money(salaries.data.reduce((sum, line) => sum + line.netPay, 0))} sent by HR`, to: "/accounts?tab=salaries" });
   const onRoad = (dispatches.data || []).filter((d) => d.status === "dispatched" && dayOf(d.date) < day).length;
   if (onRoad) attention.push({ key: "road", severity: "high", count: onRoad, title: `Vehicle ${plural(onRoad, "trip")} from earlier days not reconciled`, detail: "Reconcile the trip under Vehicle sales", to: "/sales?tab=vehicles-out" });
-  const unsent = summaryValue(cards, "livestock", "Not yet sent (kg)");
-  if (unsent > 0) attention.push({ key: "unsent", severity: "low", count: `${number(unsent, 0)} kg`, title: "Today's milk not yet sent to MVA", to: "/livestock?tab=transfers" });
+  const unsent = summaryValue(cards, "livestock", "Not yet sent (litres)");
+  if (unsent > 0) attention.push({ key: "unsent", severity: "low", count: `${number(unsent, 0)} L`, title: "Today's milk not yet sent to MVA", to: "/livestock?tab=transfers" });
   const variance = summaryValue(cards, "sales", "Vehicle shortage / excess");
   if (variance < 0) attention.push({ key: "variance", severity: "high", count: compactMoney(Math.abs(variance)), title: "Vehicle cash short today", detail: `Short by ${money(Math.abs(variance))}`, to: "/sales?tab=vehicles-out" });
 
@@ -417,15 +415,14 @@ const Dashboard = () => {
           {showMilk && (
             <ChartSection
               title="Milk intake"
-              description={mixedMilk ? `Own herd in kilograms, local farmers in litres, last ${DAYS} days` : `${milkSeries[0]?.unit === "kg" ? "Kilograms" : "Litres"} per day, last ${DAYS} days`}
+              description={`Litres per day, last ${DAYS} days`}
               loading={(herd.loading && !herd.data) || (farmers.loading && !farmers.data)}
               total={{ value: milkText(total), label: `${DAYS}-day total` }}
             >
               <ColumnChart
                 title="Milk intake per day"
-                summable={!mixedMilk}
                 data={chartRows(days, Object.fromEntries(milkSeries.map((s) => [s.key, milkByDay[s.key]])))}
-                series={milkSeries.map((s) => ({ key: s.key, label: mixedMilk ? `${s.label} (${s.unit})` : s.label, format: (v, full) => (full ? s.as(v) : number(v, 0)) }))}
+                series={milkSeries.map((s) => ({ key: s.key, label: s.label, format: (v, full) => (full ? s.as(v) : number(v, 0)) }))}
               />
             </ChartSection>
           )}

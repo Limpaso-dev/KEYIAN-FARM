@@ -1,9 +1,11 @@
-import { CheckCircle2, CornerUpLeft, XCircle } from "lucide-react";
+import { CheckCircle2, CornerUpLeft, Download, ExternalLink, FileText, Paperclip, XCircle } from "lucide-react";
 import { ModulePage } from "../../components/resource/ModulePage";
 import { ResourcePage } from "../../components/resource/ResourcePage";
 import { Alert, Badge, NewTag } from "../../components/ui/ui";
 import { useAuth } from "../../context/useAuth";
-import { dateTime, money, number } from "../../lib/format";
+import { download, errorMessage, openFile } from "../../lib/api";
+import { dateTime, fileSize, money, number } from "../../lib/format";
+import { showError } from "../../lib/toast";
 import { answeredSince, useAnswersSeen } from "../../lib/useNavCounts";
 import { StoreAnswer } from "../stores/StoreRequestDetails";
 import { storeRequestsConfig } from "../stores/storeRequests";
@@ -27,13 +29,41 @@ const itemsField = {
   formatTotal: money,
 };
 
+const MAX_PROFORMA_BYTES = 5 * 1024 * 1024;
+
 const formFields = [
   { name: "title", label: "Title", required: true, placeholder: "e.g. Dairy meal for November" },
   { name: "priority", label: "Priority", type: "select", options: "priorities" },
   itemsField,
+  {
+    name: "proforma", label: "Proforma invoice (PDF)", type: "file", accept: "application/pdf", maxBytes: MAX_PROFORMA_BYTES,
+    placeholder: "Attach the supplier's proforma invoice", help: "Optional. A PDF of up to 5 MB; Accounts opens it from the requisition.",
+  },
 ];
 
-const toPayload = (v) => ({ title: v.title, priority: v.priority || "normal", items: (v.items || []).filter((i) => i.description) });
+// The proforma: a new file is sent; one already saved is left as it is (not sent); removed, null.
+const toPayload = (v) => ({
+  title: v.title,
+  priority: v.priority || "normal",
+  items: (v.items || []).filter((i) => i.description),
+  proforma: v.proforma?.existing ? undefined : v.proforma ? { name: v.proforma.name, data: v.proforma.data } : null,
+});
+
+const proformaPath = (row) => `/requisitions/${row.id}/proforma`;
+const failed = (err) => showError(errorMessage(err, "The proforma invoice could not be opened. Please try again."), "Could not open the file");
+
+/** The proforma invoice sent with a requisition: its name and size, to open or save. */
+const Proforma = ({ row }) => (
+  <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+    <span className="font-medium text-slate-700">Proforma invoice:</span>
+    <span className="inline-flex min-w-0 items-center gap-1.5 text-slate-800"><FileText size={15} className="shrink-0 text-primary-700" aria-hidden /><span className="break-all">{row.proforma.fileName}</span></span>
+    <span className="text-xs tabular-nums text-slate-500">{fileSize(row.proforma.size)}</span>
+    <span className="flex gap-3">
+      <button type="button" onClick={() => openFile(proformaPath(row), row.proforma.fileName).catch(failed)} className="inline-flex items-center gap-1 text-xs font-medium text-primary-700 hover:underline"><ExternalLink size={13} aria-hidden />Open</button>
+      <button type="button" onClick={() => download(proformaPath(row), {}, row.proforma.fileName).catch(failed)} className="inline-flex items-center gap-1 text-xs font-medium text-primary-700 hover:underline"><Download size={13} aria-hidden />Download</button>
+    </span>
+  </p>
+);
 
 const Details = ({ row }) => {
   // Requisitions raised before each item had its own purpose carry one for the whole requisition.
@@ -64,6 +94,7 @@ const Details = ({ row }) => {
       </div>
       <div className="space-y-1 text-slate-600">
         {row.purpose && <p><span className="font-medium text-slate-700">Purpose:</span> {row.purpose}</p>}
+        {row.proforma ? <Proforma row={row} /> : <p><span className="font-medium text-slate-700">Proforma invoice:</span> None attached</p>}
         <p><span className="font-medium text-slate-700">Raised by:</span> {row.requestedBy?.name} on {dateTime(row.createdAt)}</p>
         {row.decidedBy && <p><span className="font-medium text-slate-700">Decided by:</span> {row.decidedBy.name} on {dateTime(row.decidedAt)}</p>}
         {row.decisionComment && <p><span className="font-medium text-slate-700">Comment:</span> {row.decisionComment}</p>}
@@ -97,9 +128,10 @@ const config = (user, permissions, answers) => {
     resource: "requisitions",
     endpoint: "/requisitions",
     title: "Requisitions to Accounts",
-    description: "Money and things to buy, such as dust coats, each item with its purpose. The head of Accounts or the General Manager approves, returns or rejects, and Accounts then fulfils it. (Ask Stores for its items under To Stores.)",
+    description: "Money and things to buy, such as dust coats, each item with its purpose, and the supplier's proforma invoice (PDF) where there is one. The head of Accounts or the General Manager approves, returns or rejects, and Accounts then fulfils it. (Ask Stores for its items under To Stores.)",
     singular: "Requisition",
     createLabel: "New requisition",
+    createSubmit: "Send for approval",
     formSize: "lg",
     canCreate: () => permissions?.requisitions?.raise,
     canEdit: () => true,
@@ -108,7 +140,11 @@ const config = (user, permissions, answers) => {
     editFields: formFields,
     createFields: formFields,
     createInitial: () => ({ priority: "normal", items: [{ description: "", quantity: "", unit: "", unitCost: "", purpose: "" }] }),
-    toForm: (r) => ({ ...r, items: r.items.map((i) => ({ description: i.description, quantity: i.quantity, unit: i.unit || "", unitCost: i.unitCost, purpose: i.purpose || "" })) }),
+    toForm: (r) => ({
+      ...r,
+      items: r.items.map((i) => ({ description: i.description, quantity: i.quantity, unit: i.unit || "", unitCost: i.unitCost, purpose: i.purpose || "" })),
+      proforma: r.proforma ? { name: r.proforma.fileName, size: r.proforma.size, existing: true } : null,
+    }),
     toPayload,
     created: (r) => `${r.requisitionNumber} sent for approval`,
     filters: [
@@ -121,7 +157,15 @@ const config = (user, permissions, answers) => {
       { key: "requisitionNumber", label: "Number" },
       { key: "createdAt", label: "Raised", render: (r) => dateTime(r.createdAt) },
       { key: "department", label: "Department", type: "option:departments" },
-      { key: "title", label: "Title" },
+      {
+        key: "title", label: "Title",
+        render: (r) => (
+          <span className="inline-flex items-center gap-1.5">
+            {r.title}
+            {r.proforma && <span title="Proforma invoice attached" className="text-slate-400"><Paperclip size={14} aria-hidden /><span className="sr-only">(proforma invoice attached)</span></span>}
+          </span>
+        ),
+      },
       { key: "priority", label: "Priority", render: (r, c) => <span className={r.priority === "urgent" ? "font-medium text-rose-700" : ""}>{c.label("priorities", r.priority)}</span> },
       { key: "requestedBy", label: "Raised by", render: (r) => r.requestedBy?.name },
       { key: "totalAmount", label: "Estimate", type: "money" },

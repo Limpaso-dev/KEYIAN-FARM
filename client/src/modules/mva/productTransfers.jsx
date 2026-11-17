@@ -10,7 +10,7 @@ export const productTransfers = {
   resource: "productTransfers",
   endpoint: "/mva/product-transfers",
   title: "Products sent to Sales",
-  description: "Finished products go to Sales from here. Raw milk goes through the L.Sale allocation. Sales confirms receipt before it counts in Sales stock.",
+  description: "Finished products go to Sales from here, Mala and Yoghurt also in bulk (litres). Raw milk goes through the local sale allocation. Sales confirms receipt before it counts in Sales stock.",
   singular: "Transfer",
   editFields: false,
   deletableWhen: (r) => r.status === "sent" && !r.allocationId,

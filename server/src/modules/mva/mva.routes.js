@@ -10,7 +10,8 @@ import { nextNumber } from "../../lib/numbers.js";
 import { isoDay } from "../../lib/periods.js";
 import { moveStock, productByCode } from "../../lib/stock.js";
 import { parseBody, parseItems, round2 } from "../../lib/validate.js";
-import { outputFigures, productionDays } from "./production.js";
+import materialsRouter, { useCups } from "./materials.js";
+import { outputFigures, productionDays, YOGHURT_PACKS } from "./production.js";
 import { productBrief, sendToSales, transferInclude } from "./transfers.js";
 
 const router = express.Router();
@@ -92,12 +93,15 @@ router.use("/milk-prices", crud({
 // ---------------------------------------------------------------------
 const deliveryRouter = express.Router();
 
-// Record many farmers for one session at once.
+// Record many farmers for one session at once. Each line may carry remarks on
+// milk rejected at collection; a farmer whose milk was all rejected gets a
+// line of 0 litres with the remarks, so the rejection is on record.
 deliveryRouter.post("/", allow("milkDeliveries", "write"), async (req, res) => {
   const { date, session } = parseBody({ date: "date!", session: "option:milkSessions!" }, req.body);
-  const lines = parseItems(req.body.deliveries, { supplierId: "id!", litres: "decimal!", notes: "text" }, { label: "deliveries" })
-    .filter((line) => line.litres > 0);
-  if (!lines.length) throw badRequest("Enter litres for at least one farmer");
+  const lines = parseItems(req.body.deliveries, { supplierId: "id!", litres: "decimal", notes: "text" }, { label: "deliveries" })
+    .map((line) => ({ ...line, litres: line.litres || 0 }))
+    .filter((line) => line.litres > 0 || line.notes);
+  if (!lines.length) throw badRequest("Enter litres (or remarks on rejected milk) for at least one farmer");
   const saved = await inTransaction(async (tx) => {
     const price = await priceOn(tx, date);
     if (!price) throw conflict("Set a milk price per litre for this date before recording deliveries");
@@ -119,6 +123,7 @@ deliveryRouter.post("/", allow("milkDeliveries", "write"), async (req, res) => {
         },
         include: { supplier: supplierBrief },
       });
+      // Milk all rejected adds nothing to stock (moveStock skips 0).
       await moveStock(tx, {
         productId: rawMilk.id,
         location: "mva",
@@ -137,11 +142,12 @@ deliveryRouter.post("/", allow("milkDeliveries", "write"), async (req, res) => {
   ok(res, saved, 201, { message: `Recorded ${saved.length} delivery(ies)` });
 });
 
-// Totals per farmer for a period (for the farmer's statement).
+// Totals per farmer for a period (for the farmer's statement). Milk that was
+// all rejected is not a delivery.
 deliveryRouter.get("/statement", allow("milkDeliveries", "read"), async (req, res) => {
   const { from, to, supplierId } = req.query;
   if (!from || !to) throw badRequest("Choose a from and to date");
-  const where = { date: { gte: new Date(from), lte: new Date(to) }, ...(supplierId ? { supplierId } : {}) };
+  const where = { date: { gte: new Date(from), lte: new Date(to) }, litres: { gt: 0 }, ...(supplierId ? { supplierId } : {}) };
   const groups = await prisma.milkDelivery.groupBy({ by: ["supplierId"], where, _sum: { litres: true, amount: true }, _count: true });
   const suppliers = await prisma.milkSupplier.findMany({ where: { id: { in: groups.map((g) => g.supplierId) } }, select: supplierBrief.select });
   const byId = new Map(suppliers.map((s) => [s.id, s]));
@@ -187,8 +193,8 @@ router.use("/milk-deliveries", crud({
 
 // ---------------------------------------------------------------------
 // Allocation: where each day's milk goes. There is one record per day, and
-// saving it again changes it. Raw milk stock falls as it is allocated. L.Sale
-// goes to Sales as raw milk, waiting there to be received.
+// saving it again changes it. Raw milk stock falls as it is allocated. Local
+// sale goes to Sales as raw milk, waiting there to be received.
 // ---------------------------------------------------------------------
 const allocationRouter = express.Router();
 
@@ -198,14 +204,14 @@ allocationRouter.get("/", allow("milkAllocations", "read"), async (req, res) => 
 
 const syncLocalSale = async (tx, allocation, transfer, quantity, rawMilkId) => {
   const ref = { productId: rawMilkId, location: "mva", date: allocation.date, allowNegative: true };
-  if (transfer?.status === "received") throw conflict("Sales has already received this day's L.Sale milk, so it cannot be changed");
+  if (transfer?.status === "received") throw conflict("Sales has already received this day's local sale milk, so it cannot be changed");
   if (!transfer) {
     const created = await tx.productTransfer.create({
       data: {
         date: allocation.date,
         allocationId: allocation.id,
         transferNumber: await nextNumber(tx, "PTR", allocation.date),
-        notes: "L.Sale allocation",
+        notes: "Local sale allocation",
         items: { create: [{ productId: rawMilkId, quantity }] },
       },
     });
@@ -266,10 +272,12 @@ allocationRouter.post("/", allow("milkAllocations", "write"), async (req, res) =
 router.use("/milk-allocations", allocationRouter);
 
 // ---------------------------------------------------------------------
-// Product output: kilograms processed and the pieces made from them. The
-// milk has already left raw stock when it was allocated. Every pack made -
-// Mala, the three yoghurt sizes and fresh milk in 250 ml packets - goes into
-// MVA stock, ready to send to Sales.
+// Product output: the litres processed and what was made from them. The
+// milk has already left raw stock when it was allocated. Everything made -
+// Mala, the four yoghurt sizes, Mala and Yoghurt in bulk (litres) and Fresh
+// Pasteurised Milk in 250 ml packets - goes into MVA stock, ready to send to
+// Sales. Each piece of yoghurt packed uses a cup of its size from MVA's raw
+// materials.
 // ---------------------------------------------------------------------
 const batchInclude = { outputs: { include: { product: productBrief } } };
 const batchRouter = express.Router();
@@ -281,11 +289,27 @@ batchRouter.get("/", allow("processingBatches", "read"), async (req, res) => {
 });
 
 batchRouter.post("/", allow("processingBatches", "write"), async (req, res) => {
-  const data = parseBody({ date: "date!", malaKg: "decimal", malaPieces: "int", yoghurtKg: "decimal", yoghurt500: "int", yoghurt250: "int", yoghurt150: "int", fresh250: "int", notes: "text" }, req.body);
-  const packed = [["MALA", data.malaPieces], ["YOGHURT_500", data.yoghurt500], ["YOGHURT_250", data.yoghurt250], ["YOGHURT_150", data.yoghurt150], ["FRESH_MILK", data.fresh250]];
+  const data = parseBody({
+    date: "date!",
+    malaLitres: "decimal",
+    malaPieces: "int",
+    bulkMala: "decimal",
+    yoghurtLitres: "decimal",
+    ...Object.fromEntries(YOGHURT_PACKS.map(([, key]) => [key, "int"])),
+    bulkYoghurt: "decimal",
+    fresh250: "int",
+    notes: "text",
+  }, req.body);
+  const packed = [
+    ["MALA", data.malaPieces],
+    ["BULK_MALA", data.bulkMala],
+    ...YOGHURT_PACKS.map(([code, key]) => [code, data[key]]),
+    ["BULK_YOGHURT", data.bulkYoghurt],
+    ["FRESH_MILK", data.fresh250],
+  ];
   if (packed.some(([, pieces]) => pieces < 0)) throw badRequest("The number of pieces cannot be negative");
   const made = packed.filter(([, pieces]) => pieces > 0);
-  if (!made.length && !data.malaKg && !data.yoghurtKg) throw badRequest("Enter at least one figure");
+  if (!made.length && !data.malaLitres && !data.yoghurtLitres) throw badRequest("Enter at least one figure");
 
   const batch = await inTransaction(async (tx) => {
     const products = await tx.product.findMany({ where: { code: { in: made.map(([code]) => code) } } });
@@ -299,10 +323,10 @@ batchRouter.post("/", allow("processingBatches", "write"), async (req, res) => {
         date: data.date,
         notes: data.notes,
         batchNumber: await nextNumber(tx, "BAT", data.date),
-        malaKg: data.malaKg || 0,
-        yoghurtKg: data.yoghurtKg || 0,
+        malaLitres: data.malaLitres || 0,
+        yoghurtLitres: data.yoghurtLitres || 0,
         fresh250: data.fresh250 || 0,
-        rawMilkInput: round2((data.malaKg || 0) + (data.yoghurtKg || 0)),
+        rawMilkInput: round2((data.malaLitres || 0) + (data.yoghurtLitres || 0)),
         outputs: { create: outputs },
       },
       include: batchInclude,
@@ -310,6 +334,7 @@ batchRouter.post("/", allow("processingBatches", "write"), async (req, res) => {
     for (const line of outputs) {
       await moveStock(tx, { productId: line.productId, location: "mva", quantity: line.quantity, movementType: "processing_output", referenceType: "processingBatch", referenceId: created.id, date: data.date, notes: created.batchNumber });
     }
+    await useCups(tx, created, made);
     await audit(tx, { user: req.user, action: "create", entity: "processingBatch", entityId: created.id, after: created });
     return created;
   });
@@ -326,12 +351,14 @@ router.use("/processing-batches", crud({
   dateField: "date",
   create: false,
   update: false,
-  // Deleting takes the pieces back out of stock, so anything already sent to Sales blocks it.
+  // Deleting takes the pieces back out of stock, so anything already sent to
+  // Sales blocks it; the cups they used go back to the raw materials.
   beforeDelete: async (batch, { tx }) => {
-    const outputs = await tx.processingOutput.findMany({ where: { batchId: batch.id } });
+    const outputs = await tx.processingOutput.findMany({ where: { batchId: batch.id }, include: { product: true } });
     for (const line of outputs) {
       await moveStock(tx, { productId: line.productId, location: "mva", quantity: -Number(line.quantity), movementType: "processing_reversal", referenceType: "processingBatch", referenceId: batch.id, date: batch.date, notes: `${batch.batchNumber} deleted` });
     }
+    await useCups(tx, batch, outputs.map((line) => [line.product.code, Number(line.quantity)]), 1);
   },
 }));
 
@@ -400,7 +427,7 @@ router.use("/product-transfers", crud({
   update: false,
   beforeDelete: async (transfer, { tx }) => {
     if (transfer.status !== "sent") throw conflict("A received transfer cannot be deleted");
-    if (transfer.allocationId) throw conflict("This came from the day's L.Sale allocation. Change the allocation instead.");
+    if (transfer.allocationId) throw conflict("This came from the day's local sale allocation. Change the allocation instead.");
     // A transfer that answered a request from Sales puts the request back in the queue.
     const request = await tx.productRequest.findUnique({ where: { transferId: transfer.id } });
     if (request) {
@@ -422,5 +449,8 @@ router.use("/product-transfers", crud({
     }
   },
 }));
+
+// Raw materials: raw milk and the yoghurt cups.
+router.use("/raw-materials", materialsRouter);
 
 export default router;

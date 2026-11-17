@@ -50,4 +50,32 @@ export const download = async (path, params, fallbackName) => {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
 
+/**
+ * Open a file (a PDF) from an authenticated endpoint in a new tab. The tab is
+ * opened at the click, before the file arrives, so the browser does not
+ * block it; where no tab can be opened the file is saved instead.
+ */
+export const openFile = async (path, fallbackName) => {
+  const tab = window.open("", "_blank");
+  try {
+    const response = await api.get(path, { responseType: "blob" });
+    const url = URL.createObjectURL(response.data);
+    if (tab) {
+      tab.location.href = url;
+    } else {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fallbackName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+    // Long enough for the tab's viewer to save or print it.
+    setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
+  } catch (error) {
+    tab?.close();
+    throw error;
+  }
+};
+
 export default api;

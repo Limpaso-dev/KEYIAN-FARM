@@ -115,7 +115,7 @@ export const OPTIONS = {
     ["yoghurt", "Yoghurt"],
     ["nkcc", "NKCC"],
     ["own_use", "Own use"],
-    ["local_sale", "L.Sale"],
+    ["local_sale", "Local sale"],
     ["staff", "Staff"],
     ["police", "Police"],
     ["school", "School"],
@@ -274,21 +274,39 @@ export const optionLabel = (name, value) =>
   OPTIONS[name]?.find((option) => option.value === value)?.label ?? value ?? "";
 
 /// Products MVA makes and Sales sells. Seeded on start-up if missing.
+/// All milk is in litres.
 export const DEFAULT_PRODUCTS = [
-  // Raw milk is sold by the kilogram; fresh milk always in 250 ml packets.
-  { code: "RAW_MILK", name: "Raw milk", unit: "kg", localPrice: 60, vehiclePrice: 60 },
-  { code: "FRESH_MILK", name: "Fresh milk 250 ml", unit: "packets", localPrice: 0, vehiclePrice: 0 },
+  // Raw milk is sold by the litre; fresh milk always in 250 ml packets.
+  { code: "RAW_MILK", name: "Raw milk", unit: "litres", localPrice: 60, vehiclePrice: 60 },
+  { code: "FRESH_MILK", name: "Fresh Pasteurised Milk 250 ml", unit: "packets", localPrice: 0, vehiclePrice: 0 },
   { code: "MALA", name: "Mala", unit: "pieces", localPrice: 120, vehiclePrice: 120 },
   // Yoghurt is sold by pack size. Sales sets these prices under Prices.
+  { code: "YOGHURT_1000", name: "Yoghurt 1 litre", unit: "pieces", localPrice: 0, vehiclePrice: 0 },
   { code: "YOGHURT_500", name: "Yoghurt 500 ml", unit: "pieces", localPrice: 0, vehiclePrice: 0 },
   { code: "YOGHURT_250", name: "Yoghurt 250 ml", unit: "pieces", localPrice: 0, vehiclePrice: 0 },
   { code: "YOGHURT_150", name: "Yoghurt 150 ml", unit: "pieces", localPrice: 0, vehiclePrice: 0 },
+  // Mala and Yoghurt also go to Sales unpacked, by the litre.
+  { code: "BULK_MALA", name: "Bulk Mala", unit: "litres", localPrice: 0, vehiclePrice: 0 },
+  { code: "BULK_YOGHURT", name: "Bulk Yoghurt", unit: "litres", localPrice: 0, vehiclePrice: 0 },
 ];
 
 export const RAW_MILK = "RAW_MILK";
 
-// How MVA's production sheets work out litres and expected losses.
-export const KG_TO_LITRES = 0.968;
+/** The order products are listed in, as on MVA's output sheet; others follow by name. */
+export const PRODUCT_ORDER = ["RAW_MILK", "MALA", "BULK_MALA", "YOGHURT_1000", "YOGHURT_500", "YOGHURT_250", "YOGHURT_150", "BULK_YOGHURT", "FRESH_MILK"];
+
+/// What MVA uses up in production besides the milk: a cup for each piece of
+/// yoghurt packed. usedFor is the product each cup is used by.
+export const RAW_MATERIALS = [
+  { code: "CUP_150", name: "Yoghurt cups 150 ml", unit: "cups", usedFor: "YOGHURT_150" },
+  { code: "CUP_250", name: "Yoghurt cups 250 ml", unit: "cups", usedFor: "YOGHURT_250" },
+  { code: "CUP_500", name: "Yoghurt cups 500 ml", unit: "cups", usedFor: "YOGHURT_500" },
+  { code: "CUP_1000", name: "Yoghurt cups 1 litre", unit: "cups", usedFor: "YOGHURT_1000" },
+];
+
+// How MVA's production sheets work out expected losses: of the litres
+// processed, this share should come out as product.
 export const MALA_YIELD = 0.96;
 export const YOGHURT_YIELD = 0.97;
-export const PACK_LITRES = { MALA: 0.5, YOGHURT_500: 0.5, YOGHURT_250: 0.25, YOGHURT_150: 0.15 };
+/** Litres in one piece of each packed product. */
+export const PACK_LITRES = { MALA: 0.5, YOGHURT_1000: 1, YOGHURT_500: 0.5, YOGHURT_250: 0.25, YOGHURT_150: 0.15 };

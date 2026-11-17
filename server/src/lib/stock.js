@@ -1,3 +1,4 @@
+import { PRODUCT_ORDER } from "../config/catalog.js";
 import { conflict, notFound } from "./http.js";
 import { round2 } from "./validate.js";
 
@@ -6,6 +7,12 @@ import { round2 } from "./validate.js";
 // requests cannot both spend the same litres.
 
 export const LOCATIONS = ["mva", "sales"];
+
+/** Products in the order of MVA's output sheet (Mala, the yoghurt sizes largest first ...), then the rest by name. */
+export const productOrder = (a, b) => {
+  const rank = (product) => (PRODUCT_ORDER.includes(product.code) ? PRODUCT_ORDER.indexOf(product.code) : PRODUCT_ORDER.length);
+  return rank(a) - rank(b) || a.name.localeCompare(b.name);
+};
 
 /** What is left on a vehicle for one product of a trip. */
 export const stillOnVehicle = (item) => round2(Number(item.quantityDispatched) - Number(item.quantityReturned) - Number(item.quantityDamaged) - Number(item.quantityReplaced));
@@ -54,7 +61,7 @@ export const productByCode = async (tx, code) => {
  * their stock is gone. For Sales, onVehicles is what is out on open trips.
  */
 export const stockSummary = async (tx, location, { upTo } = {}) => {
-  const products = await tx.product.findMany({ orderBy: { name: "asc" } });
+  const products = (await tx.product.findMany()).sort(productOrder);
   const sums = await tx.stockMovement.groupBy({
     by: ["productId"],
     where: { location, ...(upTo ? { date: { lte: upTo } } : {}) },

@@ -27,6 +27,9 @@ app.set("trust proxy", 1);
 app.use(helmet());
 // Content-Disposition carries the file name of report downloads.
 app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173", credentials: true, exposedHeaders: ["Content-Disposition"] }));
+// A requisition can carry its proforma invoice: a PDF of up to 5 MB, sent as
+// base64 (a third larger). Every other request stays small.
+app.use("/api/requisitions", express.json({ limit: "8mb" }));
 app.use(express.json({ limit: "1mb" }));
 // Figures change with every record saved: no browser or proxy may keep an
 // answer, so a page always shows what is in the database now.

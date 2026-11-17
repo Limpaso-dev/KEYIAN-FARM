@@ -5,9 +5,9 @@ import { MilkLeftNote } from "./MilkOnHand";
 
 const dairyField = { name: "dairy", label: "Dairy", type: "select", options: "dairies", required: true, onSelect: (_, values, meta) => keepSession(values, meta) };
 
-// Before the kilograms: what was recorded at that milking, and what is left to send.
+// Before the litres: what was recorded at that milking, and what is left to send.
 const milkLeft = { type: "note", render: (values) => <MilkLeftNote values={values} /> };
-const kgField = { name: "kg", label: "Kg sent", type: "number", required: true, help: "No more than is left of that milking" };
+const litresField = { name: "litres", label: "Litres sent", type: "number", required: true, help: "No more than is left of that milking" };
 
 /** The fields that send milk to MVA (also used by the Send buttons above the list). */
 export const sendMilkFields = [
@@ -15,16 +15,16 @@ export const sendMilkFields = [
   { ...dairyField, span: "third" },
   { ...sessionField, span: "third" },
   milkLeft,
-  kgField,
+  litresField,
   { name: "notes", label: "Notes", type: "textarea" },
 ];
 
-// Shared by the Livestock (send) and MVA (receive) screens. Milk is weighed in kilograms.
+// Shared by the Livestock (send) and MVA (receive) screens. Milk is measured in litres.
 export const milkTransfers = {
   resource: "milkTransfers",
   endpoint: "/livestock/milk-transfers",
   title: "Milk sent to MVA",
-  description: "Livestock sends milk recorded at a milking, in kilograms, and no more than was recorded; MVA confirms what it received. Only received milk enters MVA stock.",
+  description: "Livestock sends milk recorded at a milking, in litres, and no more than was recorded; MVA confirms what it received. Only received milk enters MVA stock.",
   singular: "Transfer",
   createLabel: "Send milk to MVA",
   createFields: sendMilkFields,
@@ -35,22 +35,22 @@ export const milkTransfers = {
     { key: "date", label: "Date", type: "date" },
     { key: "dairy", label: "Dairy", type: "option:dairies" },
     { key: "session", label: "Session", type: "option:milkSessions" },
-    { key: "kg", label: "Sent (kg)", type: "number" },
-    { key: "receivedKg", label: "Received (kg)", type: "number" },
+    { key: "litres", label: "Sent (L)", type: "number" },
+    { key: "receivedLitres", label: "Received (L)", type: "number" },
     { key: "status", label: "Status", type: "status:transferStatus" },
     { key: "notes", label: "Notes" },
   ],
   editableWhen: (r) => r.status === "sent",
   deletableWhen: (r) => r.status === "sent",
   // Changing a transfer, the milk it already took counts as still there.
-  toForm: (row) => ({ ...row, date: String(row.date).slice(0, 10), kg: String(Number(row.kg)), _sent: { dairy: row.dairy, session: row.session, kg: Number(row.kg) } }),
-  editFields: [dairyField, sessionField, milkLeft, kgField, { name: "notes", label: "Notes", type: "textarea" }],
+  toForm: (row) => ({ ...row, date: String(row.date).slice(0, 10), litres: String(Number(row.litres)), _sent: { dairy: row.dairy, session: row.session, litres: Number(row.litres) } }),
+  editFields: [dairyField, sessionField, milkLeft, litresField, { name: "notes", label: "Notes", type: "textarea" }],
   actions: [{
     key: "receive", label: "Receive", icon: PackageCheck, variant: "primary",
     allowed: (c) => c.can("milkTransfers", "receive"), when: (r) => r.status === "sent",
-    path: (r) => `/livestock/milk-transfers/${r.id}/receive`, title: (r) => `Receive ${r.transferNumber} (${number(r.kg)} kg sent)`,
-    fields: [{ name: "receivedKg", label: "Kg received", type: "number", required: true }, { name: "notes", label: "Notes (e.g. spillage)", type: "textarea" }],
-    initial: (r) => ({ receivedKg: r.kg }),
+    path: (r) => `/livestock/milk-transfers/${r.id}/receive`, title: (r) => `Receive ${r.transferNumber} (${number(r.litres)} L sent)`,
+    fields: [{ name: "receivedLitres", label: "Litres received", type: "number", required: true }, { name: "notes", label: "Notes (e.g. spillage)", type: "textarea" }],
+    initial: (r) => ({ receivedLitres: r.litres }),
     success: () => "Milk received into MVA raw milk stock",
   }],
 };

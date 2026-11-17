@@ -1,19 +1,22 @@
 import { Fragment, useEffect, useId, useRef, useState } from "react";
-import { CircleAlert, Plus, Search, Trash2 } from "lucide-react";
+import { CircleAlert, FileText, Paperclip, Plus, Search, Trash2 } from "lucide-react";
 import { useAuth } from "../../context/useAuth";
 import { errorMessage } from "../../lib/api";
 import { cx } from "../../lib/cx";
+import { fileSize } from "../../lib/format";
 import { showError } from "../../lib/toast";
 import { fetchCached } from "../../lib/useFetch";
 import { Alert, Button, FieldWrap, Input, Kbd, Modal, Select, Spinner, Textarea } from "../ui/ui";
 
 // Field definition:
 //   { name, label, type, required, options | ref, span (2: full width, "third"), help, placeholder,
-//     showIf(values), readOnly, step, min, columns (items), fixedRows }
+//     showIf(values), readOnly, step, min, columns (items), fixedRows, accept and maxBytes (file) }
 // required, readOnly and help may be functions of the form's values; optionFilter(option, values, meta) narrows a list;
 // onSelect(row, values, meta) returns other values to set when the field changes.
 // type: text | email | tel | number | date | month | textarea | select |
-//       checkbox | items | display | note (render(values): a line of context across the form, not a field)
+//       checkbox | items | display | note (render(values): a line of context across the form, not a field) |
+//       file (a file from the device, read here: { name, size, data } with data in base64;
+//             one already saved is { name, size, existing: true }; null when there is none)
 // options: name of a server option list (string) or [{ value, label }]
 // ref: { path, params, label(row), filter(row) } - options from records
 
@@ -56,6 +59,53 @@ const useOptions = (field, values) => {
 
 const INVALID = "border-rose-400 hover:border-rose-500 focus:border-rose-500 focus:ring-rose-500/10";
 
+/** Picks a file, checks its type and size, and reads it for sending with the form. */
+const FileInput = ({ field, value, onChange, id, invalid, disabled, describedBy }) => {
+  const input = useRef(null);
+  const [problem, setProblem] = useState("");
+  const pdfOnly = field.accept === "application/pdf";
+  const choose = () => input.current?.click();
+  const pick = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (pdfOnly && file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) return setProblem(`${file.name} is not a PDF. Choose a PDF file.`);
+    if (field.maxBytes && file.size > field.maxBytes) return setProblem(`${file.name} is ${fileSize(file.size)}; the most is ${fileSize(field.maxBytes)}.`);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProblem("");
+      onChange({ name: file.name, size: file.size, data: String(reader.result).split(",")[1] || "" });
+    };
+    reader.onerror = () => setProblem(`${file.name} could not be read. Try again.`);
+    reader.readAsDataURL(file);
+    return undefined;
+  };
+  return (
+    <div>
+      <input ref={input} id={id} type="file" accept={field.accept} className="sr-only" onChange={pick} disabled={disabled} aria-invalid={invalid || undefined} aria-describedby={describedBy} />
+      {value ? (
+        <div className={cx("flex min-h-10 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-white px-3 py-2 text-sm", invalid ? "border-rose-400" : "border-slate-200")}>
+          <FileText size={16} className="shrink-0 text-primary-700" aria-hidden />
+          <span className="min-w-0 flex-1 break-all font-medium text-slate-800">{value.name}</span>
+          {value.size > 0 && <span className="text-xs tabular-nums text-slate-500">{fileSize(value.size)}</span>}
+          {!disabled && (
+            <span className="flex gap-3">
+              <button type="button" onClick={choose} className="text-xs font-medium text-primary-700 hover:underline">Replace</button>
+              <button type="button" onClick={() => { setProblem(""); onChange(null); }} className="text-xs font-medium text-rose-700 hover:underline">Remove</button>
+            </span>
+          )}
+        </div>
+      ) : (
+        <button type="button" onClick={choose} disabled={disabled} className={cx("flex min-h-10 w-full items-center gap-2 rounded-lg border border-dashed bg-white px-3 py-2 text-left text-sm font-medium text-slate-600 transition hover:border-primary-400 hover:text-primary-800 disabled:cursor-not-allowed disabled:opacity-60", invalid ? "border-rose-400" : "border-slate-300")}>
+          <Paperclip size={16} className="shrink-0" aria-hidden />
+          {field.placeholder || "Choose a file"}
+        </button>
+      )}
+      {problem && <p className="mt-1 text-xs font-medium text-rose-700" role="alert">{problem}</p>}
+    </div>
+  );
+};
+
 const Control = ({ field, value, onChange, id, invalid, values }) => {
   const options = useOptions(field, values);
   const common = {
@@ -84,6 +134,8 @@ const Control = ({ field, value, onChange, id, invalid, values }) => {
       );
     case "display":
       return <div className="flex min-h-10 items-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-800">{field.render ? field.render(value) : value}</div>;
+    case "file":
+      return <FileInput field={field} value={value} onChange={onChange} id={id} invalid={invalid} disabled={common.disabled} describedBy={common["aria-describedby"]} />;
     default:
       return (
         <Input
@@ -299,7 +351,7 @@ export const FormFields = ({ fields, values, setValue, errors = {} }) => (
         );
       }
       const id = `field-${field.name}`;
-      const span = field.span === 2 || ["textarea", "items"].includes(field.type) ? "sm:col-span-6" : field.span === "third" ? "sm:col-span-2" : "sm:col-span-3";
+      const span = field.span === 2 || ["textarea", "items", "file"].includes(field.type) ? "sm:col-span-6" : field.span === "third" ? "sm:col-span-2" : "sm:col-span-3";
       const error = errors[field.name];
       return (
         <FieldWrap key={field.name} label={field.type === "checkbox" ? null : field.label} htmlFor={id} required={isRequired(field, values)} help={helpOf(field, values)} error={error} className={span}>
